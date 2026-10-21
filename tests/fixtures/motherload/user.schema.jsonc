@@ -1,0 +1,10 @@
+{
+  // a schema, read by dotschema, though it also ends in .jsonc
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "role": { "enum": ["admin", "member"] }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}

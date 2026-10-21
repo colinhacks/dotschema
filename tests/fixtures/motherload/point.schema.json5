@@ -1,0 +1,2 @@
+// a schema, read by dotschema, though it also ends in .json5
+{ type: 'object', properties: { x: { type: 'integer' }, y: { type: 'integer' } }, required: ['x', 'y'] }

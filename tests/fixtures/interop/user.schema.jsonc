@@ -1,0 +1,4 @@
+{
+  // a schema, for dotschema, though it also ends in .jsonc
+  "type": "string",
+}

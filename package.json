@@ -1,0 +1,51 @@
+{
+  "name": "dotschema",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Import a JSON Schema in a .schema.jsonc or .schema.json5 file as its TypeScript type and a validator compiled with ajv. A TypeScript 7.1 content mapper, a preload and an esbuild plugin.",
+  "license": "MIT",
+  "author": "Colin McDonnell",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./register": "./src/register.ts",
+    "./esbuild": "./src/esbuild.ts"
+  },
+  "typescript": {
+    "contentMapper": {
+      "exec": [
+        "node",
+        "src/mapper.ts"
+      ],
+      "compilerOptions": []
+    }
+  },
+  "scripts": {
+    "build": "nub scripts/build.ts",
+    "check-dist": "nub scripts/check-dist.ts",
+    "typecheck": "tsc --noEmit && tsc -p lab/basic/tsconfig.json --noEmit --runExternalCode",
+    "test": "node --test 'tests/**/*.test.ts'"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "json5": "2.2.3",
+    "jsonc-parser": "3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "dotschema": "link:.",
+    "esbuild": "^0.28.2",
+    "typescript": "7.1.0-dev.20261002.1"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "nub",
+      "version": "^0.9.6",
+      "onFail": "ignore"
+    }
+  }
+}

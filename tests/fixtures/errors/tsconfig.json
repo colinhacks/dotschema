@@ -1,0 +1,5 @@
+{
+  "compilerOptions": { "target": "esnext", "module": "nodenext", "types": [], "strict": true, "noEmit": true, "skipLibCheck": true },
+  "contentMappers": [{ "package": "dotschema", "extensions": [".schema.jsonc", ".schema.json5"] }],
+  "include": ["main.ts"]
+}
