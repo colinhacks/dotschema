@@ -20,6 +20,8 @@ The dotschema package types `.schema.jsonc` and `.schema.json5` imports: each be
 | `lab/basic/` | A project that imports every kind of schema: type-checked through the content mapper, run under the preload, bundled with esbuild; `team.schema.jsonc` refers to `user.schema.jsonc` and to `shared/place.schema.jsonc`, which nothing else imports, and `event.schema.jsonc` is a discriminated union that `main.ts` narrows |
 | `scripts/build.ts`, `tsconfig.build.json` | `nub run build`: the package compiled into `dist/dotschema`, with a manifest naming the compiled files and exact dependency versions, published with `npm publish dist/dotschema` |
 | `scripts/check-dist.ts` | `nub run check-dist`, after a build: the package packed, installed from the tarball into copies of `lab/basic` and `tests/fixtures/declaration` outside the repository, then type-checked, preloaded and bundled there, and `lab/basic` once more in a hoisted layout beside ajv 6; needs the npm registry |
+| `.github/workflows/release.yml`, `.github/scripts/npm-stage-publish.sh` | The release, Motherload's and Zod's: dispatched by hand from `main`, it checks, builds and stages `dotschema` on npm through stage-only trusted publishing, waits for the maintainer's 2FA approval, then creates the GitHub release ([DESIGN.md](./DESIGN.md#releasing)); `.github/workflows/test.yml` runs the checks on every push |
+| `scripts/bump.ts`, `scripts/npm-first-publish.sh` | The version, written into `package.json` by `nub run bump <version>`; and the script the maintainer runs once before the first release, which configures the npm trusted publisher of `dotschema` (npm already holds the package, a 0.0.0 placeholder) |
 | `README.md` | The only documentation, also published to npm: absolute links only, and nothing about the repository's internals |
 
 The `package.json` links `dotschema` to the repository itself (`link:.`), because a mapper package does not resolve through self-reference. It is private and points at the TypeScript sources; only `dist/dotschema` is published.
@@ -36,7 +38,9 @@ Prefer `nub` over `node`, `bun`, `npm`, `npx`, `pnpm` and `yarn`: run files with
 
 ## Git
 
-Work lands on `main` directly, with no branch or pull request. When a task is done and `nub run typecheck` and `nub run test` pass, commit it to `main`. The repository has no remote yet ([PLAN.md](./PLAN.md#open)); once it has one, push to it. Several sessions can work in this checkout at once, so stage only the files the task changed. A commit message is one prose paragraph: what changed, why (quoting the maintainer where the maintainer asked for it), and what was verified.
+Work lands on `main` directly, with no branch or pull request. When a task is done and `nub run typecheck` and `nub run test` pass, commit it to `main` and push it to `origin`, colinhacks/dotschema, public on GitHub since 2026-10-21. Several sessions can work in this checkout at once, so stage only the files the task changed. A commit message is one prose paragraph: what changed, why (quoting the maintainer where the maintainer asked for it), and what was verified.
+
+A release is never cut by a push: run `nub run bump <version>`, commit and push it, then `gh workflow run release.yml -R colinhacks/dotschema`, approve the run's `npm` deployment, and ask the maintainer to run `stager` in a terminal, which approves the staged version under one authenticator code and resumes the run ([DESIGN.md](./DESIGN.md#releasing)). After the approval, `stager --list` should show nothing of the release left staged. The first release needs the trusted publisher first, configured by the maintainer with `bash scripts/npm-first-publish.sh` ([PLAN.md](./PLAN.md#open)).
 
 ## Writing conventions
 

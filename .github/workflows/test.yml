@@ -1,0 +1,31 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Type-check, test and check the package
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: nubjs/setup-nub@c7b970ec04655a2f0a111cd436cc182a3b660e7a # v0.6.0
+        with:
+          nub-version: "0.9.6"
+      - run: nub install --frozen-lockfile
+      - run: nub run typecheck
+      # tests/motherload.test.ts is skipped here: it runs only when MOTHERLOAD_DIR names a Motherload checkout
+      - run: nub run test
+      # the package as release.yml stages it, installed from a tarball outside the repository
+      - run: nub run build
+      - run: nub run check-dist

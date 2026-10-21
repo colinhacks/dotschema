@@ -1,7 +1,8 @@
-// Builds the package into dist/dotschema, published with `npm publish dist/dotschema` (DESIGN.md,
-// "Packaging"): the sources compiled to JavaScript with their declarations, the README, the license,
+// Builds the package into dist/dotschema, which release.yml stages on npm (DESIGN.md, "Packaging" and
+// "Releasing"): the sources compiled to JavaScript with their declarations, the README, the license,
 // and a package.json whose exports and content mapper name the compiled files, because Node strips
-// no types under node_modules, and whose every dependency is at the exact version installed here.
+// no types under node_modules, whose every dependency is at the exact version installed here, and
+// which carries the repository, homepage, bugs and author fields as written.
 // The repository's own package.json keeps pointing at the sources, so the tests and the lab run them
 // without a build, and it is private, so that it cannot be published by mistake.
 import { execFileSync } from "node:child_process";
@@ -35,6 +36,12 @@ const built = {
   typescript: { ...pkg.typescript, contentMapper: { ...pkg.typescript.contentMapper, exec: (pkg.typescript.contentMapper.exec as string[]).map(js) } },
   dependencies: Object.fromEntries(Object.entries(pkg.dependencies as Record<string, string>).map(([dep, version]) => [dep, installed(dep, version)])),
 };
+
+// npm's links to the source, the README and the issues; and release.yml stages with --provenance, which
+// npm checks against the manifest's repository, so that has to name the repository that runs it.
+const repository = "git+https://github.com/colinhacks/dotschema.git";
+if (built.repository?.url !== repository) throw new Error(`package.json: "repository.url" is ${JSON.stringify(built.repository?.url)}, and release.yml runs in ${repository}`);
+for (const field of ["homepage", "bugs", "author", "license"]) if (!built[field]) throw new Error(`package.json: no "${field}" to publish`);
 
 mkdirSync(to, { recursive: true });
 cpSync(tsc, join(to, "src"), { recursive: true });

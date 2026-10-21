@@ -5,6 +5,14 @@
   "description": "Import a JSON Schema in a .schema.jsonc or .schema.json5 file as its TypeScript type and a validator compiled with ajv. A TypeScript 7.1 content mapper, a preload and an esbuild plugin.",
   "license": "MIT",
   "author": "Colin McDonnell",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/colinhacks/dotschema.git"
+  },
+  "homepage": "https://github.com/colinhacks/dotschema#readme",
+  "bugs": {
+    "url": "https://github.com/colinhacks/dotschema/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -26,6 +34,7 @@
   "scripts": {
     "build": "nub scripts/build.ts",
     "check-dist": "nub scripts/check-dist.ts",
+    "bump": "nub scripts/bump.ts",
     "typecheck": "tsc --noEmit && tsc -p lab/basic/tsconfig.json --noEmit --runExternalCode",
     "test": "node --test 'tests/**/*.test.ts'"
   },
