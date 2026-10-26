@@ -35,6 +35,13 @@ test("a broken schema file is a diagnostic at its place in the file", () => {
   assert.match(out, /broken-ref\.schema\.jsonc\(4,35\): error dotschema4: The \$ref "\.\/missing\.schema\.jsonc" names a file that does not exist\./);
   // An $id below a schema file's root is placed at the $id's value.
   assert.match(out, /embedded-id\.schema\.jsonc\(6,24\): error dotschema4: The \$id "https:\/\/example\.com\/inner" gives a schema inside the file a base URI of its own/);
+  // A syntax error at the very end of a file, truncated or empty, in either dialect, is placed there:
+  // until 2026-10-26 its span ran a byte past the end, and TypeScript refused the module (TS18069).
+  assert.match(out, /truncated\.schema\.jsonc\(3,1\): error dotschema1: Close Brace Expected/);
+  assert.match(out, /truncated\.schema\.json5\(3,1\): error dotschema1: invalid end of input at 3:1/);
+  assert.match(out, /empty\.schema\.jsonc\(1,1\): error dotschema1: Value Expected/);
+  assert.match(out, /empty\.schema\.json5\(1,1\): error dotschema1: invalid end of input at 1:1/);
+  assert.doesNotMatch(out, /TS18069/);
 });
 
 test("a library that re-exports a schema module emits its declarations: the schema's literal type is inlined, though the module does not export its name", () => {
