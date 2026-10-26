@@ -47,8 +47,19 @@ export function parseJson5File(source: string): Parsed {
   }
 }
 
-/** A schema is read in the dialect its suffix names: JSON5 for `.schema.json5`, JSON with comments for `.schema.jsonc`. */
-export const parseSchemaFile = (source: string, path: string): Parsed => (path.endsWith(".schema.json5") ? parseJson5File(source) : parseJsoncFile(source));
+/**
+ * A schema is read in the dialect its suffix names: JSON5 for `.schema.json5`, JSON with comments
+ * for `.schema.jsonc`. A byte order mark at the start, which an editor may save, is read past in
+ * both: the type check's host strips it before the mapper sees the text, while the preload and the
+ * bundlers hand over the file as read, where jsonc-parser refuses it and json5 skips it. A problem's
+ * place stays the text's own, the mark counted.
+ */
+export function parseSchemaFile(source: string, path: string): Parsed {
+  const mark = source.charCodeAt(0) === 0xfeff ? 1 : 0;
+  const text = mark ? source.slice(1) : source;
+  const parsed = path.endsWith(".schema.json5") ? parseJson5File(text) : parseJsoncFile(text);
+  return parsed.ok || !mark ? parsed : { ok: false, problems: parsed.problems.map((problem) => ({ ...problem, start: problem.start + mark })) };
+}
 
 // ---- doc comments -------------------------------------------------------------------------------
 

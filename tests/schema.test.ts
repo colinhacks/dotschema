@@ -346,6 +346,29 @@ test("a __proto__ key in properties, which ajv does not check, is typed as a key
   assert.equal(c.is(JSON.parse('{ "__proto__": "b" }')), false);
 });
 
+test("a byte order mark at the start of a file is read past in both dialects, under the preload and in an esbuild bundle, and a problem's place counts it", async () => {
+  // The type check's host strips the mark; the preload and esbuild hand the file over as read.
+  const dir = mkdtempSync(join(tmpdir(), "dotschema-bom-"));
+  writeFileSync(join(dir, "a.schema.jsonc"), '\ufeff{ "type": "object", "properties": { "n": { "type": "string" } }, "required": ["n"] }\n');
+  writeFileSync(join(dir, "b.schema.json5"), "\ufeff{ type: 'object', properties: { n: { type: 'string' } }, required: ['n'] }\n");
+  writeFileSync(join(dir, "main.ts"), 'import a from "./a.schema.jsonc";\nimport b from "./b.schema.json5";\nconsole.log(JSON.stringify([a.is({ n: "x" }), a.is({}), b.is({ n: "x" }), b.is({})]));\n');
+  const preloaded = run(process.execPath, ["--import", join(ROOT, "src/register.ts"), "main.ts"], dir);
+  assert.equal(preloaded.out.trim(), "[true,false,true,false]", preloaded.out);
+  const { build } = await import("esbuild");
+  const { default: dotschema } = await import("../src/esbuild.ts");
+  const bundled = await build({ entryPoints: [join(dir, "main.ts")], outfile: join(dir, "main.mjs"), bundle: true, format: "esm", platform: "node", plugins: [dotschema()], logLevel: "silent" });
+  assert.deepEqual(bundled.errors, []);
+  assert.equal(run(process.execPath, ["main.mjs"], dir).out.trim(), "[true,false,true,false]");
+  // A syntax error after the mark is placed in the text as the host gave it.
+  for (const [path, source] of [[PATH, '{ "type": "object",, }'], [join(ROOT, "tests/fixtures/user.schema.json5"), "{ type: 'object',, }"]] as const) {
+    const [plain] = schemaTypes(source, path).problems;
+    const [marked] = schemaTypes(`\ufeff${source}`, path).problems;
+    assert.equal(plain!.code, CODES.syntax, path);
+    assert.equal(marked!.start, plain!.start + 1, path);
+    assert.equal(`\ufeff${source}`.slice(marked!.start, marked!.start + 1), ",", path);
+  }
+});
+
 test("a .schema.jsonc file has JSON's white space: U+2028 in a comment is part of it, and U+00A0 between tokens is a syntax error", () => {
   assert.deepEqual(schemaTypes('// a\u2028b\n{ "type": "string" }', PATH).problems, []);
   const [problem] = schemaTypes('{\u00a0"type": "string" }', PATH).problems;
