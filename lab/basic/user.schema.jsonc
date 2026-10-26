@@ -4,6 +4,7 @@
   "type": "object",
   "properties": {
     "name": { "type": "string", "minLength": 1 },
+    /** Where the app sends the user's mail. */
     "email": { "type": "string", "format": "email" },
     "role": { "enum": ["admin", "member"] },
     "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }

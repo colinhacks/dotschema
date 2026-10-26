@@ -8,6 +8,7 @@
 // from that file's own module (refs.ts).
 import { basename } from "node:path";
 import { literal, propertyName, type Value } from "./core/serialize.ts";
+import { docOfKey, docOfRoot } from "./parse.ts";
 import { fileOf, pointer, pointTo, specifierOf } from "./refs.ts";
 
 type Obj = { readonly [key: string]: Value };
@@ -67,9 +68,14 @@ function objectLiteral(type: string): boolean {
   return false;
 }
 
-function doc(schema: Value | undefined, indent: string): string {
-  if (!isObj(schema) || typeof schema["description"] !== "string") return "";
-  const lines = schema["description"].replace(/\*\//g, "*\\/").split(/\r?\n/);
+/**
+ * A schema's JSDoc: its `description`, or else `comment`, the text of the `/**` comment written
+ * before its key or before the file's root (parse.ts), the maintainer's choice of 2026-10-26.
+ */
+function doc(schema: Value | undefined, indent: string, comment?: string): string {
+  const text = isObj(schema) && typeof schema["description"] === "string" ? schema["description"] : comment;
+  if (text === undefined) return "";
+  const lines = text.replace(/\*\//g, "*\\/").split(/\r?\n/);
   if (lines.length === 1) return `${indent}/** ${lines[0]} */\n`;
   return `${indent}/**\n${lines.map((line) => `${indent} *${line ? ` ${line}` : ""}`).join("\n")}\n${indent} */\n`;
 }
@@ -100,10 +106,11 @@ const fileTypeName = (path: string, taken: Set<string>): string => typeName(base
  * `Type` and `Json`. The definitions are named first, so a definition's name is its key whatever the
  * file is called, and the root, which is exported as `Type` as well, is the one that gives way.
  */
-function definitionNames(root: Value, path?: string): { rootName: string; names: Map<string, string>; definitions: [string, Value][]; taken: Set<string> } {
+function definitionNames(root: Value, path?: string): { rootName: string; names: Map<string, string>; definitions: [string, Value, string | undefined][]; taken: Set<string> } {
   const taken = new Set(["Type", LITERAL_NAME, "__DotschemaSchema"]);
   const names = new Map<string, string>();
-  const definitions: [string, Value][] = [];
+  // Each definition's name, its schema, and the doc comment before its key.
+  const definitions: [string, Value, string | undefined][] = [];
   if (isObj(root)) {
     for (const keyword of ["$defs", "definitions"]) {
       const group = root[keyword];
@@ -111,7 +118,7 @@ function definitionNames(root: Value, path?: string): { rootName: string; names:
       for (const [key, schema] of Object.entries(group)) {
         const name = typeName(key, taken);
         names.set(`${keyword}\0${key}`, name);
-        definitions.push([name, schema]);
+        definitions.push([name, schema, docOfKey(group, key)]);
       }
     }
   }
@@ -333,7 +340,7 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       valueTypes.push(type, ...(optional ? ["undefined"] : []));
       // An optional property may hold `undefined`, which the validator passes as absent, so the type
       // says so for a project with `exactOptionalPropertyTypes`.
-      lines.push(`${doc(property, inner)}${inner}${propertyName(key)}${optional ? "?" : ""}: ${optional ? union([type, "undefined"]) : type};`);
+      lines.push(`${doc(property, inner, docOfKey(properties, key))}${inner}${propertyName(key)}${optional ? "?" : ""}: ${optional ? union([type, "undefined"]) : type};`);
     }
     // A required key that `properties` does not list takes the type of the `patternProperties` whose
     // pattern matches it (all of them apply, so their union admits it), or of `additionalProperties`
@@ -481,16 +488,16 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     return meaningful.length === 1 ? meaningful[0]! : meaningful.map(paren).join(" & ");
   }
 
-  const declare = (name: string, schema: Value, type = emit(schema, ""), exported = true) => {
+  const declare = (name: string, schema: Value, comment: string | undefined, type = emit(schema, ""), exported = true) => {
     const keyword = exported ? "export " : "";
-    return objectLiteral(type) ? `${doc(schema, "")}${keyword}interface ${name} ${type}` : `${doc(schema, "")}${keyword}type ${name} = ${type};`;
+    return objectLiteral(type) ? `${doc(schema, "", comment)}${keyword}interface ${name} ${type}` : `${doc(schema, "", comment)}${keyword}type ${name} = ${type};`;
   };
   const rootType = emit(root, "");
   // Named for the file, the root is exported only as `Type`, by a re-export rather than
   // `type Type = User`, whose name a hover would print in place of `User`.
   const named = rootName !== "Type";
-  const rootDeclaration = [declare(rootName, root, rootType, !named), ...(named ? [`export type { ${rootName} as Type };`] : [])].join("\n");
-  const declarations = [rootDeclaration, ...definitions.map(([name, schema]) => declare(name, schema))].join("\n\n");
+  const rootDeclaration = [declare(rootName, root, docOfRoot(root), rootType, !named), ...(named ? [`export type { ${rootName} as Type };`] : [])].join("\n");
+  const declarations = [rootDeclaration, ...definitions.map(([name, schema, comment]) => declare(name, schema, comment))].join("\n\n");
   const lines = [...imports].map(([specifier, byName]) => `import type { ${[...byName].map(([exported, local]) => (exported === local ? exported : `${exported} as ${local}`)).join(", ")} } from ${JSON.stringify(specifier)};`);
   return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, rootType };
 }

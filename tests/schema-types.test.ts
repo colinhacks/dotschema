@@ -6,6 +6,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { schemaCode } from "../src/schema.ts";
+import { parseJson5File, parseJsoncFile } from "../src/parse.ts";
 import { schemaDeclarations, type Draft } from "../src/schema-types.ts";
 import { evaluate, run, TSC } from "./helpers.ts";
 
@@ -107,6 +108,38 @@ test("a description is a doc comment", () => {
   assert.equal(emit({ type: "string", description: "Ends */ early.\nTwo lines." }), "/**\n * Ends *\\/ early.\n * Two lines.\n */\nexport type Type = string;");
 });
 
+/** The declarations of a schema parsed from its text, in either dialect, so its comments are read. */
+function emitText(source: string, dialect: "jsonc" | "json5" = "jsonc"): string {
+  const parsed = dialect === "json5" ? parseJson5File(source) : parseJsoncFile(source);
+  assert.ok(parsed.ok);
+  return schemaDeclarations(parsed.value);
+}
+
+test("a /** */ comment before a property's key is its doc comment, in JSONC and JSON5", () => {
+  const jsonc = '{\n  "type": "object",\n  "properties": {\n    /** The user\'s name. */\n    "name": { "type": "string" },\n    "age": { "type": "integer" }\n  },\n  "additionalProperties": false\n}';
+  assert.equal(emitText(jsonc), "export interface Type {\n  /** The user's name. */\n  name?: string | undefined;\n  age?: number | undefined;\n}");
+  // JSON5's bare, single-quoted and escaped keys, and a string that holds what reads like a comment or a key.
+  const json5 = "{\n  type: 'object',\n  properties: {\n    /** Bare. */\n    name: { type: 'string', pattern: '/** no */' },\n    /** Quoted. */\n    'e-mail': { type: 'string' },\n    /** Escaped. */\n    \\u0061ge: { const: \"a,{'}:\" },\n  },\n  additionalProperties: false,\n}";
+  assert.equal(emitText(json5, "json5"), 'export interface Type {\n  /** Bare. */\n  name?: string | undefined;\n  /** Quoted. */\n  "e-mail"?: string | undefined;\n  /** Escaped. */\n  age?: "a,{\'}:" | undefined;\n}');
+});
+
+test("a doc comment is read as TypeScript reads JSDoc: each line's leading `*` dropped, tags kept", () => {
+  const source = '{ "type": "object", "properties": {\n  /**\n   * When the user joined.\n   *\n   * @deprecated Use `created`.\n   * @example\n   *   "2026-10-26"\n   */\n  "joined": { "type": "string" } }, "additionalProperties": false }';
+  assert.equal(emitText(source), 'export interface Type {\n  /**\n   * When the user joined.\n   *\n   * @deprecated Use `created`.\n   * @example\n   *   "2026-10-26"\n   */\n  joined?: string | undefined;\n}');
+});
+
+test("a description wins over a doc comment, and // and /* */ comments are never read", () => {
+  const source = '{ "type": "object", "properties": {\n  /** Loses. */\n  "a": { "type": "string", "description": "Wins." },\n  // A note.\n  "b": { "type": "string" },\n  /* A note too. */\n  "c": { "type": "string" },\n  /**/ "d": { "type": "string" },\n  "e": /** Not before a key. */ { "type": "string" },\n  /** Before a comma, so not before "g". */ "f": {} /** Nor this. */, "g": {}\n}, "additionalProperties": false }';
+  assert.equal(emitText(source), 'export interface Type {\n  /** Wins. */\n  a?: string | undefined;\n  b?: string | undefined;\n  c?: string | undefined;\n  d?: string | undefined;\n  e?: string | undefined;\n  /** Before a comma, so not before "g". */\n  f?: unknown;\n  g?: unknown;\n}');
+});
+
+test("a doc comment before a definition's key is the definition's, and one before the root is the root's", () => {
+  const source = '/** A team. */\n{ "type": "object", "properties": { "lead": { "$ref": "#/$defs/person" }, "tags": { "type": "array", "items": { "type": "object", "properties": { /** In an array. */ "x": { "type": "string" } }, "additionalProperties": false } } }, "additionalProperties": false,\n  "$defs": {\n    /** A member of the team. */\n    "person": { "type": "string" }\n  }\n}';
+  assert.equal(emitText(source), "/** A team. */\nexport interface Type {\n  lead?: Person | undefined;\n  tags?: {\n    /** In an array. */\n    x?: string | undefined;\n  }[] | undefined;\n}\n\n/** A member of the team. */\nexport type Person = string;");
+  // Draft-07's `definitions`, in JSON5.
+  assert.equal(emitText("{ definitions: { /** An id. */ id: { type: 'string' } }, $ref: '#/definitions/id' }", "json5"), "export type Type = Id;\n\n/** An id. */\nexport type Id = string;");
+});
+
 test("every emitted declaration type-checks", () => {
   const schemas = [
     { type: "object", properties: { a: { type: "string" }, b: { type: "array", items: { $ref: "#/$defs/x" } } }, additionalProperties: { type: "number" }, $defs: { x: { anyOf: [{ type: "object", properties: { k: { const: "x" } }, required: ["k"] }, { enum: [1, 2] }] } } },
@@ -117,6 +150,8 @@ test("every emitted declaration type-checks", () => {
   ];
   const dir = mkdtempSync(join(tmpdir(), "dotschema-schema-types-"));
   schemas.forEach((schema, i) => writeFileSync(join(dir, `s${i}.ts`), `${emit(JSON.parse(JSON.stringify(schema)))}\n`));
+  // Doc comments, from a parsed file's `/**` comments.
+  writeFileSync(join(dir, "docs.ts"), `${emitText('/** Root. */ { "type": "object", "properties": { /**\n * Two lines,\n * @deprecated and a tag. */ "a": { "type": "string" } }, "$defs": { /** A definition. */ "d": {} } }')}\n`);
   writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, target: "esnext", module: "nodenext" }, include: ["*.ts"] }));
   const { status, out } = run(TSC, ["-p", join(dir, "tsconfig.json")]);
   assert.equal(out, "");

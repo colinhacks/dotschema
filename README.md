@@ -319,6 +319,24 @@ const ada: user.Type = { name: "Ada", role: "admin" };
 const bob: user.Type = { name: "Bob", role: "owner" }; // type error
 ```
 
+A `/** */` comment above a property is its doc comment, which an editor shows on hover:
+
+```jsonc
+{
+  "type": "object",
+  "properties": {
+    /** The name the user signs in with. */
+    "name": { "type": "string" }
+  }
+}
+```
+
+```ts
+if (user.is(input)) {
+  input.name; // the hover shows "The name the user signs in with."
+}
+```
+
 A `$ref` can point to another schema file, by a path relative to this one:
 
 ```jsonc

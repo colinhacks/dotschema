@@ -282,6 +282,25 @@ test("a .schema.json5 schema is JSON5 in both texts, and the suffix names the di
   assert.equal(broken[0]!.start, 19);
 });
 
+test("a /** */ comment before a property's key is its doc comment in the module's types, in both dialects, and the schema stays as written", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "dotschema-docs-"));
+  writeFileSync(join(dir, "place.schema.json5"), "{\n  $schema: 'https://json-schema.org/draft/2020-12/schema',\n  type: 'object',\n  properties: {\n    /** The city, as its residents spell it. */\n    city: { type: 'string' },\n  },\n}\n");
+  const path = join(dir, "user.schema.jsonc");
+  const source = '{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n  "type": "object",\n  "properties": {\n    /** The user\'s full name. */\n    "name": { "type": "string", "nullable": true },\n    "home": { "$ref": "./place.schema.json5#/properties/city" },\n    "office": { "$ref": "./place.schema.json5" }\n  },\n  "required": ["name"]\n}';
+  writeFileSync(path, source);
+  const { types, problems } = schemaTypes(source, path);
+  assert.deepEqual(problems, []);
+  // On the root's declaration and in the default export's type, where a hover over a value finds it.
+  assert.match(types, /\ninterface User \{\n  \/\*\* The user's full name\. \*\/\n  name: string;\n/);
+  assert.match(types, /\ndeclare const schema: __DotschemaSchema<\{\n  \/\*\* The user's full name\. \*\/\n  name: string;\n/);
+  // A JSON5 file's own comments, in its module.
+  assert.match(schemaTypes(readFileSync(join(dir, "place.schema.json5"), "utf8"), join(dir, "place.schema.json5")).types, /\n  \/\*\* The city, as its residents spell it\. \*\/\n  city\?: string \| undefined;\n/);
+  // The comment is no keyword: the schema the module exports holds none.
+  const { code } = schemaCode(source, path);
+  const { default: user } = await evaluate(code);
+  assert.deepEqual(Object.keys(user.schema.properties.name), ["type", "nullable"]);
+});
+
 /** A directory of schema files, each written as JSON (JSON5 for `.schema.json5`), with the root's path and text. */
 function project(files: Record<string, unknown>, root = "user.schema.jsonc") {
   const dir = mkdtempSync(join(tmpdir(), "dotschema-refs-"));

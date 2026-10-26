@@ -12,7 +12,7 @@ The dotschema package types `.schema.jsonc` and `.schema.json5` imports: each be
 | `src/schema-types.ts` | The emitter: a JSON Schema as TypeScript declarations |
 | `src/refs.ts` | The `$ref`s a schema follows into other schema files, and the problems of `$dynamicRef` and of an `$id` below a file's root |
 | `src/json-schema.ts` | The schema as one self-contained JSON Schema in draft-07 or 2020-12, for Standard JSON Schema |
-| `src/parse.ts` | The two dialects, JSONC and JSON5, read with their positions kept |
+| `src/parse.ts` | The two dialects, JSONC and JSON5, read with their positions kept, and the `/** */` comments before their keys, which the types write as JSDoc |
 | `src/index.ts` | The types: `Schema`, `SchemaResult`, `SchemaIssue`, and the Standard Schema and Standard JSON Schema v1 interfaces |
 | `src/loader.ts`, `src/mapper.ts`, `src/register.ts`, `src/esbuild.ts` | The loader and its entry points: the content mapper process, the preload (`dotschema/register`) and the esbuild plugin (`dotschema/esbuild`) |
 | `src/vite.ts`, `src/webpack.ts`, `src/turbopack.ts`, `src/next.ts`, `src/jest.ts` | The other hosts' entry points ([DESIGN.md](./DESIGN.md#the-hosts)): the Vite plugin, also Vitest's, Rollup's, Rolldown's and a Cloudflare Worker's (`dotschema/vite`); the webpack loader, also Rspack's (`dotschema/webpack`), and the same under Turbopack's name (`dotschema/turbopack`); `withDotschema`, Next.js's wrapper with the type check inside `next build` (`dotschema/next`); and the Jest transformer (`dotschema/jest`) |

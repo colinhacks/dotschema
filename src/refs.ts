@@ -9,7 +9,7 @@ import { dirname, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CODES, type Problem } from "./core/problems.ts";
 import type { Value } from "./core/serialize.ts";
-import { parseSchemaFile } from "./parse.ts";
+import { carryDocs, parseSchemaFile } from "./parse.ts";
 
 type Obj = { readonly [key: string]: Value };
 
@@ -24,10 +24,11 @@ const ONE = ["additionalProperties", "unevaluatedProperties", "items", "addition
 const LIST = ["allOf", "anyOf", "oneOf", "prefixItems", "items"];
 const MAP = ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"];
 
-/** A copy of `schema` with `change` applied to it and then to every schema inside it, keyword by keyword, so data (`const`, an unknown keyword) stays as written. */
+/** A copy of `schema` with `change` applied to it and then to every schema inside it, keyword by keyword, so data (`const`, an unknown keyword) stays as written. The copy keeps the doc comments of the keys it copies (parse.ts). */
 export function mapSchemas(schema: Value, change: (copy: Record<string, Value>) => void): Value {
   if (!isObj(schema)) return schema;
   const copy: Record<string, Value> = { ...schema };
+  carryDocs(schema, copy);
   change(copy);
   for (const key of ONE) if (isObj(copy[key])) copy[key] = mapSchemas(copy[key], change);
   for (const key of LIST) {
@@ -37,7 +38,10 @@ export function mapSchemas(schema: Value, change: (copy: Record<string, Value>) 
   for (const key of MAP) {
     const group = copy[key];
     // A `dependencies` entry that is a list names properties; one that is an object is a schema.
-    if (isObj(group)) copy[key] = Object.fromEntries(Object.entries(group).map(([name, item]) => [name, Array.isArray(item) ? item : mapSchemas(item, change)]));
+    if (!isObj(group)) continue;
+    const mapped = Object.fromEntries(Object.entries(group).map(([name, item]) => [name, Array.isArray(item) ? item : mapSchemas(item, change)]));
+    carryDocs(group, mapped);
+    copy[key] = mapped;
   }
   return copy;
 }
