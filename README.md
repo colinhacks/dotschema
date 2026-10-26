@@ -310,13 +310,13 @@ if (result.issues) {
 }
 ```
 
-The type is the export `Type`:
+The type is `.Type` on the import:
 
 ```ts
-import type { Type as User } from "./user.schema.jsonc";
+import user from "./user.schema.jsonc";
 
-const ada: User = { name: "Ada", role: "admin" };
-const bob: User = { name: "Bob", role: "owner" }; // type error
+const ada: user.Type = { name: "Ada", role: "admin" };
+const bob: user.Type = { name: "Bob", role: "owner" }; // type error
 ```
 
 A `$ref` can point to another schema file, by a path relative to this one:
@@ -335,9 +335,9 @@ A `$ref` can point to another schema file, by a path relative to this one:
 ```
 
 ```ts
-import type { Type as Team } from "./team.schema.jsonc";
+import team from "./team.schema.jsonc";
 
-type Members = Team["members"]; // User[]
+type Members = team.Type["members"]; // User[]
 ```
 
 A `oneOf` whose variants a `const` tells apart is a union that narrows:

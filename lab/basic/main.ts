@@ -11,6 +11,9 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ?
 const expect = <T extends true>() => {};
 
 expect<Equal<User, { name: string; email?: string; role: "admin" | "member"; tags?: string[] }>>();
+// The default import names the type too.
+expect<Equal<user.Type, User>>();
+expect<Equal<team.Type, Team>>();
 expect<Equal<ReturnType<typeof user.validate>, SchemaResult<User>>>();
 // `.is()` is a type guard: the value it accepts is a User where it returns true.
 const someone: unknown = { name: "Ada", role: "admin" };

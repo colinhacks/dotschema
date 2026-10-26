@@ -24,7 +24,7 @@ import { collect, dynamicRefProblems, eachSchema, embeddedIdProblems, fileOf, fo
 import { LITERAL_NAME, schemaModuleTypes, type Draft } from "./schema-types.ts";
 import { jsonSchemas } from "./json-schema.ts";
 
-const FAILED_TYPES = ["declare const schema: any;", "export default schema;", "export type Type = any;", ""].join("\n");
+const FAILED_TYPES = ["declare const schema: any;", "declare namespace schema { export type Type = any; }", "export default schema;", "export type Type = any;", ""].join("\n");
 
 const problem = (message: string, place: { start: number; length: number } = { start: 0, length: 1 }): Problem => ({ message, ...place, code: CODES.schema });
 
@@ -319,7 +319,7 @@ export function schemaTypes(source: string, path: string): { types: string; prob
     const compiled = compile(loaded.ajv, files, path);
     if ("problem" in compiled) problems.push(compiled.problem);
   }
-  const { declarations, rootType } = schemaModuleTypes(files.schemas.get(path)!, { path, read: (other) => files.schemas.get(other) }, draft);
+  const { declarations, rootName, rootType } = schemaModuleTypes(files.schemas.get(path)!, { path, read: (other) => files.schemas.get(other) }, draft);
   return {
     types: [
       `import type { Schema as __DotschemaSchema } from "dotschema";`,
@@ -331,6 +331,10 @@ export function schemaTypes(source: string, path: string): { types: string; prob
       // gives prints the schema's properties, and a `$ref` within them by its name (the maintainer, on
       // 2026-10-26: "People want to see the actual properties for visibility").
       `declare const schema: __DotschemaSchema<${rootType}, ${LITERAL_NAME}>;`,
+      // A namespace of types alone, which merges with the const, so the default import names the
+      // type too: `user.Type` (the maintainer, on 2026-10-26: "I think the default import should have
+      // a `.Type` property on it. That should be the recommended way to access it.").
+      `declare namespace schema { export type { ${rootName} as Type }; }`,
       "export default schema;",
       "",
     ].join("\n"),

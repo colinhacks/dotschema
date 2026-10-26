@@ -200,8 +200,8 @@ export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Dra
   return schemaModuleTypes(root, files, draft).declarations;
 }
 
-/** The declarations, as `schemaDeclarations` writes them, and the root's type as text, which the module's default export takes so a hover prints its properties. */
-export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft): { declarations: string; rootType: string } {
+/** The declarations, as `schemaDeclarations` writes them; the root's name; and the root's type as text, which the module's default export takes so a hover prints its properties. */
+export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft): { declarations: string; rootName: string; rootType: string } {
   const prefixItems = draft === undefined || draft === "2020-12";
   const itemLists = draft === undefined || draft !== "2020-12";
   const unevaluated = draft === undefined || draft !== "draft-07";
@@ -230,17 +230,17 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
 
   /** `exported`, a name `document`'s module declares, as a name in this module: itself, or the name it is imported under. */
   function nameIn(document: Document, exported: string): string {
-    // A file's root is imported by the name its module declares it under, never by its `Type`
-    // alias, so a hover in this module prints `User` for `./user.schema.jsonc` and not `Type`.
-    const declared = exported === "Type" ? document.rootName : exported;
-    if (document.own) return declared;
+    if (document.own) return exported === "Type" ? rootName : exported;
     const specifier = specifierOf(files!.path, document.path!);
     let byName = imports.get(specifier);
     if (!byName) imports.set(specifier, (byName = new Map()));
-    let local = byName.get(declared);
+    let local = byName.get(exported);
     if (local === undefined) {
-      local = typeName(declared, taken);
-      byName.set(declared, local);
+      // Another file's root is imported as its `Type`, the re-export of the root its module declares
+      // and does not export, named here for the file: `./address.schema.jsonc` gives `Address`. A
+      // hover prints the root's own name, or `address.Type` where the file imports that module.
+      local = typeName(exported === "Type" ? document.rootName : exported, taken);
+      byName.set(exported, local);
     }
     return local;
   }
@@ -481,13 +481,16 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     return meaningful.length === 1 ? meaningful[0]! : meaningful.map(paren).join(" & ");
   }
 
-  const declare = (name: string, schema: Value, type = emit(schema, "")) => {
-    return objectLiteral(type) ? `${doc(schema, "")}export interface ${name} ${type}` : `${doc(schema, "")}export type ${name} = ${type};`;
+  const declare = (name: string, schema: Value, type = emit(schema, ""), exported = true) => {
+    const keyword = exported ? "export " : "";
+    return objectLiteral(type) ? `${doc(schema, "")}${keyword}interface ${name} ${type}` : `${doc(schema, "")}${keyword}type ${name} = ${type};`;
   };
   const rootType = emit(root, "");
-  // A re-export rather than `type Type = User`, whose name a hover would print in place of `User`.
-  const alias = rootName === "Type" ? [] : [`export type { ${rootName} as Type };`];
-  const declarations = [[declare(rootName, root, rootType), ...alias].join("\n"), ...definitions.map(([name, schema]) => declare(name, schema))].join("\n\n");
+  // Named for the file, the root is exported only as `Type`, by a re-export rather than
+  // `type Type = User`, whose name a hover would print in place of `User`.
+  const named = rootName !== "Type";
+  const rootDeclaration = [declare(rootName, root, rootType, !named), ...(named ? [`export type { ${rootName} as Type };`] : [])].join("\n");
+  const declarations = [rootDeclaration, ...definitions.map(([name, schema]) => declare(name, schema))].join("\n\n");
   const lines = [...imports].map(([specifier, byName]) => `import type { ${[...byName].map(([exported, local]) => (exported === local ? exported : `${exported} as ${local}`)).join(", ")} } from ${JSON.stringify(specifier)};`);
-  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootType };
+  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, rootType };
 }
