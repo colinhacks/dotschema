@@ -8,11 +8,12 @@
 // `nub install` in it, and its tests are skipped where it is not installed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { ROOT, run, TSC } from "./helpers.ts";
+import { env, ROOT, run, TSC } from "./helpers.ts";
 
 test("lab/basic type-checks through the content mapper", () => {
   const { status, out } = run(TSC, ["-p", "lab/basic/tsconfig.json", "--noEmit", "--runExternalCode"]);
@@ -234,6 +235,66 @@ test("lab/jest: Vitest imports lab/basic's schemas through the Vite plugin", { s
   const { status, out } = run(`${JEST_LAB}/node_modules/.bin/vitest`, ["run"], JEST_LAB);
   assert.equal(status, 0, out);
   assert.match(out, /Tests\s+1 passed \(1\)/);
+});
+
+// Vitest keeps each module on disk across runs, keyed by its file's text, so a schema whose $ref'd
+// file changed came back from the cache as it was, in one run after another and in watch mode, until
+// 2026-10-26. A project outside the repository, where `team.schema.jsonc` refers to
+// `user.schema.jsonc`, whose `minLength` changes between runs: the test writes `team`'s verdict.
+function vitestProject(): { dir: string; verdict: () => string; minLength: (n: number) => void } {
+  const dir = mkdtempSync(join(tmpdir(), "dotschema-vitest-"));
+  mkdirSync(join(dir, "node_modules"));
+  symlinkSync(ROOT, join(dir, "node_modules", "dotschema"));
+  writeFileSync(join(dir, "package.json"), '{ "private": true, "type": "module" }\n');
+  writeFileSync(join(dir, "vitest.config.mjs"), 'import dotschema from "dotschema/vite";\nexport default { plugins: [dotschema()], test: { include: ["ref.test.mjs"], globals: true } };\n');
+  writeFileSync(join(dir, "team.schema.jsonc"), '{ "type": "object", "properties": { "lead": { "$ref": "./user.schema.jsonc" } } }\n');
+  writeFileSync(join(dir, "ref.test.mjs"), 'import { writeFileSync } from "node:fs";\nimport team from "./team.schema.jsonc";\ntest("ref", () => writeFileSync(new URL("verdict.txt", import.meta.url), String(team.is({ lead: { name: "Al" } }))));\n');
+  const minLength = (n: number) => writeFileSync(join(dir, "user.schema.jsonc"), `{ "type": "object", "properties": { "name": { "type": "string", "minLength": ${n} } }, "required": ["name"] }\n`);
+  minLength(3);
+  return { dir, minLength, verdict: () => (existsSync(join(dir, "verdict.txt")) ? readFileSync(join(dir, "verdict.txt"), "utf8") : "") };
+}
+
+test("lab/jest: Vitest makes a schema again when a file it refers to changes between runs", { skip: installed("jest") }, () => {
+  const project = vitestProject();
+  try {
+    const vitest = () => run(`${JEST_LAB}/node_modules/.bin/vitest`, ["run"], project.dir);
+    const verdicts = [];
+    for (const n of [3, 1, 1, 3]) {
+      project.minLength(n);
+      const { status, out } = vitest();
+      assert.equal(status, 0, out);
+      verdicts.push(project.verdict());
+    }
+    assert.deepEqual(verdicts, ["false", "true", "true", "false"]);
+  } finally {
+    rmSync(project.dir, { recursive: true, force: true });
+  }
+});
+
+test("lab/jest: Vitest's watch mode makes a schema again when a file it refers to changes", { skip: installed("jest") }, async () => {
+  const project = vitestProject();
+  const child = spawn(`${JEST_LAB}/node_modules/.bin/vitest`, ["watch"], { cwd: project.dir, env: env() });
+  let out = "";
+  child.stdout.on("data", (chunk) => (out += chunk));
+  child.stderr.on("data", (chunk) => (out += chunk));
+  // Waits for the verdict a run writes, up to 30 seconds.
+  const verdict = async (expected: string) => {
+    for (const end = Date.now() + 30_000; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 100))) if (project.verdict() === expected) return;
+    assert.fail(`no verdict ${expected}, the last ${project.verdict() || "none"}:\n${out}`);
+  };
+  try {
+    await verdict("false");
+    // Vitest watches files once it has run, so the change comes after the first run's summary.
+    for (const end = Date.now() + 30_000; !/Waiting for file changes/.test(out) && Date.now() < end; ) await new Promise((resolve) => setTimeout(resolve, 100));
+    project.minLength(1);
+    await verdict("true");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+    rmSync(project.dir, { recursive: true, force: true });
+  }
 });
 
 // lab/cloudflare: a Worker built with Vite and Cloudflare's plugin, run in workerd under the dev
