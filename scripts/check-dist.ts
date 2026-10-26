@@ -10,8 +10,13 @@
 // (Jest and Vitest) and lab/cloudflare (a Worker built and previewed in workerd), each failing on a
 // tool's warning. Needs the npm registry for TypeScript, the bundlers, Next.js, Jest, wrangler and the
 // dependencies. Run `nub run build` first.
+// The package's dependencies are caret ranges (DESIGN.md, "Packaging"). By default each project gets
+// what its range resolves to on the registry, as a new project does; with `--lowest`, each project
+// overrides dotschema's dependencies to the floor of each range, the oldest versions a project that
+// shares them with another package can end up with.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -37,6 +42,22 @@ run("nub", ["pack", "--pack-destination", tarballs], dist);
 const tarball = `file:${join(tarballs, readdirSync(tarballs).find((name) => /^dotschema-.*\.tgz$/.test(name))!)}`;
 const devDependencies = { typescript: "7.1.0-dev.20261002.1", "@types/node": "^26.6.1", esbuild: "^0.28.2" };
 
+// The manifest's ranges, each `^x.y.z` (scripts/build.ts); under `--lowest`, the floor of each, which
+// every project overrides dotschema's dependencies to, by pnpm's `parent>child` selector in npm's
+// `overrides` field, which nub reads, so ajv 6 beside it (below) keeps its version.
+const ranges: Record<string, string> = JSON.parse(readFileSync(join(dist, "package.json"), "utf8")).dependencies;
+const lowest = process.argv.includes("--lowest");
+const floors = Object.fromEntries(Object.entries(ranges).map(([dep, range]) => [dep, range.replace(/^\^/, "")]));
+const overrides = lowest ? Object.fromEntries(Object.entries(floors).map(([dep, floor]) => [`dotschema>${dep}`, floor])) : undefined;
+
+/** The version of each of dotschema's dependencies that the installed dotschema resolves, which under `--lowest` must be its range's floor. */
+function dependencyVersions(name: string, dir: string): string {
+  const require = createRequire(realpathSync(join(dir, "node_modules", "dotschema", "package.json")));
+  const found = Object.fromEntries(Object.keys(ranges).map((dep) => [dep, require(`${dep}/package.json`).version as string]));
+  if (lowest) for (const [dep, floor] of Object.entries(floors)) if (found[dep] !== floor) throw new Error(`${name}: dotschema resolves ${dep} ${found[dep]}, and --lowest overrides it to ${floor}`);
+  return Object.entries(found).map(([dep, version]) => `${dep}@${version}`).join(" ");
+}
+
 /** The lab's own dependencies, as its package.json in the repository names them. */
 const labDependencies = (lab: string): Record<string, string> => {
   const pkg = JSON.parse(readFileSync(join(root, "lab", lab, "package.json"), "utf8"));
@@ -48,8 +69,9 @@ function project(name: string, from: string, dependencies: Record<string, string
   const dir = join(work, name);
   cpSync(from, dir, { recursive: true, filter: (path) => !/[\\/](node_modules|dist|\.next|\.wrangler)$/.test(path) && !/[\\/](pnpm-lock\.yaml|tsconfig\.tsbuildinfo|next-env\.d\.ts)$/.test(path) });
   prepare?.(dir);
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: `check-dist-${name}`, private: true, type: "module", dependencies, devDependencies: { ...devDependencies, ...extra } }, null, 2) + "\n");
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: `check-dist-${name}`, private: true, type: "module", dependencies, devDependencies: { ...devDependencies, ...extra }, ...(overrides ? { overrides } : {}) }, null, 2) + "\n");
   run("nub", ["install", ...installArgs], dir);
+  console.log(`${name}: dotschema's dependencies ${dependencyVersions(name, dir)}`);
   return dir;
 }
 

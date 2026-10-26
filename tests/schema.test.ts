@@ -303,6 +303,33 @@ test("a /** */ comment before a property's key is its doc comment in the module'
   assert.deepEqual(Object.keys(user.schema.properties.name), ["type", "nullable"]);
 });
 
+// The floors of the parsers' ranges (DESIGN.md, "Packaging"): json5 before 2.2.2 made a `__proto__`
+// key the object's prototype (CVE-2022-46175), and jsonc-parser before 3.1.0 read U+2028 as a line
+// break and U+00A0 as white space, so a file read otherwise under an older copy in the same range.
+test("a __proto__ key is a property in both dialects: the type's, the schema's, and required by the validator", async () => {
+  for (const [path, source] of [
+    [PATH, '{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "required": ["__proto__"] }'],
+    [join(ROOT, "tests/fixtures/user.schema.json5"), "{ type: 'object', properties: { __proto__: { type: 'string' } }, required: ['__proto__'] }"],
+  ] as const) {
+    const typed = schemaTypes(source, path);
+    assert.deepEqual(typed.problems, []);
+    assert.match(typed.types, /__proto__: string;/, path);
+    const { code, problems } = schemaCode(source, path);
+    assert.deepEqual(problems, []);
+    const { default: s } = await evaluate(code);
+    assert.deepEqual(Object.keys(s.schema.properties), ["__proto__"], path);
+    assert.equal(s.is(JSON.parse('{ "__proto__": "x" }')), true, path);
+    assert.equal(s.is({}), false, path);
+  }
+});
+
+test("a .schema.jsonc file has JSON's white space: U+2028 in a comment is part of it, and U+00A0 between tokens is a syntax error", () => {
+  assert.deepEqual(schemaTypes('// a\u2028b\n{ "type": "string" }', PATH).problems, []);
+  const [problem] = schemaTypes('{\u00a0"type": "string" }', PATH).problems;
+  assert.equal(problem!.code, CODES.syntax);
+  assert.equal(problem!.start, 1);
+});
+
 /** A directory of schema files, each written as JSON (JSON5 for `.schema.json5`), with the root's path and text. */
 function project(files: Record<string, unknown>, root = "user.schema.jsonc") {
   const dir = mkdtempSync(join(tmpdir(), "dotschema-refs-"));
@@ -712,6 +739,18 @@ test("every format ajv-formats defines, and its formatMinimum, formatMaximum and
     assert.deepEqual((s.validate(value).issues ?? []).map((i: any) => [i.keyword, i.path.length ? "/" + i.path.join("/") : "", i.message]), expected, JSON.stringify(value));
     assert.equal(s.is(value), expected.length === 0);
   }
+});
+
+// The floor of ajv-formats' range: 2.x, which also targets ajv 8, passed a time without its offset
+// and an IPv4 address with a leading zero, and had no iso-time or iso-date-time.
+test("ajv-formats 3's rules: a time has its offset, an IPv4 address no leading zero, and iso-time is a format", async () => {
+  const { code, problems } = schemaCode(JSON.stringify({ type: "object", properties: { time: { format: "time" }, ipv4: { format: "ipv4" }, iso: { format: "iso-time" } } }), PATH);
+  assert.deepEqual(problems, []);
+  const { default: s } = await evaluate(code);
+  assert.equal(s.is({ time: "12:30:00Z", ipv4: "1.2.3.4", iso: "12:30:00" }), true);
+  assert.equal(s.is({ time: "12:30:00" }), false);
+  assert.equal(s.is({ ipv4: "01.2.3.4" }), false);
+  assert.equal(s.is({ iso: "25:00:00" }), false);
 });
 
 test("a string in the schema that reads like a require call stays the schema's: the validator compares it as written and inlines nothing for it", async () => {

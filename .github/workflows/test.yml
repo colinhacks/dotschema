@@ -35,3 +35,5 @@ jobs:
       # the package as release.yml stages it, installed from a tarball outside the repository
       - run: nub run build
       - run: nub run check-dist
+      # the same, with dotschema's dependencies at the floor of each range, the oldest a project can share with another package
+      - run: nub run check-dist --lowest

@@ -34,7 +34,8 @@ test("the package is private in the repository, points at its sources, and depen
   // A mapper package does not resolve through self-reference, so the repository links itself.
   assert.equal(pkg.devDependencies.dotschema, "link:.");
   assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["ajv", "ajv-formats", "json5", "jsonc-parser"]);
-  for (const [dep, version] of Object.entries(pkg.dependencies)) assert.match(version as string, /^\d+\.\d+\.\d+$/, dep);
+  // Each a caret range on the oldest version that passes the checks (DESIGN.md, "Packaging").
+  for (const [dep, range] of Object.entries(pkg.dependencies)) assert.match(range as string, /^\^[1-9]\d*\.\d+\.\d+$/, dep);
 });
 
 test("dotschema claims its two suffixes, and a longer suffix than a .jsonc or .json5 loader's", () => {
