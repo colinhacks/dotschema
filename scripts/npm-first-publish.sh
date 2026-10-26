@@ -21,18 +21,6 @@ set -euo pipefail
 repo=colinhacks/dotschema
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-v="$(npm --version)"
-[ "$(printf '%s\n11.15.0\n' "$v" | sort -V | head -1)" = "11.15.0" ] || { echo "npm $v cannot configure a stage-only trusted publisher (need >= 11.15)"; exit 1; }
-
-name="$(nub --node -p "require('$root/package.json').name")"
-
-# Read without a login, before one is made: a package that does not exist cannot be trusted, and publishing it is not this script's to do.
-if [ -z "$(npm view "$name" version 2>/dev/null)" ]; then
-  echo "$name is not on npm, and a trusted publisher needs a package that exists; publish a 0.0.0 placeholder first (Motherload's scripts/npm-first-publish.sh shows how)."
-  exit 1
-fi
-echo "✓ $name exists"
-
 work="$(mktemp -d)"
 cfg="$work/npmrc"
 last="$work/last"
@@ -45,9 +33,25 @@ cleanup() {
   if grep -q '_authToken' "$cfg" 2>/dev/null; then
     npm logout > /dev/null 2>&1 && echo "logged out of npm" || echo "npm logout failed; revoke this machine's newest token at https://www.npmjs.com/settings/~/tokens"
   fi
+  cd /
   rm -rf "$work"
 }
 trap cleanup EXIT
+# And runs there, outside the repository: the nub shims on PATH (`nub pm shim`) refuse to run npm inside a
+# project whose package manager is nub, as this one's is, and these commands are the registry's, not the project's.
+cd "$work"
+
+v="$(npm --version)"
+[ "$(printf '%s\n11.15.0\n' "$v" | sort -V | head -1)" = "11.15.0" ] || { echo "npm $v cannot configure a stage-only trusted publisher (need >= 11.15)"; exit 1; }
+
+name="$(nub --node -p "require('$root/package.json').name")"
+
+# Read without a login, before one is made: a package that does not exist cannot be trusted, and publishing it is not this script's to do.
+if [ -z "$(npm view "$name" version 2>/dev/null)" ]; then
+  echo "$name is not on npm, and a trusted publisher needs a package that exists; publish a 0.0.0 placeholder first (Motherload's scripts/npm-first-publish.sh shows how)."
+  exit 1
+fi
+echo "✓ $name exists"
 
 echo "Sign in to npm in the browser (the login lasts for this run only):"
 npm login --auth-type=web
