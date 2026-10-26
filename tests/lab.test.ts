@@ -63,7 +63,9 @@ const TEAM = '"team":[true,false,false]';
 const JSON_SCHEMA = '"teamJsonSchema":[["https://json-schema.org/draft/2020-12/schema","#/$defs/user","user,place"],["http://json-schema.org/draft-07/schema#","#/definitions/user","user,place"]]';
 // event.schema.jsonc: a click and a visit, then a bad date-time, a bad uri and a click with a visit's field; then main.ts's narrowing functions.
 const EVENTS = '"events":[true,true,false,false,false],"described":"3,4","clickX":5';
-const EXPECTED = [VALIDATE, POINTS, TEAM, JSON_SCHEMA, EVENTS];
+// user.schema.jsonc's address definition, imported as a validator: valid, then a missing city and an extra key.
+const ADDRESS = '"address":[true,["city: required","zip: additionalProperties"]]';
+const EXPECTED = [VALIDATE, POINTS, TEAM, JSON_SCHEMA, EVENTS, ADDRESS];
 
 test("lab/basic runs under the preload", () => {
   const { status, out } = run(process.execPath, ["--import", "dotschema/register", "main.ts"], `${ROOT}lab/basic`);

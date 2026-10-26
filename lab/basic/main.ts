@@ -1,7 +1,7 @@
 // Every import below is typed by dotschema's content mapper (`tsc --runExternalCode`) and loaded by
 // its preload (`node --import dotschema/register main.ts`) or its esbuild plugin.
 import type { SchemaResult, StandardJSONSchemaV1 } from "dotschema";
-import user, { type Type as User } from "./user.schema.jsonc";
+import user, { address, type Type as User } from "./user.schema.jsonc";
 import point, { type Type as Point } from "./point.schema.json5";
 import team, { type Type as Team } from "./team.schema.jsonc";
 import event, { type Type as Event } from "./event.schema.jsonc";
@@ -10,7 +10,10 @@ import event, { type Type as Event } from "./event.schema.jsonc";
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 const expect = <T extends true>() => {};
 
-expect<Equal<User, { name: string; email?: string; role: "admin" | "member"; tags?: string[] }>>();
+expect<Equal<User, { name: string; email?: string; role: "admin" | "member"; tags?: string[]; address?: address.Type }>>();
+// Each definition is a validator of its own, named for its key, with its type as `.Type`.
+expect<Equal<address.Type, { street?: string; city: string }>>();
+expect<Equal<ReturnType<typeof address.validate>, SchemaResult<address.Type>>>();
 // The default import names the type too.
 expect<Equal<user.Type, User>>();
 expect<Equal<team.Type, Team>>();
@@ -87,5 +90,7 @@ console.log(
     ],
     described: event.is(click) ? describe(click) : "not an event",
     clickX: fifth.issues ? fifth.issues.length : clickX(fifth.value),
+    // user.schema.jsonc's address definition, imported as a validator: valid, then a missing city and an extra key.
+    address: [address.is({ city: "Paris" }), address.validate({ street: "Rue de Rivoli", zip: "75001" }).issues?.map((issue) => `${issue.path.join(".")}: ${issue.keyword}`)],
   }),
 );

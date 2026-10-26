@@ -7,8 +7,21 @@
     /** Where the app sends the user's mail. */
     "email": { "type": "string", "format": "email" },
     "role": { "enum": ["admin", "member"] },
-    "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+    "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "address": { "$ref": "#/definitions/address" }
   },
   "required": ["name", "role"],
-  "additionalProperties": false
+  "additionalProperties": false,
+  // A definition is a validator of its own: `import { address } from "./user.schema.jsonc"`.
+  "definitions": {
+    "address": {
+      "type": "object",
+      "properties": {
+        "street": { "type": "string" },
+        "city": { "type": "string", "minLength": 1 }
+      },
+      "required": ["city"],
+      "additionalProperties": false
+    }
+  }
 }

@@ -358,6 +358,31 @@ import team from "./team.schema.jsonc";
 type Members = team.Type["members"]; // User[]
 ```
 
+Each entry of `$defs` is a validator of its own, imported by its key:
+
+```jsonc
+// place.schema.jsonc
+{
+  "type": "object",
+  "properties": { "home": { "$ref": "#/$defs/address" } },
+  "$defs": {
+    "address": {
+      "type": "object",
+      "properties": { "city": { "type": "string" } },
+      "required": ["city"]
+    }
+  }
+}
+```
+
+```ts
+import { address } from "./place.schema.jsonc";
+
+if (address.is(input)) {
+  input.city; // string
+}
+```
+
 A `oneOf` whose variants a `const` tells apart is a union that narrows:
 
 ```jsonc

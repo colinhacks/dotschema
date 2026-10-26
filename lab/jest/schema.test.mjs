@@ -1,11 +1,12 @@
 // ESM: Jest's own linker (--experimental-vm-modules) loads each schema through dotschema/jest, and
 // Vitest through dotschema/vite.
-import user from "../basic/user.schema.jsonc";
+import user, { address } from "../basic/user.schema.jsonc";
 import point from "../basic/point.schema.json5";
 import event from "../basic/event.schema.jsonc";
 
 test("lab/basic's schemas, imported by an ES module test", () => {
   expect(user.is({ name: "Ada", role: "admin" })).toBe(true);
+  expect(address.is({ city: "Paris" })).toBe(true);
   expect(user["~standard"].validate({ name: "Ada" }).issues[0].path).toEqual(["role"]);
   expect(point.schema.properties.label.maxLength).toBe(16);
   // ajv-formats' date-time, inlined into the module.

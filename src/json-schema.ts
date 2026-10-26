@@ -20,6 +20,9 @@ export type JsonSchemaTarget = "draft-07" | "draft-2020-12";
 
 export type JsonSchemaResult = { schema: Value } | { error: string };
 
+/** The unit of an entry's document that is the entry itself (`jsonSchema`). */
+const ENTRY = "\0entry";
+
 /** The `$schema` each target's schema declares. */
 export const TARGET_URIS: Record<JsonSchemaTarget, string> = {
   "draft-07": "http://json-schema.org/draft-07/schema#",
@@ -72,26 +75,47 @@ const WALK_ONE = new Set([...ONE, "items", "additionalItems", "unevaluatedItems"
 const WALK_LIST = new Set([...LIST, "prefixItems", "items"]);
 const WALK_MAP = new Set([...MAP, "$defs", "definitions", "dependentSchemas", "dependencies"]);
 
-/** The schema as a self-contained JSON Schema in each target draft, or the reason it cannot be one. `draft` is the root's, the draft every file is compiled in. */
-export function jsonSchemas(files: Files, rootPath: string, draft: Draft): Record<JsonSchemaTarget, JsonSchemaResult> {
-  return { "draft-07": jsonSchema(files, rootPath, draft, "draft-07"), "draft-2020-12": jsonSchema(files, rootPath, draft, "draft-2020-12") };
+/**
+ * The schema as a self-contained JSON Schema in each target draft, or the reason it cannot be one.
+ * `draft` is the root's, the draft every file is compiled in. With `entry`, a definition of the root
+ * file (`["$defs", "address"]`), that definition is the document's root, and what it refers to is
+ * folded in beside it ([DESIGN.md](../DESIGN.md#each-definition-a-validator)).
+ */
+export function jsonSchemas(files: Files, rootPath: string, draft: Draft, entry?: Entry): Record<JsonSchemaTarget, JsonSchemaResult> {
+  return { "draft-07": jsonSchema(files, rootPath, draft, "draft-07", entry), "draft-2020-12": jsonSchema(files, rootPath, draft, "draft-2020-12", entry) };
 }
 
-/** One target's entry of `jsonSchemas`. */
-export function jsonSchema(files: Files, rootPath: string, draft: Draft, target: JsonSchemaTarget): JsonSchemaResult {
+/** A definition of the root file, by its keyword and key, made the root of its own document. */
+export type Entry = readonly ["$defs" | "definitions", string];
+
+/**
+ * One target's entry of `jsonSchemas`. With `entry`, the definition is converted at the document's
+ * root; the root file's other definitions are hoisted into the target's container under their keys,
+ * the rest of the root file is folded in under its file's name, as another file is, and each of those
+ * is kept only when the definition reaches it, so a reference elsewhere in the file neither bloats
+ * nor fails the definition's document.
+ */
+export function jsonSchema(files: Files, rootPath: string, draft: Draft, target: JsonSchemaTarget, entry?: Entry): JsonSchemaResult {
   if (files.problems.length) return { error: files.problems.map((p) => p.message).join(" ") };
   const root = files.schemas.get(rootPath);
   if (root === undefined) return { error: `${basename(rootPath)} was not read.` };
+  const entrySchema = entry && isObj(root) && isObj(root[entry[0]]) && has(root[entry[0]] as Obj, entry[1]) ? (root[entry[0]] as Obj)[entry[1]] : undefined;
+  if (entry && entrySchema === undefined) return { error: `${basename(rootPath)} has no ${entry[0]} entry "${entry[1]}".` };
   const to07 = target === "draft-07";
   const container = to07 ? "definitions" : "$defs";
   const foreign = FOREIGN[draft];
   const multiFile = files.schemas.size > 1;
-  const errors: string[] = [];
+  // Each error with the unit of the document it was found in (`unitOf`), so an unreached unit's are dropped.
+  const errors: { unit: string; message: string }[] = [];
   /** Where each schema of each file landed: `[file, ...source segments]` to output segments. */
   const positions = new Map<string, string[]>();
   const anchors = new Map<string, Map<string, string[]>>();
   const sites: { object: Out; key: "$ref" | "$dynamicRef"; ref: string; file: string; at: string[] }[] = [];
   const place = (file: string, segments: readonly string[]) => JSON.stringify([file, ...segments]);
+  // The unit of the document a place in it belongs to: a schema in the container, by its name, or the entry.
+  const unitOf = (out: readonly string[]) => (entry && out.length >= 2 && out[0] === container && unitNames.has(out[1]!) ? out[1]! : ENTRY);
+  // Which unit refers to which, for an entry's document to keep only what it reaches.
+  const edges: [string, string][] = [];
   const where = (file: string, segments: readonly string[]) => `${specifierOf(rootPath, file)}#${fragmentOf(segments)}`;
 
   // 2019-09's `unevaluatedItems` counts the items `items` and `additionalItems` evaluated; 2020-12's
@@ -104,6 +128,15 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
   const folded = new Map<string, string>();
   const taken = new Set<string>();
   if (isObj(root)) for (const key of ["$defs", "definitions"]) if (isObj(root[key])) for (const name of Object.keys(root[key])) taken.add(name);
+  // With an entry, the rest of the root file is a unit of its own, named for the file, before the others.
+  let rootName = "";
+  if (entry) {
+    const suffix = SCHEMA_SUFFIXES.find((s) => rootPath.endsWith(s)) ?? "";
+    const base = basename(rootPath).slice(0, basename(rootPath).length - suffix.length) || "schema";
+    rootName = base;
+    for (let n = 2; taken.has(rootName); n++) rootName = `${base}${n}`;
+    taken.add(rootName);
+  }
   for (const path of files.schemas.keys()) {
     if (path === rootPath) continue;
     const suffix = SCHEMA_SUFFIXES.find((s) => path.endsWith(s)) ?? "";
@@ -112,6 +145,14 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     for (let n = 2; taken.has(name); n++) name = `${base}${n}`;
     taken.add(name);
     folded.set(path, name);
+  }
+
+  // With an entry, the names of the units beside it: the root file's other definitions, the rest of the root file, the other files.
+  const unitNames = new Set<string>();
+  if (entry) {
+    if (isObj(root)) for (const keyword of ["$defs", "definitions"]) if (isObj(root[keyword])) for (const name of Object.keys(root[keyword])) if (keyword !== entry[0] || name !== entry[1]) unitNames.add(name);
+    unitNames.add(rootName);
+    for (const name of folded.values()) unitNames.add(name);
   }
 
   let file = rootPath;
@@ -127,11 +168,12 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     if (!isObj(node)) return node;
     const result: Out = {};
     const fileRoot = src.length === 0;
-    const rootOfAll = fileRoot && file === rootPath;
+    // The document's root: the root file's, or the entry's.
+    const rootOfAll = file === rootPath && (entry ? src.length === 2 && src[0] === entry[0] && src[1] === entry[1] : fileRoot);
     const names: string[] = [];
     let itemsDone = false;
     let dependenciesDone = false;
-    const refuse = (keyword: string, why: string) => errors.push(`"${keyword}" at ${where(file, [...src, keyword])} ${why}`);
+    const refuse = (keyword: string, why: string) => errors.push({ unit: unitOf(out), message: `"${keyword}" at ${where(file, [...src, keyword])} ${why}` });
     const sub = (value: Value, from: (string | number)[], to: (string | number)[]) => convert(value, [...src, ...from.map(String)], [...out, ...to.map(String)]);
 
     for (const [keyword, value] of Object.entries(node)) {
@@ -147,7 +189,7 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
             if (value.length > 1) names.push(value.slice(1));
           } else if (!fileRoot) {
             refuse(keyword, "gives a schema inside the file a base URI of its own, which dotschema does not carry into one document.");
-          } else if (rootOfAll) {
+          } else if (rootOfAll && fileRoot) {
             const hash = value.indexOf("#");
             if (hash !== -1 && hash < value.length - 1) refuse(keyword, "has a fragment.");
             else result["$id"] = to07 || hash === -1 ? value : value.slice(0, hash);
@@ -191,6 +233,8 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
         case "$defs":
         case "definitions": {
           if (!isObj(value)) break;
+          // With an entry, the root file's definitions are hoisted beside it (below).
+          if (entry && fileRoot && file === rootPath) break;
           const defs = (result[container] ??= {}) as Out;
           if (rootOfAll) rootContainer = defs;
           for (const [name, schema] of Object.entries(value)) {
@@ -239,7 +283,7 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
         else if (!has(result, "$id")) result["$id"] = `#${name}`;
       }
     }
-    if (rootOfAll && folded.size && !rootContainer) rootContainer = result[container] = {};
+    if (!entry && rootOfAll && folded.size && !rootContainer) rootContainer = result[container] = {};
 
     if (typeof result["$ref"] === "string") {
       const ref = result["$ref"];
@@ -324,11 +368,30 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     result["dependencies"] = deps;
   };
 
-  const converted = convert(root, [], []);
+  // With an entry, the units the document may hold beside it, in order: the root file's other
+  // definitions, the rest of the root file, then the other files; each kept only if reached.
+  const units = new Map<string, Value>();
+  let converted: Value;
+  if (entry) {
+    converted = convert(entrySchema!, [...entry], []);
+    if (isObj(root)) {
+      for (const keyword of ["$defs", "definitions"] as const) {
+        const group = root[keyword];
+        if (!isObj(group)) continue;
+        for (const [name, schema] of Object.entries(group)) {
+          if (keyword === entry[0] && name === entry[1]) continue;
+          if (units.has(name)) errors.push({ unit: name, message: `"${keyword}" at ${where(rootPath, [keyword])} and "${keyword === "$defs" ? "definitions" : "$defs"}" both define "${name}".` });
+          else units.set(name, convert(schema, [keyword, name], [container, name]));
+        }
+      }
+    }
+    units.set(rootName, convert(root, [], [container, rootName]));
+  } else converted = convert(root, [], []);
   for (const [path, name] of folded) {
     file = path;
     const schema = convert(files.schemas.get(path)!, [], [container, name]);
-    if (rootContainer) rootContainer[name] = schema;
+    if (entry) units.set(name, schema);
+    else if (rootContainer) rootContainer[name] = schema;
   }
 
   // Every reference becomes a pointer into the one document. A file's own absolute `$id` names it
@@ -343,7 +406,8 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     const hash = ref.indexOf("#");
     const uri = hash === -1 ? ref : ref.slice(0, hash);
     const fragment = hash === -1 ? "" : ref.slice(hash + 1);
-    const fail = (why: string) => errors.push(`"${site.key}" at ${where(site.file, site.at)}: "${ref}" ${why}`);
+    const from = unitOf(positions.get(place(site.file, site.at.slice(0, -1))) ?? []);
+    const fail = (why: string) => errors.push({ unit: from, message: `"${site.key}" at ${where(site.file, site.at)}: "${ref}" ${why}` });
     let target: string | undefined;
     if (uri === "") target = site.file;
     else if (SCHEME.test(uri)) {
@@ -371,9 +435,33 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
       continue;
     }
     site.object[site.key] = `#${fragmentOf(out)}`;
+    edges.push([from, unitOf(out)]);
   }
 
-  if (errors.length) return { error: errors.join(" ") };
+  if (entry) {
+    // The units the entry reaches, transitively; the others, and their errors, are left out.
+    const reached = new Set([ENTRY]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const [from, to] of edges)
+        if (reached.has(from) && !reached.has(to)) {
+          reached.add(to);
+          grew = true;
+        }
+    }
+    for (let i = errors.length - 1; i >= 0; i--) if (units.has(errors[i]!.unit) && !reached.has(errors[i]!.unit)) errors.splice(i, 1);
+    const kept = [...units].filter(([name]) => reached.has(name));
+    if (kept.length && isObj(converted)) {
+      const out = converted as Out;
+      const defs = ((out[container] as Out | undefined) ??= {});
+      for (const [name, schema] of kept) {
+        if (has(defs, name)) errors.push({ unit: ENTRY, message: `"${container}" at ${where(rootPath, [...entry, container])} defines "${name}", which the document also gives to a schema the definition refers to.` });
+        else defs[name] = schema;
+      }
+    }
+  }
+
+  if (errors.length) return { error: errors.map((e) => e.message).join(" ") };
   if (isObj(converted)) return { schema: { $schema: TARGET_URIS[target], ...converted } };
   // A boolean schema cannot declare its draft; the empty schema accepts every value, and its negation none.
   return { schema: converted === false ? { $schema: TARGET_URIS[target], not: {} } : { $schema: TARGET_URIS[target] } };

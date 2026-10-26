@@ -2,7 +2,7 @@
 // Rollup and Rolldown, and through dotschema/webpack by webpack and Rspack. JavaScript, so that no
 // bundler needs a loader for TypeScript; lab/basic's main.ts checks the types. It prints what
 // lab/basic/main.ts prints.
-import user from "../basic/user.schema.jsonc";
+import user, { address } from "../basic/user.schema.jsonc";
 import point from "../basic/point.schema.json5";
 import team from "../basic/team.schema.jsonc";
 import event from "../basic/event.schema.jsonc";
@@ -41,5 +41,6 @@ console.log(
     ],
     described: event.is(click) ? describe(click) : "not an event",
     clickX: fifth.issues ? fifth.issues.length : fifth.value.x,
+    address: [address.is({ city: "Paris" }), address.validate({ street: "Rue de Rivoli", zip: "75001" }).issues?.map((issue) => `${issue.path.join(".")}: ${issue.keyword}`)],
   }),
 );

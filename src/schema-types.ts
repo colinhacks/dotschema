@@ -91,6 +91,39 @@ function typeName(key: string, taken: Set<string>): string {
 }
 
 /**
+ * Words a definition's value cannot be named: JavaScript's reserved words, in strict mode and in a
+ * module (`await`), the two names strict mode refuses to bind, the global values a module should not
+ * shadow, TypeScript's names for its own types, which a namespace may not take, and `schema`, the
+ * module's own name for its default export.
+ */
+const RESERVED = new Set(
+  "await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval undefined NaN Infinity globalThis any bigint boolean never number object string symbol unknown schema".split(" "),
+);
+
+/**
+ * A definition's key as the name of its validator, a value the module exports: camelCase (`my-address`
+ * is `myAddress`, `HTTPServer` is `httpServer`), `_` before a leading digit, `_` after a reserved word
+ * (`default` is `default_`), `definition` when the key has no letter or digit, and a number after a
+ * name already taken, by another key or by a type the module declares. So the name is always an
+ * identifier a module can export as a `const`, and the same key always gives the same name.
+ */
+export function valueName(key: string, taken: Set<string>): string {
+  const words = key.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const lower = (word: string) => {
+    const capitals = /^[A-Z]+/.exec(word)?.[0].length ?? 0;
+    const cut = capitals === word.length ? capitals : Math.max(1, capitals - 1);
+    return word.slice(0, cut).toLowerCase() + word.slice(cut);
+  };
+  let name = words.map((word, i) => (i === 0 ? lower(word) : word[0]!.toUpperCase() + word.slice(1))).join("") || "definition";
+  if (/^[0-9]/.test(name)) name = `_${name}`;
+  if (RESERVED.has(name)) name = `${name}_`;
+  let unique = name;
+  for (let n = 2; taken.has(unique); n++) unique = `${name}${n}`;
+  taken.add(unique);
+  return unique;
+}
+
+/**
  * The name of the module's type for the schema as written, its literal type, which the module's
  * `Schema<Type, Json>` takes as its second argument, so an error or a hover prints the name in place
  * of the whole schema. The module does not export it; a definition or an imported type never takes it.
@@ -106,25 +139,31 @@ const fileTypeName = (path: string, taken: Set<string>): string => typeName(base
  * `Type` and `Json`. The definitions are named first, so a definition's name is its key whatever the
  * file is called, and the root, which is exported as `Type` as well, is the one that gives way.
  */
-function definitionNames(root: Value, path?: string): { rootName: string; names: Map<string, string>; definitions: [string, Value, string | undefined][]; taken: Set<string> } {
+function definitionNames(root: Value, path?: string): { rootName: string; names: Map<string, string>; definitions: [string, Value, string | undefined, Definition][]; taken: Set<string> } {
   const taken = new Set(["Type", LITERAL_NAME, "__DotschemaSchema"]);
   const names = new Map<string, string>();
-  // Each definition's name, its schema, and the doc comment before its key.
-  const definitions: [string, Value, string | undefined][] = [];
+  // Each definition's name, its schema, the doc comment before its key, and its names in the module.
+  const definitions: [string, Value, string | undefined, Definition][] = [];
   if (isObj(root)) {
-    for (const keyword of ["$defs", "definitions"]) {
+    for (const keyword of ["$defs", "definitions"] as const) {
       const group = root[keyword];
       if (!isObj(group)) continue;
       for (const [key, schema] of Object.entries(group)) {
         const name = typeName(key, taken);
         names.set(`${keyword}\0${key}`, name);
-        definitions.push([name, schema, docOfKey(group, key)]);
+        definitions.push([name, schema, docOfKey(group, key), { keyword, key, typeName: name, valueName: "", type: "", doc: "" }]);
       }
     }
   }
   const rootName = path === undefined ? "Type" : fileTypeName(path, taken);
+  // Each definition's validator is named after the types, so it never takes a type's name.
+  const values = new Set(taken);
+  for (const [, , , definition] of definitions) definition.valueName = valueName(definition.key, values);
   return { rootName, names, definitions, taken };
 }
+
+/** The root's definitions, each with the names its type and its validator take in the module, in the order the module declares them. */
+export const definitionsOf = (root: Value, path: string): Definition[] => definitionNames(root, path).definitions.map(([, , , definition]) => definition);
 
 /** The other schema files a schema's `$ref`s reach, so that a reference to one is typed by its module. */
 export interface SchemaFiles {
@@ -132,6 +171,17 @@ export interface SchemaFiles {
   path: string;
   /** The schema in another file, or undefined when it cannot be read (a problem reported at the reference). */
   read(path: string): Value | undefined;
+}
+
+/** An entry of the root's `$defs` or `definitions`: its keyword and key, the names of its type and its validator, and its type written out. */
+export interface Definition {
+  keyword: "$defs" | "definitions";
+  key: string;
+  typeName: string;
+  valueName: string;
+  type: string;
+  /** Its doc comment, as the module writes it before its type: for its validator too. */
+  doc: string;
 }
 
 /** A schema file whose pointers a reference can follow: the root's own, or another file's, whose names are imported. */
@@ -208,7 +258,7 @@ export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Dra
 }
 
 /** The declarations, as `schemaDeclarations` writes them; the root's name; and the root's type as text, which the module's default export takes so a hover prints its properties. */
-export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft): { declarations: string; rootName: string; rootType: string } {
+export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft): { declarations: string; rootName: string; rootType: string; definitions: Definition[] } {
   const prefixItems = draft === undefined || draft === "2020-12";
   const itemLists = draft === undefined || draft !== "2020-12";
   const unevaluated = draft === undefined || draft !== "draft-07";
@@ -500,7 +550,14 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
   // `type Type = User`, whose name a hover would print in place of `User`.
   const named = rootName !== "Type";
   const rootDeclaration = [declare(rootName, root, docOfRoot(root), rootType, !named), ...(named ? [`export type { ${rootName} as Type };`] : [])].join("\n");
-  const declarations = [rootDeclaration, ...definitions.map(([name, schema, comment]) => declare(name, schema, comment))].join("\n\n");
+  const declarations = [
+    rootDeclaration,
+    ...definitions.map(([name, schema, comment, definition]) => {
+      definition.type = emit(schema, "");
+      definition.doc = doc(schema, "", comment);
+      return declare(name, schema, comment, definition.type);
+    }),
+  ].join("\n\n");
   const lines = [...imports].map(([specifier, byName]) => `import type { ${[...byName].map(([exported, local]) => (exported === local ? exported : `${exported} as ${local}`)).join(", ")} } from ${JSON.stringify(specifier)};`);
-  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, rootType };
+  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, rootType, definitions: definitions.map(([, , , definition]) => definition) };
 }
