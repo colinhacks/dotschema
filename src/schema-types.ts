@@ -233,6 +233,8 @@ function propertyTest(test: Value | undefined): { key: string; values: Primitive
   const keys = isObj(test["properties"]) ? Object.keys(test["properties"]) : [];
   if (keys.length !== 1) return undefined;
   const key = keys[0]!;
+  // ajv does not test a `__proto__` key in `properties`, so the `if` does not test the value.
+  if (key === "__proto__") return undefined;
   if (test["required"] !== undefined && !(Array.isArray(test["required"]) && test["required"].every((name) => name === key))) return undefined;
   const values = literalsOf((test["properties"] as Obj)[key], true);
   return values && { key, values };
@@ -388,6 +390,9 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     const lines: string[] = [];
     const valueTypes: string[] = [];
     for (const [key, property] of Object.entries(properties)) {
+      // ajv skips a `__proto__` key in `properties` (`allSchemaProperties`, dist/vocabularies/code.js),
+      // so a value's own `__proto__` is one of the keys the index signature covers, as below.
+      if (key === "__proto__") continue;
       const type = emit(property, inner);
       const optional = !required.has(key);
       valueTypes.push(type, ...(optional ? ["undefined"] : []));
@@ -399,7 +404,7 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     // pattern matches it (all of them apply, so their union admits it), or of `additionalProperties`
     // when none does: it is one of the keys the index signature covers.
     for (const key of required) {
-      if (Object.hasOwn(properties, key)) continue;
+      if (Object.hasOwn(properties, key) && key !== "__proto__") continue;
       const matching = patterns.filter((pattern) => pattern.test(key) !== false);
       const type = matching.length ? union(matching.map((pattern) => pattern.type)) : additionalType;
       // A pattern that cannot be read here may not match: the key may be an additional one too.

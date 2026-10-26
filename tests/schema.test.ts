@@ -313,7 +313,7 @@ test("a __proto__ key is a property in both dialects: the type's, the schema's, 
   ] as const) {
     const typed = schemaTypes(source, path);
     assert.deepEqual(typed.problems, []);
-    assert.match(typed.types, /__proto__: string;/, path);
+    assert.match(typed.types, /__proto__: unknown;/, path);
     const { code, problems } = schemaCode(source, path);
     assert.deepEqual(problems, []);
     const { default: s } = await evaluate(code);
@@ -321,6 +321,29 @@ test("a __proto__ key is a property in both dialects: the type's, the schema's, 
     assert.equal(s.is(JSON.parse('{ "__proto__": "x" }')), true, path);
     assert.equal(s.is({}), false, path);
   }
+});
+
+test("a __proto__ key in properties, which ajv does not check, is typed as a key outside properties", async () => {
+  // ajv skips the key in `properties` and reads a value's own `__proto__` as an additional property.
+  // Each schema written as text: in an object literal, `__proto__` would set the prototype.
+  const cases = [
+    ['{ "type": "object", "properties": { "__proto__": { "type": "string" }, "a": { "type": "number" } }, "required": ["__proto__"] }', /\n  a\?: number \| undefined;\n  __proto__: unknown;\n  \[key: string\]: unknown;\n/, [['{ "__proto__": 1 }', true], ['{ "__proto__": "x" }', true], ["{}", false]]],
+    ['{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "additionalProperties": false }', /\{\n  \[key: string\]: never;\n\}/, [['{ "__proto__": "x" }', false], ["{}", true]]],
+    ['{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "required": ["__proto__"], "additionalProperties": { "type": "number" } }', /\n  __proto__: number;\n  \[key: string\]: number;\n/, [['{ "__proto__": 1 }', true], ['{ "__proto__": "x" }', false]]],
+  ] as const;
+  for (const [source, type, verdicts] of cases) {
+    const typed = schemaTypes(source, PATH);
+    assert.deepEqual(typed.problems, [], source);
+    assert.match(typed.types, type, source);
+    const { code } = schemaCode(source, PATH);
+    const { default: s } = await evaluate(code);
+    for (const [value, verdict] of verdicts) assert.equal(s.is(JSON.parse(value)), verdict, `${source} on ${value}`);
+  }
+  // An `if` that tests the key tests nothing in ajv, so the type does not narrow on it.
+  const conditional = '{ "type": "object", "properties": { "__proto__": { "enum": ["a", "b"] } }, "required": ["__proto__"], "if": { "properties": { "__proto__": { "const": "a" } } }, "then": { "required": ["t"] } }';
+  assert.match(schemaTypes(conditional, PATH).types, /\ninterface User \{\n  __proto__: unknown;\n  \[key: string\]: unknown;\n\}/);
+  const { default: c } = await evaluate(schemaCode(conditional, PATH).code);
+  assert.equal(c.is(JSON.parse('{ "__proto__": "b" }')), false);
 });
 
 test("a .schema.jsonc file has JSON's white space: U+2028 in a comment is part of it, and U+00A0 between tokens is a syntax error", () => {
