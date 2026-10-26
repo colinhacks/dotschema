@@ -851,7 +851,8 @@ test("a schema outside any project that installs ajv still validates: ajv is dot
   writeFileSync(path, SCHEMA);
   const { types, problems } = schemaTypes(SCHEMA, path);
   assert.deepEqual(problems, []);
-  // The file names the root, not the schema's title.\n  assert.match(types, /\ninterface A \{\n  name: string;\n  tags\?: \{\n    \[key: string\]: unknown;\n  \}\[\] \| undefined;\n\}/);
+  // The file names the root, not the schema's title.
+  assert.match(types,/\ninterface A \{\n  name: string;\n  tags\?: \{\n    \[key: string\]: unknown;\n  \}\[\] \| undefined;\n\}/);
   const { code, problems: codeProblems } = schemaCode(SCHEMA, path);
   assert.deepEqual(codeProblems, []);
   assert.doesNotMatch(code, /^import /m);
