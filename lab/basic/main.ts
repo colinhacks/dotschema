@@ -1,6 +1,6 @@
 // Every import below is typed by dotschema's content mapper (`tsc --runExternalCode`) and loaded by
 // its preload (`node --import dotschema/register main.ts`) or its esbuild plugin.
-import type { SchemaResult, StandardJSONSchemaV1 } from "dotschema";
+import type { SchemaResult, StandardJSONSchemaV1, StandardSchemaV1 } from "dotschema";
 import user, { address, type Type as User } from "./user.schema.jsonc";
 import point, { type Type as Point } from "./point.schema.json5";
 import team, { type Type as Team } from "./team.schema.jsonc";
@@ -14,6 +14,16 @@ expect<Equal<User, { name: string; email?: string; role: "admin" | "member"; tag
 // Each definition is a validator of its own, named for its key, with its type as `.Type`.
 expect<Equal<address.Type, { street?: string; city: string }>>();
 expect<Equal<ReturnType<typeof address.validate>, SchemaResult<address.Type>>>();
+// `.pick()` and `.omit()` give a schema of some of the properties, typed with their own optionality.
+const summary = user.pick("name", "role");
+expect<Equal<StandardSchemaV1.InferOutput<typeof summary>, { name: string; role: "admin" | "member" }>>();
+const contact = user.omit("role", "tags", "address").pick("name", "email");
+expect<Equal<StandardSchemaV1.InferOutput<typeof contact>, { name: string; email?: string }>>();
+expect<Equal<StandardSchemaV1.InferOutput<ReturnType<typeof address.omit<"street">>>, { city: string }>>();
+// @ts-expect-error a key the schema's properties do not name
+user.pick("nickname");
+// @ts-expect-error an event is a oneOf, whose properties picking would not filter: it has no pick
+event.pick;
 // The default import names the type too.
 expect<Equal<user.Type, User>>();
 expect<Equal<team.Type, Team>>();
@@ -92,5 +102,7 @@ console.log(
     clickX: fifth.issues ? fifth.issues.length : clickX(fifth.value),
     // user.schema.jsonc's address definition, imported as a validator: valid, then a missing city and an extra key.
     address: [address.is({ city: "Paris" }), address.validate({ street: "Rue de Rivoli", zip: "75001" }).issues?.map((issue) => `${issue.path.join(".")}: ${issue.keyword}`)],
+    // A user with only a name and a role: closed, so an email is now an additional property; then the omitted role is no longer required.
+    picked: [summary.validate({ name: "", email: "ada@example.com" }).issues?.map((issue) => `${issue.path.join(".")}: ${issue.message}`), contact.is({ name: "Ada" }), Object.keys(summary["~standard"].jsonSchema.input({ target: "draft-07" }).properties as object).join()],
   }),
 );

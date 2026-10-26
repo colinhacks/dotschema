@@ -56,7 +56,7 @@ test("each definition is a named export, its name the key in camelCase, never a 
   // The type of "2fa" is `_2fa`, so its validator takes `_2fa2`; each carries its type as `.Type`.
   assert.match(types, /\nexport declare const _2fa2: __DotschemaSchema<2, Json\["\$defs"\]\["2fa"\]>;\nexport declare namespace _2fa2 \{ export type \{ _2fa as Type \}; \}/);
   assert.match(types, /\nexport declare const myAddress2: __DotschemaSchema<number, Json\["\$defs"\]\["myAddress"\]>;/);
-  assert.match(types, /\nexport declare const address: __DotschemaSchema<\{\n  city: string;\n\}, Json\["\$defs"\]\["address"\]>;\nexport declare namespace address \{ export type \{ Address as Type \}; \}/);
+  assert.match(types, /\nexport declare const address: __DotschemaObjectSchema<\{\n  city: string;\n\}, Json\["\$defs"\]\["address"\], "city">;\nexport declare namespace address \{ export type \{ Address as Type \}; \}/);
   // Each validates as its definition does, on its own.
   assert.deepEqual([module.address.is({ city: "Paris" }), module.address.is({ city: "" }), module.myAddress2.is(1), module.myAddress.is(1), module.default_.is("d"), module.yes.is(1), module.no.is(1)], [true, false, true, false, true, true, false]);
   assert.deepEqual(module.address.validate({}).issues, [{ message: "must have required property 'city'", path: ["city"], keyword: "required" }]);

@@ -118,3 +118,17 @@ export interface Schema<T, S = unknown> extends StandardSchemaV1<T, T>, Standard
   } & StandardSchemaV1.Props<T, T> &
     StandardJSONSchemaV1.Props<T, T>;
 }
+
+/**
+ * A schema module, or one of its definitions, whose schema is a plain object (`type: "object"` with
+ * `properties`, `required` and `additionalProperties`, and annotations): a `Schema` that also picks
+ * and omits properties. `K` is the keys `properties` and `required` name. The schema each method
+ * gives is the one whose `properties` and `required` keep the keys chosen, every other keyword as it
+ * was, so `additionalProperties: false` refuses a property left out. Nothing on it throws, as on `Schema`.
+ */
+export interface ObjectSchema<T, S = unknown, K extends string = string> extends Schema<T, S> {
+  /** The schema with only these properties: `user.pick("name", "role")`. Its validators were compiled with the module; nothing is compiled at run time. */
+  pick<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? Q : string extends Q ? Q : never]: T[Q] }, unknown, P>;
+  /** The schema without these properties: `user.omit("email")`. */
+  omit<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] }, unknown, Exclude<K, P>>;
+}

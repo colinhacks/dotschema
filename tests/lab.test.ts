@@ -46,7 +46,10 @@ test("a library that re-exports a schema module emits its declarations: the sche
   // Here `dotschema` is this repository, so TypeScript names its types by a relative path; installed,
   // it names them `import("dotschema")`, which scripts/check-dist.ts checks.
   // The module's default export writes its root's properties out, so the declarations do too.
-  assert.match(declarations, /user: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.Schema<\{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\s+\}, \{\n\s+readonly type: "object";/);
+  // A plain object is an ObjectSchema, and a picked schema's type is written out too.
+  assert.match(declarations, /scores: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.Schema<\{/);
+  assert.match(declarations, /export declare const summary: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.ObjectSchema<\{\n\s+name: string;\n\}, unknown, "name">;/);
+  assert.match(declarations, /user: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.ObjectSchema<\{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\s+\}, \{\n\s+readonly type: "object";/);
   assert.doesNotMatch(declarations, /\bJson\b/);
   assert.match(declarations, /export declare const check: \(value: unknown\) => value is \{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\};/);
   rmSync(out, { recursive: true, force: true });
@@ -65,7 +68,9 @@ const JSON_SCHEMA = '"teamJsonSchema":[["https://json-schema.org/draft/2020-12/s
 const EVENTS = '"events":[true,true,false,false,false],"described":"3,4","clickX":5';
 // user.schema.jsonc's address definition, imported as a validator: valid, then a missing city and an extra key.
 const ADDRESS = '"address":[true,["city: required","zip: additionalProperties"]]';
-const EXPECTED = [VALIDATE, POINTS, TEAM, JSON_SCHEMA, EVENTS, ADDRESS];
+// `.pick()` and `.omit()`: the picked schema's issues in ajv's order, a chain, and its Standard JSON Schema.
+const PICKED = `"picked":[["role: must have required property 'role'","email: must NOT have additional properties","name: must NOT have fewer than 1 characters"],true,"name,role"]`;
+const EXPECTED = [VALIDATE, POINTS, TEAM, JSON_SCHEMA, EVENTS, ADDRESS, PICKED];
 
 test("lab/basic runs under the preload", () => {
   const { status, out } = run(process.execPath, ["--import", "dotschema/register", "main.ts"], `${ROOT}lab/basic`);

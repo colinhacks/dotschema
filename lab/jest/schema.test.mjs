@@ -6,7 +6,7 @@ import event from "../basic/event.schema.jsonc";
 
 test("lab/basic's schemas, imported by an ES module test", () => {
   expect(user.is({ name: "Ada", role: "admin" })).toBe(true);
-  expect(address.is({ city: "Paris" })).toBe(true);
+  expect([address.is({ city: "Paris" }), user.omit("role").is({ name: "Ada" })]).toEqual([true, true]);
   expect(user["~standard"].validate({ name: "Ada" }).issues[0].path).toEqual(["role"]);
   expect(point.schema.properties.label.maxLength).toBe(16);
   // ajv-formats' date-time, inlined into the module.

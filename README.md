@@ -383,6 +383,24 @@ if (address.is(input)) {
 }
 ```
 
+The `.pick()` method gives the schema with only the properties named, and `.omit()` the schema without them:
+
+```ts
+import user from "./user.schema.jsonc";
+
+const named = user.pick("name");
+named.validate({ name: "Ada", role: "admin" });
+// { issues: [{ message: "must NOT have additional properties", path: ["role"], keyword: "additionalProperties" }] }
+```
+
+Its type is the output of a Standard Schema:
+
+```ts
+import type { StandardSchemaV1 } from "dotschema";
+
+type Named = StandardSchemaV1.InferOutput<typeof named>; // { name: string }
+```
+
 A `oneOf` whose variants a `const` tells apart is a union that narrows:
 
 ```jsonc

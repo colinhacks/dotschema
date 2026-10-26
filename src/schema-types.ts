@@ -140,7 +140,7 @@ const fileTypeName = (path: string, taken: Set<string>): string => typeName(base
  * file is called, and the root, which is exported as `Type` as well, is the one that gives way.
  */
 function definitionNames(root: Value, path?: string): { rootName: string; names: Map<string, string>; definitions: [string, Value, string | undefined, Definition][]; taken: Set<string> } {
-  const taken = new Set(["Type", LITERAL_NAME, "__DotschemaSchema"]);
+  const taken = new Set(["Type", LITERAL_NAME, "__DotschemaSchema", "__DotschemaObjectSchema"]);
   const names = new Map<string, string>();
   // Each definition's name, its schema, the doc comment before its key, and its names in the module.
   const definitions: [string, Value, string | undefined, Definition][] = [];

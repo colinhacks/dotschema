@@ -10,6 +10,7 @@ test("lab/basic's schemas, required by a CommonJS test", () => {
   expect(user.validate({ name: "", role: "owner" }).issues.map((issue) => issue.keyword)).toEqual(["minLength", "enum"]);
   expect(user["~standard"].vendor).toBe("dotschema");
   expect([address.is({ city: "Paris" }), address.is({ city: "" })]).toEqual([true, false]);
+  expect(user.pick("name", "role").validate({ name: "Ada" }).issues.map((issue) => issue.message)).toEqual(["must have required property 'role'"]);
   expect([point.is({ x: 1, y: 2 }), point.is({ x: 1.5, y: 2 })]).toEqual([true, false]);
   // team.schema.jsonc refers to user.schema.jsonc and shared/place.schema.jsonc.
   expect(team.validate({ lead: { name: "Ada", role: "admin" }, members: [{ name: "", role: "member" }] }).issues[0].path).toEqual(["members", 0, "name"]);

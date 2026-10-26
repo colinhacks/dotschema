@@ -32,7 +32,7 @@ test("the module validates with ajv's standalone code and imports nothing", asyn
   assert.equal(user["~standard"].version, 1);
   assert.equal(user["~standard"].vendor, "dotschema");
   assert.equal(user.schema.title, "User");
-  assert.deepEqual(Object.keys(user), ["validate", "is", "schema", "~standard"]);
+  assert.deepEqual(Object.keys(user), ["validate", "is", "schema", "~standard", "pick", "omit"]);
 });
 
 test(".validate() reports every issue, each with ajv's message and keyword and its path, and nothing else", async () => {
@@ -247,8 +247,10 @@ test("the types name the root for its file, export it as Type too, and write its
   assert.match(types, /\ndeclare namespace schema \{ export type \{ User as Type \}; \}\nexport default schema;\n/);
   assert.match(types, /\ntype Json = \{ readonly \$schema: "https:\/\/json-schema.org\/draft\/2020-12\/schema";/);
   // The schema as written is a type of its own, so an error or a hover prints `Json` in its place;
-  // the root's type is written out, so a hover over a value prints its properties.
-  assert.match(types, /\ndeclare const schema: __DotschemaSchema<\{\n  name: string;\n[^]*?\n\}, Json>;\n/);
+  // the root's type is written out, so a hover over a value prints its properties. A plain object is
+  // an ObjectSchema, with .pick() and .omit() over the keys its properties and required name.
+  assert.match(types, /\ndeclare const schema: __DotschemaObjectSchema<\{\n  name: string;\n[^]*?\n\}, Json, "name" \| "tags">;\n/);
+  assert.match(types, /\nimport type \{ ObjectSchema as __DotschemaObjectSchema \} from "dotschema";\n/);
 });
 
 test("a schema is JSONC: comments and trailing commas are read in both texts", async () => {
@@ -292,7 +294,7 @@ test("a /** */ comment before a property's key is its doc comment in the module'
   assert.deepEqual(problems, []);
   // On the root's declaration and in the default export's type, where a hover over a value finds it.
   assert.match(types, /\ninterface User \{\n  \/\*\* The user's full name\. \*\/\n  name: string;\n/);
-  assert.match(types, /\ndeclare const schema: __DotschemaSchema<\{\n  \/\*\* The user's full name\. \*\/\n  name: string;\n/);
+  assert.match(types, /\ndeclare const schema: __DotschemaObjectSchema<\{\n  \/\*\* The user's full name\. \*\/\n  name: string;\n/);
   // A JSON5 file's own comments, in its module.
   assert.match(schemaTypes(readFileSync(join(dir, "place.schema.json5"), "utf8"), join(dir, "place.schema.json5")).types, /\n  \/\*\* The city, as its residents spell it\. \*\/\n  city\?: string \| undefined;\n/);
   // The comment is no keyword: the schema the module exports holds none.
