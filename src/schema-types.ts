@@ -91,8 +91,16 @@ function typeName(key: string, taken: Set<string>): string {
  */
 export const LITERAL_NAME = "Json";
 
-/** The names a schema's module declares: one per entry of its `$defs` and `definitions`, keyed `<keyword>\0<key>`, besides `Type` and `Json`. */
-function definitionNames(root: Value): { names: Map<string, string>; definitions: [string, Value][]; taken: Set<string> } {
+/** The name of a schema file's root type: the file's name in PascalCase, `user.schema.jsonc` giving `User`. */
+const fileTypeName = (path: string, taken: Set<string>): string => typeName(basename(path).replace(/\.schema\.json[c5]$/, ""), taken);
+
+/**
+ * The names a schema's module declares: one per entry of its `$defs` and `definitions`, keyed
+ * `<keyword>\0<key>`, then its root's, named for the file (`Type` when there is no file), besides
+ * `Type` and `Json`. The definitions are named first, so a definition's name is its key whatever the
+ * file is called, and the root, which is exported as `Type` as well, is the one that gives way.
+ */
+function definitionNames(root: Value, path?: string): { rootName: string; names: Map<string, string>; definitions: [string, Value][]; taken: Set<string> } {
   const taken = new Set(["Type", LITERAL_NAME, "__DotschemaSchema"]);
   const names = new Map<string, string>();
   const definitions: [string, Value][] = [];
@@ -107,7 +115,8 @@ function definitionNames(root: Value): { names: Map<string, string>; definitions
       }
     }
   }
-  return { names, definitions, taken };
+  const rootName = path === undefined ? "Type" : fileTypeName(path, taken);
+  return { rootName, names, definitions, taken };
 }
 
 /** The other schema files a schema's `$ref`s reach, so that a reference to one is typed by its module. */
@@ -119,7 +128,7 @@ export interface SchemaFiles {
 }
 
 /** A schema file whose pointers a reference can follow: the root's own, or another file's, whose names are imported. */
-type Document = { schema: Value; path: string | undefined; names: Map<string, string>; own: boolean };
+type Document = { schema: Value; path: string | undefined; rootName: string; names: Map<string, string>; own: boolean };
 
 /**
  * The keywords that evaluate properties in place, beside `properties` and `patternProperties`: a
@@ -176,7 +185,10 @@ function propertyTest(test: Value | undefined): { key: string; values: Primitive
 export type Draft = "draft-07" | "2019-09" | "2020-12";
 
 /**
- * The root `Type` and one named declaration per definition, as module text. With `files`, a `$ref`
+ * The root's declaration and one named declaration per definition, as module text. With `files`,
+ * the root is named for the file (`user.schema.jsonc` declares `User`), so a hover or an error that
+ * reaches it through a `$ref` prints that name, and `Type` is exported as an alias of it; without,
+ * the root is `Type`. With `files`, a `$ref`
  * to another schema file is typed by that file's module: its `Type`, or the type it declares for
  * the definition the reference points to, imported under a name of this module's choosing; a
  * pointer to anything else there is inlined from the file. Without `files`, such a `$ref` is `unknown`.
@@ -185,11 +197,16 @@ export type Draft = "draft-07" | "2019-09" | "2020-12";
  * 2019-09; without, every keyword is read.
  */
 export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Draft): string {
+  return schemaModuleTypes(root, files, draft).declarations;
+}
+
+/** The declarations, as `schemaDeclarations` writes them, and the root's type as text, which the module's default export takes so a hover prints its properties. */
+export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft): { declarations: string; rootType: string } {
   const prefixItems = draft === undefined || draft === "2020-12";
   const itemLists = draft === undefined || draft !== "2020-12";
   const unevaluated = draft === undefined || draft !== "draft-07";
-  const { names, definitions, taken } = definitionNames(root);
-  const main: Document = { schema: root, path: files?.path, names, own: true };
+  const { rootName, names, definitions, taken } = definitionNames(root, files?.path);
+  const main: Document = { schema: root, path: files?.path, rootName, names, own: true };
   const documents = new Map<string, Document>();
   // The types imported from other files: specifier, then exported name, then the name used here.
   const imports = new Map<string, Map<string, string>>();
@@ -204,7 +221,8 @@ export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Dra
     if (!document) {
       const schema = files!.read(path);
       if (schema === undefined) return undefined;
-      document = { schema, path, names: definitionNames(schema).names, own: false };
+      const { rootName, names } = definitionNames(schema, path);
+      document = { schema, path, rootName, names, own: false };
       documents.set(path, document);
     }
     return document;
@@ -212,15 +230,17 @@ export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Dra
 
   /** `exported`, a name `document`'s module declares, as a name in this module: itself, or the name it is imported under. */
   function nameIn(document: Document, exported: string): string {
-    if (document.own) return exported;
+    // A file's root is imported by the name its module declares it under, never by its `Type`
+    // alias, so a hover in this module prints `User` for `./user.schema.jsonc` and not `Type`.
+    const declared = exported === "Type" ? document.rootName : exported;
+    if (document.own) return declared;
     const specifier = specifierOf(files!.path, document.path!);
     let byName = imports.get(specifier);
     if (!byName) imports.set(specifier, (byName = new Map()));
-    let local = byName.get(exported);
+    let local = byName.get(declared);
     if (local === undefined) {
-      // Another file's `Type` is named for the file: `./address.schema.jsonc` gives `Address`.
-      local = typeName(exported === "Type" ? basename(document.path!).replace(/\.schema\.json[c5]$/, "") : exported, taken);
-      byName.set(exported, local);
+      local = typeName(declared, taken);
+      byName.set(declared, local);
     }
     return local;
   }
@@ -461,11 +481,13 @@ export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Dra
     return meaningful.length === 1 ? meaningful[0]! : meaningful.map(paren).join(" & ");
   }
 
-  const declare = (name: string, schema: Value) => {
-    const type = emit(schema, "");
+  const declare = (name: string, schema: Value, type = emit(schema, "")) => {
     return objectLiteral(type) ? `${doc(schema, "")}export interface ${name} ${type}` : `${doc(schema, "")}export type ${name} = ${type};`;
   };
-  const declarations = [declare("Type", root), ...definitions.map(([name, schema]) => declare(name, schema))].join("\n\n");
+  const rootType = emit(root, "");
+  // A re-export rather than `type Type = User`, whose name a hover would print in place of `User`.
+  const alias = rootName === "Type" ? [] : [`export type { ${rootName} as Type };`];
+  const declarations = [[declare(rootName, root, rootType), ...alias].join("\n"), ...definitions.map(([name, schema]) => declare(name, schema))].join("\n\n");
   const lines = [...imports].map(([specifier, byName]) => `import type { ${[...byName].map(([exported, local]) => (exported === local ? exported : `${exported} as ${local}`)).join(", ")} } from ${JSON.stringify(specifier)};`);
-  return lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations;
+  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootType };
 }

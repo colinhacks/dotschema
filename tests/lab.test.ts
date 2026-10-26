@@ -45,9 +45,10 @@ test("a library that re-exports a schema module emits its declarations: the sche
   const declarations = readFileSync(join(out, "tests/fixtures/declaration/main.d.ts"), "utf8");
   // Here `dotschema` is this repository, so TypeScript names its types by a relative path; installed,
   // it names them `import("dotschema")`, which scripts/check-dist.ts checks.
-  assert.match(declarations, /user: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.Schema<import\("\.\/user\.schema\.jsonc"\)\.Type, \{\n\s+readonly type: "object";/);
+  // The module's default export writes its root's properties out, so the declarations do too.
+  assert.match(declarations, /user: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.Schema<\{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\s+\}, \{\n\s+readonly type: "object";/);
   assert.doesNotMatch(declarations, /\bJson\b/);
-  assert.match(declarations, /export declare const check: \(value: unknown\) => value is import\("\.\/user\.schema\.jsonc"\)\.Type;/);
+  assert.match(declarations, /export declare const check: \(value: unknown\) => value is \{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\};/);
   rmSync(out, { recursive: true, force: true });
 });
 

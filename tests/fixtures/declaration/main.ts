@@ -1,4 +1,4 @@
-// A library that re-exports a schema module: its declarations must name the module's types.
+// A library that re-exports a schema module: its declarations must name `Schema` and write out the module's types.
 import user from "./user.schema.jsonc";
 import scores from "./scores.schema.jsonc";
 

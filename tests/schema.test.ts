@@ -238,20 +238,22 @@ test("ajv is set to check the schema as written: a property is the value's own, 
   assert.deepEqual(await verdicts({ type: "integer", multipleOf: 3 }, [9, 10, 9007199254740990]), [true, false, true]);
 });
 
-test("the types name the root Type whatever its title", () => {
+test("the types name the root for its file, export it as Type too, and write its properties out in the default export's type", () => {
   const { types, problems } = schemaTypes(SCHEMA, PATH);
   assert.deepEqual(problems, []);
-  assert.match(types, /export interface Type \{/);
+  // user.schema.jsonc declares `User`, so a `$ref` to it from another file prints `User`.
+  assert.match(types, /\nexport interface User \{\n  name: string;\n[^]*?\n\}\nexport type \{ User as Type \};\n/);
   assert.match(types, /\ntype Json = \{ readonly \$schema: "https:\/\/json-schema.org\/draft\/2020-12\/schema";/);
-  // The schema as written is a type of its own, so an error or a hover prints `Schema<Type, Json>`.
-  assert.match(types, /\ndeclare const schema: __DotschemaSchema<Type, Json>;\n/);
+  // The schema as written is a type of its own, so an error or a hover prints `Json` in its place;
+  // the root's type is written out, so a hover over a value prints its properties.
+  assert.match(types, /\ndeclare const schema: __DotschemaSchema<\{\n  name: string;\n[^]*?\n\}, Json>;\n/);
 });
 
 test("a schema is JSONC: comments and trailing commas are read in both texts", async () => {
   const source = '{\n  // a user\n  "type": "object",\n  "properties": { "name": { "type": "string" }, },\n  "required": ["name"], /* closed */ "additionalProperties": false,\n}';
   const typed = schemaTypes(source, PATH);
   assert.deepEqual(typed.problems, []);
-  assert.match(typed.types, /export interface Type \{\n  name: string;\n\}/);
+  assert.match(typed.types, /export interface User \{\n  name: string;\n\}/);
   const { code, problems } = schemaCode(source, PATH);
   assert.deepEqual(problems, []);
   const { default: user } = await evaluate(code);
@@ -264,7 +266,7 @@ test("a .schema.json5 schema is JSON5 in both texts, and the suffix names the di
   const source = "// a user\n{\n  type: 'object',\n  properties: { name: { type: 'string', maxLength: 0x4 }, },\n  required: ['name'],\n  additionalProperties: false,\n}\n";
   const typed = schemaTypes(source, path);
   assert.deepEqual(typed.problems, []);
-  assert.match(typed.types, /export interface Type \{\n  name: string;\n\}/);
+  assert.match(typed.types, /export interface User \{\n  name: string;\n\}/);
   const { code, problems } = schemaCode(source, path);
   assert.deepEqual(problems, []);
   const { default: user } = await evaluate(code);
@@ -307,13 +309,14 @@ test("a $ref to another file is followed: its type is imported from that file's 
   });
   const typed = schemaTypes(source, path);
   assert.deepEqual(typed.problems, []);
-  // The definition keeps the name its own module gives it; the other files' roots are named for their files.
-  assert.match(typed.types, /^import type \{ Tag, Type as Tag2 \} from "\.\/shared\/tag\.schema\.jsonc";\nimport type \{ Type as Point \} from "\.\/point\.schema\.json5";$/m);
+  // The definition keeps the name its own module gives it, and a file's root is imported by the name its module declares,
+  // its file's (shared/tag.schema.jsonc's root gives way to its definition `tag` and is `Tag2`).
+  assert.match(typed.types, /^import type \{ Tag, Tag2 \} from "\.\/shared\/tag\.schema\.jsonc";\nimport type \{ Point \} from "\.\/point\.schema\.json5";$/m);
   // A pointer that is not a definition is inlined from the other file, its own references imported.
-  assert.match(typed.types, /export interface Type \{\n  tag: Tag;\n  group\?: Tag2 \| undefined;\n  label\?: Tag \| undefined;\n  at\?: Point \| undefined;\n\}/);
+  assert.match(typed.types, /export interface User \{\n  tag: Tag;\n  group\?: Tag2 \| undefined;\n  label\?: Tag \| undefined;\n  at\?: Point \| undefined;\n\}/);
   const tag = join(dir, "shared/tag.schema.jsonc");
   const tagTypes = schemaTypes(readFileSync(tag, "utf8"), tag);
-  assert.match(tagTypes.types, /^import type \{ Type as User \} from "\.\.\/user\.schema\.jsonc";$/m);
+  assert.match(tagTypes.types, /^import type \{ User \} from "\.\.\/user\.schema\.jsonc";$/m);
 
   const { code, problems, watchFiles } = schemaCode(source, path);
   assert.deepEqual(problems, []);
@@ -399,17 +402,17 @@ test("a schema with no $schema is draft-07, and a later draft's keyword is ignor
   const source = JSON.stringify({ type: "array", prefixItems: [{ type: "string" }], contains: { const: 1 }, minContains: 2 });
   const typed = schemaTypes(source, PATH);
   assert.deepEqual(typed.problems, []);
-  assert.match(typed.types, /export type Type = unknown\[\];/);
+  assert.match(typed.types, /export type User = unknown\[\];/);
   const built = schemaCode(source, PATH);
   assert.deepEqual(built.problems, []);
   // draft-07 reads `contains` and neither `prefixItems` nor `minContains`.
   const { default: s } = await evaluate(built.code);
   assert.deepEqual([s.is([1]), s.is([2])], [true, false]);
   // Without `type`, a keyword the draft ignores does not make the type an array.
-  assert.match(schemaTypes(JSON.stringify({ prefixItems: [{ type: "string" }] }), PATH).types, /export type Type = unknown;/);
+  assert.match(schemaTypes(JSON.stringify({ prefixItems: [{ type: "string" }] }), PATH).types, /export type User = unknown;/);
   // Declared 2020-12, both are read.
   const declared = JSON.stringify({ $schema: "https://json-schema.org/draft/2020-12/schema", ...JSON.parse(source) });
-  assert.match(schemaTypes(declared, PATH).types, /export type Type = \[string\?, \.\.\.unknown\[\]\];/);
+  assert.match(schemaTypes(declared, PATH).types, /export type User = \[string\?, \.\.\.unknown\[\]\];/);
   const { default: t } = await evaluate(schemaCode(declared, PATH).code);
   assert.deepEqual([t.is([1]), t.is(["a", 1]), t.is(["a", 1, 1])], [false, false, true]);
 });
@@ -433,7 +436,7 @@ test("a keyword no draft defines is ignored in every draft: a vendor's, an unkno
     const draft = $schema ?? "no $schema";
     const typed = schemaTypes(source, PATH);
     assert.deepEqual(typed.problems, [], draft);
-    assert.match(typed.types, /export interface Type \{\n  name: string;\n  tags\?: string\[\] \| undefined;\n\}/, draft);
+    assert.match(typed.types, /export interface User \{\n  name: string;\n  tags\?: string\[\] \| undefined;\n\}/, draft);
     const { code, problems } = schemaCode(source, PATH);
     assert.deepEqual(problems, [], draft);
     const { default: s } = await evaluate(code);
@@ -460,7 +463,7 @@ test("a keyword ajv reads that the schema's draft does not define is ignored: $a
   await check({ $async: true, type: "object", properties: { name: { type: "string" } }, required: ["name"] }, [{ name: "a" }, { name: 1 }], [true, false]);
   await check({ type: "object", properties: { inner: { $async: true, type: "string" } } }, [{ inner: "a" }, { inner: 1 }], [true, false]);
   // OpenAPI 3.0's `nullable`: null is refused as `type` says, and the shapes ajv refused compile.
-  await check({ type: "string", nullable: true }, ["a", null], [true, false], /export type Type = string;/);
+  await check({ type: "string", nullable: true }, ["a", null], [true, false], /export type User = string;/);
   await check({ nullable: true, const: "a" }, ["a", null], [true, false]);
   await check({ type: ["string", "null"], nullable: false }, ["a", null], [true, true]);
   await check({ type: "string", nullable: "yes" }, ["a", null], [true, false]);
@@ -658,7 +661,7 @@ test("a schema outside any project that installs ajv still validates: ajv is dot
   writeFileSync(path, SCHEMA);
   const { types, problems } = schemaTypes(SCHEMA, path);
   assert.deepEqual(problems, []);
-  assert.match(types, /export interface Type \{\n  name: string;\n  tags\?: \{\n    \[key: string\]: unknown;\n  \}\[\] \| undefined;\n\}/);
+  // The file names the root, not the schema's title.\n  assert.match(types, /export interface A \{\n  name: string;\n  tags\?: \{\n    \[key: string\]: unknown;\n  \}\[\] \| undefined;\n\}/);
   const { code, problems: codeProblems } = schemaCode(SCHEMA, path);
   assert.deepEqual(codeProblems, []);
   assert.doesNotMatch(code, /^import /m);

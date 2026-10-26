@@ -21,7 +21,7 @@ import { CODES, type Problem } from "./core/problems.ts";
 import { literal, toJs, type Value } from "./core/serialize.ts";
 import { parseSchemaFile } from "./parse.ts";
 import { collect, dynamicRefProblems, eachSchema, embeddedIdProblems, fileOf, forAjv, mapSchemas, pointer, pointTo, withoutKeywords, type Files } from "./refs.ts";
-import { LITERAL_NAME, schemaDeclarations, type Draft } from "./schema-types.ts";
+import { LITERAL_NAME, schemaModuleTypes, type Draft } from "./schema-types.ts";
 import { jsonSchemas } from "./json-schema.ts";
 
 const FAILED_TYPES = ["declare const schema: any;", "export default schema;", "export type Type = any;", ""].join("\n");
@@ -319,14 +319,18 @@ export function schemaTypes(source: string, path: string): { types: string; prob
     const compiled = compile(loaded.ajv, files, path);
     if ("problem" in compiled) problems.push(compiled.problem);
   }
+  const { declarations, rootType } = schemaModuleTypes(files.schemas.get(path)!, { path, read: (other) => files.schemas.get(other) }, draft);
   return {
     types: [
       `import type { Schema as __DotschemaSchema } from "dotschema";`,
-      schemaDeclarations(files.schemas.get(path)!, { path, read: (other) => files.schemas.get(other) }, draft),
-      // The schema as written, under a name of its own, so an error or a hover prints `Schema<Type, Json>`.
+      declarations,
+      // The schema as written, under a name of its own, so an error or a hover prints `Json` in its place.
       `/** The JSON Schema as written in ${basename(path).replace(/\*\//g, "*\\/")}. */`,
       `type ${LITERAL_NAME} = ${literal(schema)};`,
-      `declare const schema: __DotschemaSchema<Type, ${LITERAL_NAME}>;`,
+      // The root's type written out rather than named, so a hover over a value `.validate()` or `.is()`
+      // gives prints the schema's properties, and a `$ref` within them by its name (the maintainer, on
+      // 2026-10-26: "People want to see the actual properties for visibility").
+      `declare const schema: __DotschemaSchema<${rootType}, ${LITERAL_NAME}>;`,
       "export default schema;",
       "",
     ].join("\n"),
