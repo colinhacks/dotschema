@@ -1,6 +1,48 @@
-# dotschema
+<h1 align="center">dotschema</h1>
 
-Import a JSON Schema file into TypeScript and get the type it describes and a validator for it.
+<p align="center">Import <code>.schema.jsonc</code> files into TypeScript, fully typed</p>
+
+<p align="center">
+  <a href="https://github.com/colinhacks/dotschema/actions/workflows/test.yml"><img src="https://github.com/colinhacks/dotschema/actions/workflows/test.yml/badge.svg?branch=main" alt="test status" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/github/license/colinhacks/dotschema?style=flat" alt="License: MIT" /></a>
+  <a href="https://www.npmjs.com/package/dotschema"><img src="https://img.shields.io/npm/v/dotschema" alt="npm version" /></a>
+</p>
+
+<br/>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/colinhacks/dotschema/main/assets/readme-demo.gif" alt="An editor: hovering a value that user.is() narrowed shows its type, which follows the JSON Schema as the schema changes" />
+</p>
+
+<br/>
+
+If you have a JSON Schema like this:
+
+```jsonc
+// user.schema.jsonc
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "role": { "enum": ["admin", "member"] }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}
+```
+
+You can import it directly from a TypeScript file, and get its type and a validator:
+
+```ts
+// main.ts
+import user from "./user.schema.jsonc";
+
+const data = await request.json();
+
+if (user.is(data)) {
+  data; // { name: string; role?: "admin" | "member" | undefined }
+}
+```
 
 It's powered by TypeScript's [_content mappers_](https://github.com/microsoft/typescript-go/pull/4712) (introduced in TypeScript 7.1), which let a package give `tsc` the types of a file it imports. The validator is compiled by [ajv](https://ajv.js.org) when the module is built, so a bundle carries the validator and no validator library.
 
@@ -253,22 +295,7 @@ Zed doesn't send schema files to the language server, so an error inside one sho
 
 ## Usage
 
-A `.schema.jsonc` file holds a JSON Schema, with comments allowed:
-
-```jsonc
-{
-  // a user of the app
-  "type": "object",
-  "properties": {
-    "name": { "type": "string", "minLength": 1 },
-    "role": { "enum": ["admin", "member"] }
-  },
-  "required": ["name"],
-  "additionalProperties": false
-}
-```
-
-Importing it gives a validator, whose `.validate()` method returns the value or every issue:
+The `.validate()` method returns the value or every issue:
 
 ```ts
 import user from "./user.schema.jsonc";
@@ -279,15 +306,7 @@ if (result.issues) {
   // [{ message: "must NOT have fewer than 1 characters", path: ["name"], keyword: "minLength" }]
   console.log(result.issues);
 } else {
-  result.value; // { name: string; role?: "admin" | "member" }
-}
-```
-
-The `.is()` method checks a value and narrows it:
-
-```ts
-if (user.is(input)) {
-  input.role; // "admin" | "member" | undefined
+  result.value; // { name: string; role?: "admin" | "member" | undefined }
 }
 ```
 

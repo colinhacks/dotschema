@@ -26,6 +26,7 @@ The dotschema package types `.schema.jsonc` and `.schema.json5` imports: each be
 | `.github/workflows/release.yml`, `.github/scripts/npm-stage-publish.sh` | The release, Motherload's and Zod's: dispatched by hand from `main`, it checks, builds and stages `dotschema` on npm through stage-only trusted publishing, waits for the maintainer's 2FA approval, then creates the GitHub release ([DESIGN.md](./DESIGN.md#releasing)); `.github/workflows/test.yml` runs the checks on every push |
 | `scripts/bump.ts`, `scripts/npm-first-publish.sh` | The version, written into `package.json` by `nub run bump <version>`; and the script the maintainer runs once before the first release, which configures the npm trusted publisher of `dotschema` (npm already holds the package, a 0.0.0 placeholder) |
 | `README.md` | The only documentation, also published to npm: absolute links only, and nothing about the repository's internals |
+| `assets/readme-demo.gif` | The README's demo, linked by its absolute URL on GitHub and not published to npm: an HTML page of `main.ts` and `user.schema.jsonc` drawn frame by frame, every type in it printed by the TypeScript 7.1 language server through dotschema, by a generator kept outside the repository (`~/Documents/scratch/dotschema-demo/gen.mjs`, on the model of Reylo's README demo) |
 
 The `package.json` links `dotschema` to the repository itself (`link:.`), because a mapper package does not resolve through self-reference. It is private and points at the TypeScript sources; only `dist/dotschema` is published.
 
