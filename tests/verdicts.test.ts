@@ -186,7 +186,7 @@ const pets = (variants: unknown[], extra: object = {}) => ({ $schema: D2020, typ
 const CAT = { properties: { kind: { const: "cat" }, lives: { type: "integer" } }, required: ["lives"] };
 const DOG = { properties: { kind: { enum: ["dog"] }, bark: { type: "string" } }, required: ["bark"] };
 
-test("the discriminator is added through a $ref, in another file, and in a nested union, and only where ajv's rules hold", async () => {
+test("the discriminator is added through a $ref, to a pointer or an anchor, in another file, and in a nested union, and only where ajv's rules hold", async () => {
   const tagged = async (schema: unknown, path = PATH, source = JSON.stringify(schema)) => {
     await build(source, path);
     return discriminators(source, path) === 1;
@@ -197,6 +197,15 @@ test("the discriminator is added through a $ref, in another file, and in a neste
   assert.equal(await tagged({ ...pets([{ $ref: "#/$defs/cat" }, DOG]), $defs: { cat: CAT } }), true);
   const other = project({ "pet.schema.jsonc": pets([{ $ref: "./cat.schema.jsonc" }, DOG]), "cat.schema.jsonc": CAT }, "pet.schema.jsonc");
   assert.equal(await tagged(undefined, other.path, other.source), true);
+  // A variant that is a $ref to an anchor, in the file and in another file.
+  const anchored = { ...pets([{ $ref: "#cat" }, DOG]), $defs: { cat: { $anchor: "cat", ...CAT } } };
+  assert.equal(await tagged(anchored), true);
+  const { module: byAnchor } = await build(JSON.stringify(anchored));
+  // Only the dog's issue, not the cat's `lives` or its `const`, nor the oneOf's.
+  assert.deepEqual(byAnchor.validate({ pet: { kind: "dog" } }).issues?.map(({ path, keyword }) => [path, keyword]), [[["pet", "bark"], "required"]]);
+  assert.deepEqual(byAnchor.validate({ pet: { kind: "cat" } }).issues?.map(({ path, keyword }) => [path, keyword]), [[["pet", "lives"], "required"]]);
+  const otherAnchor = project({ "pet.schema.jsonc": pets([{ $ref: "./cat.schema.jsonc#cat" }, DOG]), "cat.schema.jsonc": { $schema: D2020, $defs: { cat: { $anchor: "cat", ...CAT } } } }, "pet.schema.jsonc");
+  assert.equal(await tagged(undefined, otherAnchor.path, otherAnchor.source), true);
   // Where ajv's discriminator would not give the oneOf's verdict, or would refuse the schema: the flat list.
   for (const [schema, why] of [
     [{ ...pets([CAT, DOG]), properties: { pet: { required: ["kind"], oneOf: [CAT, DOG] } } }, "no type: object, so a number would pass"],
@@ -223,6 +232,7 @@ test("with the discriminator, every value gets the verdict the oneOf as written 
     { path: EVENT, source: readFileSync(EVENT, "utf8") },
     { path: PATH, source: JSON.stringify(pets([CAT, DOG])) },
     { path: PATH, source: JSON.stringify({ ...pets([{ $ref: "#/$defs/cat" }, DOG]), $defs: { cat: CAT } }) },
+    { path: PATH, source: JSON.stringify({ ...pets([{ $ref: "#cat" }, DOG]), $defs: { cat: { $anchor: "cat", ...CAT } } }) },
   ];
   for (const { path, source } of cases) {
     const tagged = await build(source, path);

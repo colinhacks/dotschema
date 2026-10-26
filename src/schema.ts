@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { CODES, type Problem } from "./core/problems.ts";
 import { literal, toJs, type Value } from "./core/serialize.ts";
 import { parseSchemaFile } from "./parse.ts";
-import { collect, dynamicRefProblems, eachSchema, embeddedIdProblems, fileOf, forAjv, mapSchemas, pointer, pointTo, withoutKeywords, type Files } from "./refs.ts";
+import { collect, dynamicRefProblems, eachSchema, embeddedIdProblems, fileOf, forAjv, fragmentPath, mapSchemas, pointTo, withoutKeywords, type Files } from "./refs.ts";
 import { LITERAL_NAME, schemaModuleTypes, type Draft } from "./schema-types.ts";
 import { jsonSchemas } from "./json-schema.ts";
 
@@ -222,12 +222,12 @@ export function needsConfirmation(files: Files): boolean {
   return found;
 }
 
-/** The value a `$ref` in the file `from` points to, among the files the validator is compiled from; undefined for an anchor, a URL or nothing. */
+/** The value a `$ref` in the file `from` points to, among the files the validator is compiled from, by a JSON Pointer or an anchor (`fragmentPath`); undefined for a URL or nothing. */
 function refTarget(files: Files, ref: string, from: string): Value | undefined {
   const other = fileOf(ref, from);
   const [file, fragment] = other ? [other.path, other.fragment] : ref.startsWith("#") ? [from, ref.slice(1)] : [undefined, ""];
   const schema = file === undefined ? undefined : files.schemas.get(file);
-  const segments = pointer(fragment);
+  const segments = schema === undefined ? undefined : fragmentPath(schema, fragment);
   return schema === undefined || !segments ? undefined : pointTo(schema, segments);
 }
 
