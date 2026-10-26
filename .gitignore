@@ -10,3 +10,11 @@ coverage/
 
 # Lab emit output
 lab/**/dist/
+
+# Next.js output in the Next.js lab
+lab/nextjs/.next/
+lab/nextjs/next-env.d.ts
+lab/nextjs/tsconfig.tsbuildinfo
+
+# workerd's local state in the Cloudflare lab (dist/ is ignored above)
+lab/cloudflare/.wrangler/

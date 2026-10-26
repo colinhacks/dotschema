@@ -1,0 +1,5 @@
+# dotschema's preload for `bun main.ts`, and for `bun test`
+preload = ["dotschema/register"]
+
+[test]
+preload = ["dotschema/register"]

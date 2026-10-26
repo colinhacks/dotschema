@@ -1,11 +1,17 @@
 // The end-to-end checks: the type check through TypeScript's content mapper, the preload, and the
-// esbuild plugin, on lab/basic; diagnostics placed in broken schema files; and a library's
-// declarations.
+// esbuild plugin, on lab/basic; diagnostics placed in broken schema files; a library's
+// declarations; and lab/basic's schemas in every other host: nub and Bun (lab/nub, lab/bun), the
+// webpack loader under webpack and Rspack and the Vite plugin under Vite (for Node and the
+// browser), Rollup and Rolldown (lab/bundlers), Next.js with Turbopack and with webpack
+// (lab/nextjs), Jest and Vitest (lab/jest), and a Cloudflare Worker built and served by Vite in
+// workerd (lab/cloudflare). Each of those labs has its own dependencies, installed with
+// `nub install` in it, and its tests are skipped where it is not installed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { ROOT, run, TSC } from "./helpers.ts";
 
 test("lab/basic type-checks through the content mapper", () => {
@@ -74,3 +80,173 @@ test("lab/basic bundles with the esbuild plugin and runs with nothing installed"
   assert.equal(ran.status, 0, ran.out);
   for (const expected of EXPECTED) assert.ok(ran.out.includes(expected), ran.out);
 });
+
+/** A lab's tests are skipped until `nub install` has run in it. */
+const installed = (lab: string): string | false => (existsSync(`${ROOT}lab/${lab}/node_modules`) ? false : `lab/${lab} is not installed: run \`nub install\` in lab/${lab}`);
+const missing = (tool: string): string | false => (spawnSync(tool, ["--version"]).status === 0 ? false : `${tool} is not installed`);
+
+/** Runs a bundle copied alone into an empty directory, so that nothing it could require is installed above it. */
+function runAlone(file: string): { status: number | null; out: string } {
+  const dir = mkdtempSync(join(tmpdir(), "dotschema-alone-"));
+  try {
+    copyFileSync(file, join(dir, basename(file)));
+    return run(process.execPath, [basename(file)], dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// lab/nub: the preload from nub.jsonc, with no flag.
+test("lab/nub runs lab/basic and a test under the preload nub.jsonc names", { skip: missing("nub") }, () => {
+  const ran = run("nub", ["main.ts"], `${ROOT}lab/nub`);
+  assert.equal(ran.status, 0, ran.out);
+  for (const expected of EXPECTED) assert.ok(ran.out.includes(expected), ran.out);
+  const tested = run("nub", ["--test"], `${ROOT}lab/nub`);
+  assert.equal(tested.status, 0, tested.out);
+  assert.match(tested.out, /ℹ pass 1\nℹ fail 0/);
+});
+
+test("control: under NODE_COMPAT=1 nub runs as plain Node, reads no nub.jsonc, and cannot import a schema", { skip: missing("nub") }, () => {
+  const ran = run("nub", ["main.ts"], `${ROOT}lab/nub`, { NODE_COMPAT: "1" });
+  assert.notEqual(ran.status, 0);
+  assert.match(ran.out, /ERR_UNKNOWN_FILE_EXTENSION.*\.jsonc/);
+});
+
+// lab/bun: the preload from bunfig.toml, and Bun.build with the esbuild plugin.
+test("lab/bun runs lab/basic and a test under the preload bunfig.toml names, and bundles it with Bun.build", { skip: missing("bun") }, () => {
+  const ran = run("bun", ["main.ts"], `${ROOT}lab/bun`);
+  assert.equal(ran.status, 0, ran.out);
+  for (const expected of EXPECTED) assert.ok(ran.out.includes(expected), ran.out);
+  const tested = run("bun", ["test"], `${ROOT}lab/bun`);
+  assert.equal(tested.status, 0, tested.out);
+  assert.match(tested.out, / 1 pass\n 0 fail/);
+  rmSync(`${ROOT}lab/bun/dist`, { recursive: true, force: true });
+  const built = run("bun", ["build.ts"], `${ROOT}lab/bun`);
+  assert.equal(built.status, 0, built.out);
+  assert.match(built.out, /success=true outputs=dist\/main\.js/);
+  const alone = runAlone(`${ROOT}lab/bun/dist/main.js`);
+  assert.equal(alone.status, 0, alone.out);
+  for (const expected of EXPECTED) assert.ok(alone.out.includes(expected), alone.out);
+});
+
+// lab/bundlers: lab/basic's schemas through dotschema/webpack and dotschema/vite.
+const BUNDLERS = `${ROOT}lab/bundlers`;
+for (const [bundler, through, file] of [["webpack", "the webpack loader", "main.cjs"], ["rspack", "the webpack loader", "main.cjs"], ["vite", "the Vite plugin", "main.mjs"], ["vite-browser", "the Vite plugin, for the browser", "main.mjs"], ["rollup", "the Vite plugin", "main.mjs"], ["rolldown", "the Vite plugin", "main.mjs"]] as const) {
+  test(`lab/bundlers bundles with ${bundler} through ${through}, and the bundle runs with nothing installed`, { skip: installed("bundlers") }, () => {
+    rmSync(`${BUNDLERS}/dist/${bundler}`, { recursive: true, force: true });
+    const built = run(process.execPath, ["build.mjs", bundler], BUNDLERS);
+    assert.equal(built.status, 0, built.out);
+    assert.match(built.out, /errors=0 warnings=0 node_modules=0/);
+    const ran = runAlone(`${BUNDLERS}/dist/${bundler}/${file}`);
+    assert.equal(ran.status, 0, ran.out);
+    for (const expected of EXPECTED) assert.ok(ran.out.includes(expected), ran.out);
+  });
+}
+
+test("lab/bundlers: the browser bundle has no new Function and no Node.js import, so a Content Security Policy without unsafe-eval allows it", { skip: installed("bundlers") }, () => {
+  if (!existsSync(`${BUNDLERS}/dist/vite-browser/main.mjs`)) assert.equal(run(process.execPath, ["build.mjs", "vite-browser"], BUNDLERS).status, 0);
+  const code = readFileSync(`${BUNDLERS}/dist/vite-browser/main.mjs`, "utf8");
+  assert.doesNotMatch(code, /new Function|\beval\(/);
+  assert.doesNotMatch(code, /from\s*["']node:|\bimport\(["']node:/);
+  // The one `require(` left is in a string: ajv's `.code` for its own code generation.
+  assert.ok([...code.matchAll(/require\(/g)].every((m) => code[m.index - 1] === "`" || code[m.index - 1] === "'" || code[m.index - 1] === '"'), "a require( outside a string");
+});
+
+test("lab/bundlers: Vite's, Rollup's and Rolldown's config types each take the plugin", { skip: installed("bundlers") }, () => {
+  const { status, out } = run(TSC, ["-p", "lab/bundlers/tsconfig.json"]);
+  assert.equal(out, "");
+  assert.equal(status, 0);
+});
+
+// lab/nextjs: a server component and a client component that import lab/basic's schemas.
+const NEXT_LAB = `${ROOT}lab/nextjs`;
+const NEXT = `${NEXT_LAB}/node_modules/.bin/next`;
+/** What the server component and the client component printed, as the build prerendered them. */
+const SERVER = { vendor: "dotschema", valid: true, issues: ["name: minLength", "email: format", "role: enum"], points: [true, false], team: [true, false], events: [true, false] };
+const CLIENT = ["name: must NOT have fewer than 1 characters", 'email: must match format "email"'];
+function prerendered(): { server: unknown; client: unknown } {
+  const html = readFileSync(`${NEXT_LAB}/.next/server/app/index.html`, "utf8").replaceAll("&quot;", '"');
+  return { server: JSON.parse(html.match(/id="server">([^<]*)/)![1]!), client: JSON.parse(html.match(/id="client">([^<]*)/)![1]!) };
+}
+
+test("lab/nextjs type-checks through the content mapper after next typegen", { skip: installed("nextjs") }, () => {
+  const typegen = run(NEXT, ["typegen"], NEXT_LAB);
+  assert.equal(typegen.status, 0, typegen.out);
+  const { status, out } = run(TSC, ["-p", "lab/nextjs/tsconfig.json", "--noEmit", "--runExternalCode"]);
+  assert.equal(out, "");
+  assert.equal(status, 0);
+});
+
+for (const args of [[], ["--webpack"]]) {
+  test(`lab/nextjs builds with ${args.length ? "webpack" : "Turbopack"}, its type check run by next build, the validators in the server's and the browser's modules`, { skip: installed("nextjs") }, () => {
+    rmSync(`${NEXT_LAB}/.next`, { recursive: true, force: true });
+    const built = run(NEXT, ["build", ...args], NEXT_LAB);
+    assert.equal(built.status, 0, built.out);
+    assert.match(built.out, /Completed runAfterProductionCompile/);
+    assert.deepEqual(prerendered(), { server: SERVER, client: CLIENT });
+    // The client component's validator is in a browser chunk.
+    const chunks = `${NEXT_LAB}/.next/static/chunks`;
+    const files = readdirSync(chunks, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".js"));
+    assert.ok(files.some((f) => readFileSync(join(chunks, f), "utf8").includes("must NOT have fewer than 1 characters")), "no browser chunk holds the validator");
+  });
+}
+
+// lab/jest: Jest's CommonJS and ES module runs through dotschema/jest, and Vitest through
+// dotschema/vite. Vitest colours its summary on CI's runners, and Jest under FORCE_COLOR; run()
+// strips the colour codes.
+const JEST_LAB = `${ROOT}lab/jest`;
+const jest = (config: string, extra: Record<string, string> = {}) => run(`${JEST_LAB}/node_modules/.bin/jest`, ["-c", config, "--ci", "--no-cache"], JEST_LAB, extra);
+
+test("lab/jest: a CommonJS test requires lab/basic's schemas through the Jest transformer", { skip: installed("jest") }, () => {
+  const { status, out } = jest("jest.cjs.config.cjs");
+  assert.equal(status, 0, out);
+  assert.match(out, /Tests:\s+1 passed, 1 total/);
+});
+
+test("lab/jest: CommonJS and ES module tests load lab/basic's schemas under --experimental-vm-modules", { skip: installed("jest") }, () => {
+  const { status, out } = jest("jest.esm.config.cjs", { NODE_OPTIONS: "--experimental-vm-modules" });
+  assert.equal(status, 0, out);
+  assert.match(out, /Tests:\s+2 passed, 2 total/);
+});
+
+test("lab/jest: with dotschema's pattern before a .jsonc transformer's, each file goes to its own", { skip: installed("jest") }, () => {
+  const { status, out } = jest("jest.interop.config.cjs");
+  assert.equal(status, 0, out);
+  assert.match(out, /Tests:\s+1 passed, 1 total/);
+});
+
+test("lab/jest: Vitest imports lab/basic's schemas through the Vite plugin", { skip: installed("jest") }, () => {
+  const { status, out } = run(`${JEST_LAB}/node_modules/.bin/vitest`, ["run"], JEST_LAB);
+  assert.equal(status, 0, out);
+  assert.match(out, /Tests\s+1 passed \(1\)/);
+});
+
+// lab/cloudflare: a Worker built with Vite and Cloudflare's plugin, run in workerd under the dev
+// server and as the build `wrangler deploy` would upload, with no Cloudflare account.
+const CLOUDFLARE = `${ROOT}lab/cloudflare`;
+const WORKER = {
+  get: { vendor: "dotschema", valid: true, issues: ["name: minLength", "email: format", "role: enum"], team: [true, false], events: [true, false] },
+  post: [400, { issues: [{ message: "must NOT have fewer than 1 characters", path: ["name"], keyword: "minLength" }, { message: "must be equal to one of the allowed values", path: ["role"], keyword: "enum" }] }],
+};
+
+test("lab/cloudflare type-checks through the content mapper", { skip: installed("cloudflare") }, () => {
+  const { status, out } = run(TSC, ["-p", "lab/cloudflare/tsconfig.json", "--noEmit", "--runExternalCode"]);
+  assert.equal(out, "");
+  assert.equal(status, 0);
+});
+
+for (const mode of ["dev", "preview"] as const) {
+  test(`lab/cloudflare: the Worker validates in workerd under vite ${mode}`, { skip: installed("cloudflare") }, () => {
+    if (mode === "preview") {
+      rmSync(`${CLOUDFLARE}/dist`, { recursive: true, force: true });
+      const built = run(`${CLOUDFLARE}/node_modules/.bin/vite`, ["build"], CLOUDFLARE);
+      assert.equal(built.status, 0, built.out);
+      assert.equal(built.out, "");
+      // workerd refuses new Function; the bundle's validators need none.
+      assert.doesNotMatch(readFileSync(`${CLOUDFLARE}/dist/dotschema_lab/index.js`, "utf8"), /new Function|\beval\(/);
+    }
+    const served = run(process.execPath, ["serve.mjs", mode], CLOUDFLARE);
+    assert.equal(served.status, 0, served.out);
+    assert.deepEqual(JSON.parse(served.out.trim().split("\n").at(-1)!), WORKER);
+  });
+}

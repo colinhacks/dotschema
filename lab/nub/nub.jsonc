@@ -1,0 +1,4 @@
+{
+  // dotschema's preload: `nub main.ts` and `nub --test` import schemas with no flag
+  "preload": ["dotschema/register"]
+}

@@ -1,10 +1,14 @@
-// The loader contract and its projections onto each host (Node's hooks, Bun, esbuild, the content
-// mapper), copied from Motherload's `@motherload/core` (packages/core/src/universal.ts at d21b5ac)
-// with its names changed to dotschema's (DESIGN.md, "The extraction from Motherload"). A loader
+// The loader contract and its projections onto each host (Node's hooks, Bun, esbuild, a webpack
+// loader for webpack, Rspack and Turbopack, a Vite plugin for Vite, Vitest, Rollup and Rolldown, a
+// Jest transformer, the content mapper), copied from Motherload's `@motherload/core`
+// (packages/core/src/universal.ts at d21b5ac, and its webpack, Vite and Jest adapters and the Bun
+// branch of its esbuild plugin at 099d7e2) with its names changed to dotschema's (DESIGN.md, "The
+// extraction from Motherload" and "The hosts"). A loader
 // names the extensions it reads, so that of the loaders in one host the one that claims the longer
 // suffix of a file loads it, as TypeScript routes it (`user.schema.jsonc` to dotschema, not to
 // Motherload's `.jsonc` loader), whatever order the host was given them in. The two global keys
 // below are Motherload's, kept as they are, so that its loaders and dotschema's see each other.
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CODES, type Problem } from "./problems.ts";
@@ -120,15 +124,17 @@ export async function register(plugin: LoaderPlugin): Promise<void> {
 
 // ---- esbuild ----------------------------------------------------------------------------------
 
+/**
+ * A module as an esbuild plugin's onLoad returns it, in the one shape esbuild and `Bun.build`, which
+ * takes esbuild's plugins, both accept, so that the plugin type-checks in either.
+ */
+type EsbuildModule = { contents: string; loader: "js"; watchFiles?: string[] };
 type EsbuildBuild = {
   initialOptions?: { plugins?: readonly unknown[] };
-  onLoad(
-    options: { filter: RegExp; namespace?: string },
-    callback: (args: { path: string; suffix?: string }) => { contents: string; loader: "js"; watchFiles?: string[] } | { errors: { text: string }[]; watchFiles?: string[] } | undefined,
-  ): void;
+  onLoad(options: { filter: RegExp; namespace?: string }, callback: (args: { path: string; suffix?: string }) => EsbuildModule | undefined): void;
 };
 
-/** The loader an esbuild plugin object was made from, so that plugins in one build can see each other; Motherload's key, kept as it is. */
+/** The loader a plugin object (esbuild's, Vite's) or a webpack loader's function was made from, so that the loaders in one build can see each other; Motherload's key, kept as it is. */
 const PLUGIN = Symbol.for("motherload.plugin");
 
 export function toEsbuildPlugin(plugin: LoaderPlugin): { name: string; setup(build: EsbuildBuild): void } {
@@ -146,11 +152,157 @@ export function toEsbuildPlugin(plugin: LoaderPlugin): { name: string; setup(bui
         // The files a module was made from are watched even when it fails, so fixing one rebuilds it.
         const result = plugin.load(readFileSync(args.path, "utf8"), args.path);
         const watchFiles = result.watchFiles ?? [];
-        if (result.problems.length) return { errors: [{ text: loadError(plugin, args.path, result.problems) }], watchFiles };
+        if (result.problems.length) {
+          const text = loadError(plugin, args.path, result.problems);
+          // `Bun.build` does not take an onLoad's `errors`: it fails with "onLoad plugins must return
+          // an object with "contents" as a string or Uint8Array" in place of the problem, so under
+          // Bun the problem is thrown, which Bun prints as it is (Motherload's finding, Bun 1.4.3).
+          if (process.versions.bun) throw new Error(text);
+          return { errors: [{ text }], watchFiles } as unknown as EsbuildModule;
+        }
         return { contents: result.code, loader: "js", watchFiles };
       });
     },
   } as { name: string; setup(build: EsbuildBuild): void };
+}
+
+// ---- webpack, Rspack and Turbopack: a webpack loader -----------------------------------------
+
+type WebpackLoaderContext = {
+  resourcePath: string;
+  resourceQuery?: string;
+  /** Every loader that runs on the resource, each module's function as `normal` once it has loaded. */
+  loaders?: readonly { normal?: unknown }[];
+  addDependency(file: string): void;
+};
+
+/**
+ * A loader for a rule that sends the plugin's files to it. Every rule that matches a file runs its
+ * loaders on it, one after another, so a file another loader on the resource claims more strongly
+ * (Motherload's `.jsonc` loader is outranked on `user.schema.jsonc`), or one with a query, passes
+ * through as it came: whichever order the two run in, the other one makes the module. Its siblings
+ * are the functions of the resource's other loaders, each marked with its plugin under
+ * `Symbol.for("motherload.plugin")`, as an esbuild plugin object is. Turbopack runs only the first
+ * rule that matches a file, so there the order of the rules decides (`withDotschema`, next.ts).
+ */
+export function toWebpackLoader(plugin: LoaderPlugin): (this: WebpackLoaderContext, source: string) => string {
+  function loader(this: WebpackLoaderContext, source: string): string {
+    const siblings = (this.loaders ?? []).flatMap((l) => ((l.normal as Record<symbol, unknown> | undefined)?.[PLUGIN] as LoaderPlugin | undefined) ?? []);
+    if (outranked(plugin, this.resourcePath, siblings) || this.resourceQuery) return source;
+    // Rspack loads a loader only when its turn comes (2.2.9's runLoaders), where webpack loads every
+    // loader on the resource before the first runs, so under Rspack a loader that runs before this
+    // one sees no mark of this one's and makes its own module of the file: with dotschema's rule
+    // first, Motherload's `.jsonc` loader runs first and hands dotschema a data module of
+    // `user.schema.jsonc` (measured on 2026-10-25). A loader this one outranks on the file is so a
+    // sign that `source` may be its module, and the file is read as it is on disk; under webpack,
+    // where that loader passes the file through, the two are the same text.
+    const mine = claim(plugin, this.resourcePath);
+    const weaker = siblings.some((other) => other !== plugin && claim(other, this.resourcePath) > 0 && claim(other, this.resourcePath) < mine);
+    const result = plugin.load(weaker ? readFileSync(this.resourcePath, "utf8") : source, this.resourcePath);
+    // The files a module was made from are watched even when it fails, so fixing one rebuilds it.
+    for (const file of result.watchFiles ?? []) this.addDependency(file);
+    if (result.problems.length) throw new Error(loadError(plugin, this.resourcePath, result.problems));
+    return result.code;
+  }
+  return Object.assign(loader, { [PLUGIN]: plugin });
+}
+
+// ---- Vite, Rollup and Rolldown: a Rollup-shaped plugin ---------------------------------------
+
+type RollupContext = { addWatchFile(id: string): void; error(message: string): never };
+
+/** The loaders among a host's plugins (a plugin or a list of them, nested), each plugin object marked as an esbuild plugin object is. */
+const marked = (plugins: unknown): LoaderPlugin[] => [plugins].flat(Infinity).flatMap((p) => ((p as Record<symbol, unknown> | null)?.[PLUGIN] as LoaderPlugin | undefined) ?? []);
+
+/**
+ * One `load` hook, which Vite, Rollup and Rolldown each take. `enforce: "pre"` runs it before
+ * Vite's own handling of a file type, and `moduleType: "js"` tells Rolldown, which reads a module's
+ * type from its extension, that the code is JavaScript; Rollup ignores both. An id with a query
+ * (`./user.schema.jsonc?raw`) is left to other plugins, as is a file another loader in the build
+ * claims more strongly: Vite hands its resolved plugins to `configResolved`, and Rollup and
+ * Rolldown their input options to `options`.
+ */
+export function toVitePlugin(plugin: LoaderPlugin): {
+  name: string;
+  enforce: "pre";
+  configResolved(config: { plugins: unknown }): void;
+  options(options: { plugins?: unknown }): null;
+  load(this: RollupContext, id: string): { code: string; map: null; moduleType: "js" } | null;
+} {
+  let siblings: LoaderPlugin[] = [];
+  return {
+    name: plugin.name,
+    enforce: "pre" as const,
+    [PLUGIN]: plugin,
+    configResolved(config: { plugins: unknown }) {
+      siblings = marked(config.plugins);
+    },
+    options(options: { plugins?: unknown }) {
+      if (options.plugins) siblings = marked(options.plugins);
+      return null;
+    },
+    load(this: RollupContext, id: string) {
+      if (/[?#]/.test(id) || !plugin.filter.test(id) || outranked(plugin, id, siblings)) return null;
+      const result = plugin.load(readFileSync(id, "utf8"), id);
+      // The files a module was made from are watched even when it fails, so fixing one rebuilds it.
+      for (const file of result.watchFiles ?? []) this.addWatchFile(file);
+      if (result.problems.length) this.error(loadError(plugin, id, result.problems));
+      return { code: result.code, map: null, moduleType: "js" };
+    },
+  } as ReturnType<typeof toVitePlugin>;
+}
+
+// ---- Jest: a transformer ---------------------------------------------------------------------
+
+type JestOptions = { supportsStaticESM?: boolean; configString?: string };
+
+/**
+ * A transformer for `transform` in Jest's config. Jest reads and compiles a test's modules itself,
+ * never through Node's loader, so the preload's hooks never see a schema file there, and a
+ * transformer is where Jest takes one. Its module is ESM when Jest loads the file as one
+ * (`--experimental-vm-modules` with the extension in `extensionsToTreatAsEsm`), and CommonJS
+ * otherwise. Jest keeps a transformer's output across runs, keyed by the file unless the
+ * transformer says otherwise, so the key is the module itself, which a change to a file the schema
+ * refers to, or a new version of ajv, changes. Jest runs only the first pattern of `transform` that
+ * matches a file, so there the order of the patterns decides.
+ */
+export function toJestTransformer(plugin: LoaderPlugin) {
+  const make = (source: string, path: string, options: JestOptions): string => {
+    const result = plugin.load(source, path);
+    if (result.problems.length) throw new Error(loadError(plugin, path, result.problems));
+    return options.supportsStaticESM ? result.code : commonJs(plugin, path, result.code);
+  };
+  return {
+    getCacheKey(source: string, path: string, options: JestOptions): string {
+      let code: string;
+      try {
+        code = make(source, path, options);
+      } catch (error) {
+        code = String(error);
+      }
+      return createHash("sha256").update(code).update(String(options.supportsStaticESM)).update(options.configString ?? "").digest("hex");
+    },
+    process(source: string, path: string, options: JestOptions): { code: string } {
+      return { code: make(source, path, options) };
+    },
+  };
+}
+
+/**
+ * A module as CommonJS. A schema module's one export is `export default schema;`, a line of its
+ * own at its end; the rest is declarations, the inlined CommonJS helpers wrapped in functions, and
+ * strings written with JSON.stringify, which never hold a line break. So each `export` at the start
+ * of a line is rewritten, stepping over strings for `import.meta.url`, as Motherload's transformer
+ * does for its data modules, and a module with any other import or export is refused.
+ */
+function commonJs(plugin: LoaderPlugin, path: string, code: string): string {
+  const out = code
+    .replace(/"(?:[^"\\]|\\.)*"|import\.meta\.url/g, (match) => (match.startsWith('"') ? match : 'require("node:url").pathToFileURL(__filename).href'))
+    .replace(/^export const (\w+) = /gm, "const $1 = exports.$1 = ")
+    .replace(/^export default /m, "exports.default = ")
+    .replace(/^export \{\};\n?/m, "");
+  if (/^(import|export)\b/m.test(out)) throw new Error(`${plugin.name}: ${path}: the module has a shape the Jest transformer cannot make CommonJS.`);
+  return `Object.defineProperty(exports, "__esModule", { value: true });\n${out}`;
 }
 
 // ---- TypeScript 7.1 content mapper ------------------------------------------------------------

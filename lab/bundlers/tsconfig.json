@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "nodenext",
+    "lib": ["esnext", "dom"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    // Only because dotschema is this repository, whose sources import each other by their .ts names.
+    "allowImportingTsExtensions": true
+  },
+  "include": ["host-types.ts"]
+}

@@ -7,7 +7,7 @@ It's powered by TypeScript's [_content mappers_](https://github.com/microsoft/ty
 ## Setup
 
 ```sh
-npm install -D dotschema typescript@next
+npm install -D dotschema typescript@beta
 ```
 
 The package needs Node 24 or later. An application that runs under the preload instead of a bundle loads dotschema at run time, so it lists `dotschema` in `dependencies`.
@@ -38,6 +38,100 @@ Node loads dotschema with `--import`, which turns each schema file into a module
 node --import dotschema/register main.ts
 ```
 
+### Bun
+
+Bun loads the same preload from `bunfig.toml`, for `bun main.ts` and, under `[test]`, for `bun test`:
+
+```toml
+preload = ["dotschema/register"]
+
+[test]
+preload = ["dotschema/register"]
+```
+
+Bun's bundler takes the esbuild plugin:
+
+```ts
+import dotschema from "dotschema/esbuild";
+
+await Bun.build({
+  entrypoints: ["main.ts"],
+  target: "bun",
+  plugins: [dotschema()],
+  outdir: "dist",
+});
+```
+
+### nub
+
+nub loads the preload from `nub.jsonc`, for `nub main.ts` and `nub --test`:
+
+```jsonc
+{
+  "preload": ["dotschema/register"]
+}
+```
+
+### Vite
+
+Add the Vite plugin to `vite.config.ts`, which builds each schema's module in the dev server and in the build, for the browser and for the server:
+
+```ts
+import { defineConfig } from "vite";
+import dotschema from "dotschema/vite";
+
+export default defineConfig({
+  plugins: [dotschema()],
+});
+```
+
+Vitest takes the same plugin, so a test imports schemas too.
+
+Rollup and Rolldown take the same plugin, in `rollup.config.mjs` or `rolldown.config.mjs`:
+
+```js
+import dotschema from "dotschema/vite";
+
+export default {
+  input: "main.js",
+  plugins: [dotschema()],
+  output: { file: "dist/main.mjs", format: "es" },
+};
+```
+
+### Next.js
+
+Wrap the config in `next.config.ts` with `withDotschema`, which loads schemas with Turbopack and with webpack, on the server and in the browser:
+
+```ts
+import type { NextConfig } from "next";
+import { withDotschema } from "dotschema/next";
+
+const nextConfig: NextConfig = {
+  // ...
+};
+
+export default withDotschema(nextConfig);
+```
+
+Next.js type-checks without `--runExternalCode`, so `withDotschema` turns that check off and runs `tsc --noEmit --runExternalCode` inside `next build` in its place.
+
+To type-check without building, the `typecheck` script in `package.json` runs `next typegen` first, which writes the route types:
+
+```json
+{
+  "scripts": {
+    "typecheck": "next typegen && tsc --noEmit --runExternalCode"
+  }
+}
+```
+
+Beside Motherload's `withMotherload` or Reylo's `withReylo`, the wrappers nest in either order:
+
+```ts
+export default withMotherload(withDotschema(nextConfig));
+```
+
 ### esbuild
 
 The esbuild plugin builds each schema's module at build time, so a bundled app needs no preload:
@@ -56,13 +150,106 @@ await esbuild.build({
 });
 ```
 
-### Bun
+### webpack and Rspack
 
-Bun loads the same preload with `--preload`:
+webpack and Rspack load schema files with dotschema's loader, in a rule of `webpack.config.mjs` or `rspack.config.mjs`:
+
+```js
+export default {
+  // ...
+  module: {
+    rules: [{ test: /\.schema\.(jsonc|json5)$/, use: "dotschema/webpack" }],
+  },
+};
+```
+
+### Cloudflare Workers
+
+A Worker is built with Vite, with dotschema's plugin beside Cloudflare's in `vite.config.ts`:
+
+```ts
+import { cloudflare } from "@cloudflare/vite-plugin";
+import { defineConfig } from "vite";
+import dotschema from "dotschema/vite";
+
+export default defineConfig({
+  plugins: [dotschema(), cloudflare()],
+});
+```
+
+Deploy with `wrangler deploy` after `vite build`, since Wrangler's own bundler takes no plugin.
+
+### Jest
+
+Jest takes dotschema's transformer in `jest.config.js`:
+
+```js
+export default {
+  transform: { "\\.schema\\.(jsonc|json5)$": "dotschema/jest" },
+  extensionsToTreatAsEsm: [".jsonc", ".json5"],
+};
+```
+
+Jest runs ES modules only behind a Node flag:
 
 ```sh
-bun --preload dotschema/register main.ts
+NODE_OPTIONS=--experimental-vm-modules npx jest
 ```
+
+Jest runs the first pattern that matches a file, so beside another transformer for `.jsonc` or `.json5`, such as Motherload's, dotschema's pattern comes first:
+
+```js
+export default {
+  transform: {
+    "\\.schema\\.(jsonc|json5)$": "dotschema/jest",
+    "\\.(jsonc|json5)$": "motherload/jest",
+  },
+};
+```
+
+### Editors
+
+The editor types schema imports through the TypeScript 7.1 language server, with content mappers on.
+
+In VS Code or Cursor, install the **TypeScript 7** extension (`TypeScriptTeam.native-preview`) and point it at the project's TypeScript, since the extension's own copy is TypeScript 7.0, which has no content mappers:
+
+```jsonc
+// .vscode/settings.json
+{
+  "js/ts.experimental.useTsgo": true,
+  "js/ts.tsdk.path": "./node_modules/typescript"
+}
+```
+
+Then trust the workspace, and click **Allow** when the extension asks to use the workspace's TypeScript. Content mappers run in a trusted workspace only.
+
+In Zed, install the **TypeScript Language Server** extension by Zed Industries (search for "tsgo"), point it at the project's TypeScript with content mappers on, and trust the folder:
+
+```jsonc
+// .zed/settings.json
+{
+  "languages": {
+    "TypeScript": {
+      "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."]
+    },
+    "TSX": {
+      "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."]
+    }
+  },
+  "lsp": {
+    "typescript-ls": {
+      // the extension's own download is TypeScript 7.0, which has no content mappers
+      "binary": {
+        "path": "node_modules/typescript/bin/tsc",
+        "arguments": ["--lsp", "--stdio"]
+      },
+      "initialization_options": { "runExternalCode": true }
+    }
+  }
+}
+```
+
+Zed doesn't send schema files to the language server, so an error inside one shows only in the type check.
 
 ## Usage
 

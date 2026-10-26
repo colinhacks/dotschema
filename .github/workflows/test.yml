@@ -23,6 +23,12 @@ jobs:
         with:
           nub-version: "0.9.6"
       - run: nub install --frozen-lockfile
+      # lab/bundlers, lab/nextjs, lab/jest and lab/cloudflare have their own dependencies; without them their tests are skipped
+      - run: for dir in lab/bundlers lab/nextjs lab/jest lab/cloudflare; do (cd "$dir" && nub install --frozen-lockfile) || exit 1; done
+      # lab/bun runs under Bun; release.yml leaves it out, so its jobs run no other third-party action, and the test skips it there
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.3"
       - run: nub run typecheck
       # tests/motherload.test.ts is skipped here: it runs only when MOTHERLOAD_DIR names a Motherload checkout
       - run: nub run test

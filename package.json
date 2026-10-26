@@ -2,7 +2,7 @@
   "name": "dotschema",
   "version": "0.0.1",
   "private": true,
-  "description": "Import a JSON Schema in a .schema.jsonc or .schema.json5 file as its TypeScript type and a validator compiled with ajv. A TypeScript 7.1 content mapper, a preload and an esbuild plugin.",
+  "description": "Import a JSON Schema in a .schema.jsonc or .schema.json5 file as its TypeScript type and a validator compiled with ajv. A TypeScript 7.1 content mapper, a preload, and plugins for esbuild, Vite, webpack, Next.js and Jest.",
   "license": "MIT",
   "author": "Colin McDonnell",
   "repository": {
@@ -20,7 +20,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./register": "./src/register.ts",
-    "./esbuild": "./src/esbuild.ts"
+    "./esbuild": "./src/esbuild.ts",
+    "./vite": "./src/vite.ts",
+    "./webpack": "./src/webpack.ts",
+    "./turbopack": "./src/turbopack.ts",
+    "./next": "./src/next.ts",
+    "./jest": "./src/jest.ts"
   },
   "typescript": {
     "contentMapper": {
