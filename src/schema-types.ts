@@ -9,7 +9,7 @@
 import { basename } from "node:path";
 import { literal, propertyName, type Value } from "./core/serialize.ts";
 import { docOfKey, docOfRoot } from "./parse.ts";
-import { fileOf, pointer, pointTo, specifierOf } from "./refs.ts";
+import { fileOf, fragmentPath, pointTo, specifierOf } from "./refs.ts";
 
 type Obj = { readonly [key: string]: Value };
 
@@ -252,8 +252,8 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     return local;
   }
 
-  /** Where a `$ref` points: the document and the pointer into it; undefined for a URL, a file that cannot be read, an `$anchor` name or a malformed pointer. */
-  function locate(ref: string): { document: Document; fragment: string; path: string[] } | undefined {
+  /** Where a `$ref` points: the document and the pointer into it, a JSON Pointer's or an anchor's (`fragmentPath`); undefined for a URL, a file that cannot be read, an anchor ajv does not resolve or a malformed pointer. */
+  function locate(ref: string): { document: Document; path: string[] } | undefined {
     let document = current;
     let fragment = ref === "" ? "" : ref.startsWith("#") ? ref.slice(1) : undefined;
     if (fragment === undefined) {
@@ -263,8 +263,8 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       if (!target || !reached) return undefined;
       [document, fragment] = [reached, target.fragment];
     }
-    const path = pointer(fragment);
-    return path ? { document, fragment, path } : undefined;
+    const path = fragmentPath(document.schema, fragment);
+    return path ? { document, path } : undefined;
   }
 
   /**
@@ -302,14 +302,17 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
   }
 
   function refType(ref: string, indent: string): string {
-    // A URL, a file that cannot be read, an `$anchor` name or a malformed pointer is unknown, as ajv reports the last.
+    // A URL, a file that cannot be read, an anchor ajv does not resolve or a malformed pointer is
+    // unknown, as ajv reports the last two. An anchor is the schema it is declared in, by the rules
+    // of a pointer to it: the root and a definition by name, anything else inlined.
     const at = locate(ref);
     if (!at) return "unknown";
-    const { document, fragment, path } = at;
+    const { document, path } = at;
     if (path.length === 0) return nameIn(document, "Type");
     const named = path.length === 2 ? document.names.get(`${path[0]}\0${path[1]}`) : undefined;
     if (named) return nameIn(document, named);
-    const key = `${document.path}#${fragment}`;
+    // By where it points, so a pointer and an anchor to one schema stop each other's recursion.
+    const key = JSON.stringify([document.path, ...path]);
     const target = inlining.has(key) ? undefined : pointTo(document.schema, path);
     if (target === undefined) return "unknown";
     inlining.add(key);
@@ -379,7 +382,7 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
   /** A schema that is a `$ref` within its document, with nothing beside it but annotations, as the schema it points to. */
   function followLocal(schema: Value | undefined): Value | undefined {
     for (let hops = 0; hops < 8 && isObj(schema) && typeof schema["$ref"] === "string" && schema["$ref"].startsWith("#") && Object.keys(schema).every((k) => k === "$ref" || ANNOTATIONS.includes(k)); hops++) {
-      const path = pointer(schema["$ref"].slice(1));
+      const path = fragmentPath(current.schema, schema["$ref"].slice(1));
       schema = path ? pointTo(current.schema, path) : undefined;
     }
     return schema;

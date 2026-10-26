@@ -354,6 +354,89 @@ test("a $ref to another file is followed: its type is imported from that file's 
   assert.deepEqual(schemaCode(readFileSync(tag, "utf8"), tag).problems, []);
 });
 
+test("a $ref to an anchor is the schema that declares it, in the file and in another, by a pointer's rules, and validates", async () => {
+  const { path, source } = project({
+    "probe.schema.jsonc": {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      properties: {
+        city: { $ref: "./user.schema.jsonc#city" },
+        id: { $ref: "./user.schema.jsonc#id" },
+        // Recursive through its anchor, and finite, as a recursive pointer is.
+        node: { $anchor: "node", type: "object", properties: { next: { $ref: "#node" } }, additionalProperties: false },
+        also: { $ref: "#node" },
+        flag: { $ref: "#flag" },
+      },
+      additionalProperties: false,
+      $defs: { flag: { $dynamicAnchor: "flag", type: "boolean" } },
+    },
+    "user.schema.jsonc": {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      properties: { address: { type: "object", properties: { city: { $anchor: "city", type: "string", minLength: 2 } } } },
+      $defs: { id: { $anchor: "id", type: "string", format: "uuid" } },
+    },
+  }, "probe.schema.jsonc");
+  const { types, problems } = schemaTypes(source, path);
+  assert.deepEqual(problems, []);
+  // Another file's definition is imported by name, any other schema inlined; a `$dynamicAnchor` is an anchor to a `$ref`.
+  assert.match(types, /^import type \{ Id \} from "\.\/user\.schema\.jsonc";$/m);
+  assert.match(types, /\ninterface Probe \{\n  city\?: string \| undefined;\n  id\?: Id \| undefined;\n  node\?: \{\n    next\?: \{\n      next\?: unknown;\n    \} \| undefined;\n  \} \| undefined;\n  also\?: \{\n    next\?: unknown;\n  \} \| undefined;\n  flag\?: Flag \| undefined;\n\}/);
+  const { code, problems: built } = schemaCode(source, path);
+  assert.deepEqual(built, []);
+  const { default: probe } = await evaluate(code);
+  assert.equal(probe.is({ city: "Oslo", flag: true, also: { next: {} } }), true);
+  assert.equal(probe.is({ city: "O" }), false); // the anchor's minLength
+  assert.equal(probe.is({ flag: 1 }), false);
+});
+
+test("a draft-07 anchor, a plain-name $id, is the schema that declares it", () => {
+  const { path, source } = project({
+    "user.schema.jsonc": { $schema: "http://json-schema.org/draft-07/schema#", type: "object", properties: { a: { $ref: "#name" }, b: { $ref: "#deep" }, c: { type: "object", properties: { d: { $id: "#deep", type: "integer" } } } }, definitions: { name: { $id: "#name", type: "string" } } },
+  });
+  const { types, problems } = schemaTypes(source, path);
+  assert.deepEqual(problems, []);
+  assert.match(types, /\ninterface User \{\n  a\?: Name \| undefined;\n  b\?: number \| undefined;\n/);
+});
+
+test("a $ref to nothing, to no anchor, or to a value that is not a schema is a problem at the $ref, in both texts, and its type is unknown", () => {
+  const { path, source } = project({
+    "user.schema.jsonc": {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      $anchor: "top",
+      type: "object",
+      properties: {
+        a: { $ref: "#/properties/nope" },
+        b: { $ref: "#/required" },
+        c: { $ref: "./other.schema.jsonc#/required" },
+        d: { $ref: "#nope" },
+        e: { $ref: "./other.schema.jsonc#nope" },
+        // ajv 8.20.0 does not resolve an anchor at a file's root or inside prefixItems; the message gives the pointer it does.
+        f: { $ref: "#top" },
+        g: { type: "array", prefixItems: [{ $anchor: "first", type: "string" }], items: { $ref: "#first" } },
+      },
+      required: ["a"],
+    },
+    "other.schema.jsonc": { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+  });
+  const { types, problems } = schemaTypes(source, path);
+  const at = (ref: string) => source.indexOf(`"${ref}"`) + 1;
+  assert.deepEqual(
+    problems.map((p) => [p.message, p.start, p.length, p.code]),
+    [
+      ['The $ref "#/properties/nope" points to nothing: ./user.schema.jsonc has no #/properties/nope.', at("#/properties/nope"), 17, CODES.schema],
+      ['The $ref "#/required" points to an array, not a schema: a $ref points to an object or a boolean.', at("#/required"), 10, CODES.schema],
+      ['The $ref "./other.schema.jsonc#/required" points to an array, not a schema: a $ref points to an object or a boolean.', at("./other.schema.jsonc#/required"), 30, CODES.schema],
+      ['The $ref "#nope" names no anchor: ./user.schema.jsonc declares no anchor "nope".', at("#nope"), 5, CODES.schema],
+      ['The $ref "./other.schema.jsonc#nope" names no anchor: ./other.schema.jsonc declares no anchor "nope".', at("./other.schema.jsonc#nope"), 25, CODES.schema],
+      ['The $ref "#top" names an anchor that ajv does not resolve where ./user.schema.jsonc declares it, at its root: write "#" in its place.', at("#top"), 4, CODES.schema],
+      ['The $ref "#first" names an anchor that ajv does not resolve where ./user.schema.jsonc declares it, inside prefixItems: write "#/properties/g/prefixItems/0" in its place.', at("#first"), 6, CODES.schema],
+    ],
+  );
+  assert.match(types, /\n  a: unknown;\n  b\?: unknown;\n  c\?: unknown;\n  d\?: unknown;\n  e\?: unknown;\n  f\?: unknown;\n/);
+  assert.deepEqual(schemaCode(source, path).problems, problems);
+});
+
 test("a $ref that cannot be followed is a problem at the $ref, in both texts, and its type is unknown", () => {
   const { path, source } = project({
     "user.schema.jsonc": {

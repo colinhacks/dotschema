@@ -13,7 +13,7 @@
 // is, never a schema that validates otherwise than dotschema's validator does.
 import { basename } from "node:path";
 import type { Value } from "./core/serialize.ts";
-import { fileOf, pointer, SCHEMA_SUFFIXES, specifierOf, type Files } from "./refs.ts";
+import { fileOf, fragmentOf, pointer, SCHEMA_SUFFIXES, specifierOf, type Files } from "./refs.ts";
 import type { Draft } from "./schema-types.ts";
 
 export type JsonSchemaTarget = "draft-07" | "draft-2020-12";
@@ -57,10 +57,6 @@ const FOREIGN: Record<Draft, ReadonlySet<string>> = {
 
 /** The plain names each target allows an anchor (draft-07 core 8.2.3, `$id` "#name"; 2020-12 core 8.2.2, `$anchor`). */
 const ANCHOR_NAMES: Record<JsonSchemaTarget, RegExp> = { "draft-07": /^[A-Za-z][-A-Za-z0-9_:.]*$/, "draft-2020-12": /^[A-Za-z_][-A-Za-z0-9._]*$/ };
-
-/** A JSON Pointer as a URI fragment, without its `#`: RFC 6901's escapes, then percent-encoding for what a fragment may not hold. */
-export const fragmentOf = (segments: readonly string[]): string =>
-  segments.map((segment) => "/" + segment.replace(/~/g, "~0").replace(/\//g, "~1").replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@?]/gu, (c) => encodeURIComponent(c))).join("");
 
 /** Whether `schema`, or a schema inside it, has `keyword`, searched keyword by keyword so data (`const`, a property's name) is not. */
 function uses(schema: Value, keyword: string): boolean {

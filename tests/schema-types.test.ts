@@ -103,6 +103,13 @@ test("`#` is the root; another pointer is inlined, unless it leads back into its
   assert.equal(emit({ type: "object", properties: { a: { type: "string" }, b: { $ref: "#/properties/a" }, c: { $ref: "#/properties/c" }, d: { $ref: "./other.schema.jsonc" } }, additionalProperties: false }), "export interface Type {\n  a?: string | undefined;\n  b?: string | undefined;\n  c?: unknown;\n  d?: unknown;\n}");
 });
 
+test("an anchor is the schema that declares it: a definition by its name, anything else inlined, and finite when it recurses", () => {
+  assert.equal(
+    emit({ type: "object", properties: { a: { $ref: "#tag" }, b: { $ref: "#inner" }, c: { type: "object", properties: { d: { $anchor: "inner", type: "number" } } }, e: { $anchor: "self", type: "array", items: { $ref: "#self" } } }, additionalProperties: false, $defs: { tag: { $anchor: "tag", type: "string" } } }),
+    "export interface Type {\n  a?: Tag | undefined;\n  b?: number | undefined;\n  c?: {\n    d?: number | undefined;\n    [key: string]: unknown;\n  } | undefined;\n  e?: unknown[][] | undefined;\n}\n\nexport type Tag = string;",
+  );
+});
+
 test("a description is a doc comment", () => {
   assert.equal(emit({ type: "object", properties: { a: { type: "string", description: "One line." } }, additionalProperties: false }), "export interface Type {\n  /** One line. */\n  a?: string | undefined;\n}");
   assert.equal(emit({ type: "string", description: "Ends */ early.\nTwo lines." }), "/**\n * Ends *\\/ early.\n * Two lines.\n */\nexport type Type = string;");

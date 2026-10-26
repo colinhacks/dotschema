@@ -93,6 +93,64 @@ export function pointer(fragment: string): string[] | undefined {
   }
 }
 
+/** A JSON Pointer as a URI fragment, without its `#`: RFC 6901's escapes, then percent-encoding for what a fragment may not hold. */
+export const fragmentOf = (segments: readonly string[]): string =>
+  segments.map((segment) => "/" + segment.replace(/~/g, "~0").replace(/\//g, "~1").replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@?]/gu, (c) => encodeURIComponent(c))).join("");
+
+// The keywords json-schema-traverse 1.0.0, which ajv walks a schema with, treats as holding a list of
+// schemas, a map of them, or data; with `allKeys`, as ajv calls it, every other keyword's value is
+// walked as a schema.
+const TRAVERSE_LIST = new Set(["items", "allOf", "anyOf", "oneOf"]);
+const TRAVERSE_MAP = new Set(["$defs", "definitions", "properties", "patternProperties", "dependencies"]);
+const TRAVERSE_SKIP = new Set(["default", "enum", "const", "required", "maximum", "minimum", "exclusiveMaximum", "exclusiveMinimum", "multipleOf", "maxLength", "minLength", "pattern", "format", "maxItems", "minItems", "uniqueItems", "maxProperties", "minProperties"]);
+
+/** The plain names a schema declares for itself: `$anchor`, `$dynamicAnchor`, and a plain-name `$id` (`"#name"`, draft-07's spelling of an anchor). */
+function anchorNames(schema: Obj): string[] {
+  const id = schema["$id"];
+  return [schema["$anchor"], schema["$dynamicAnchor"], typeof id === "string" && id.startsWith("#") ? id.slice(1) : undefined].filter((name): name is string => typeof name === "string" && name !== "");
+}
+
+/**
+ * Each anchor in a file's schema and where it is, as JSON Pointer segments. With `asAjv`, only
+ * where ajv 8.20.0 resolves one (`getSchemaRefs` in its dist/compile/resolve.js): an `$anchor`, a
+ * `$dynamicAnchor` or a plain-name `$id`, in any draft, in each schema json-schema-traverse reaches,
+ * which leaves out the file's root and the items of `prefixItems` (measured on 2026-10-26: ajv
+ * refused a `$ref` to an anchor in either, "can't resolve reference #top", and resolved one under
+ * a keyword no draft defines). Without, also there, as the spec reads them. A name's first place
+ * is kept; ajv refuses a second that differs.
+ */
+function anchorsIn(schema: Value, asAjv: boolean): Map<string, string[]> {
+  const anchors = new Map<string, string[]>();
+  const walk = (node: Value, segments: string[]) => {
+    if (!isObj(node)) return;
+    if (!asAjv || segments.length) for (const name of anchorNames(node)) if (!anchors.has(name)) anchors.set(name, segments);
+    for (const [key, value] of Object.entries(node)) {
+      if (Array.isArray(value)) {
+        if (TRAVERSE_LIST.has(key) || (!asAjv && key === "prefixItems")) value.forEach((item, i) => walk(item, [...segments, key, String(i)]));
+      } else if (TRAVERSE_MAP.has(key)) {
+        if (isObj(value)) for (const [name, item] of Object.entries(value)) walk(item, [...segments, key, name]);
+      } else if (!TRAVERSE_SKIP.has(key)) walk(value, [...segments, key]);
+    }
+  };
+  walk(schema, []);
+  return anchors;
+}
+
+const ajvAnchors = new WeakMap<object, Map<string, string[]>>();
+
+/**
+ * Where a `$ref`'s fragment points in a file's schema, as JSON Pointer segments: a pointer's own,
+ * or the place of the anchor it names, where ajv resolves one (`anchorsIn`). Undefined for a
+ * malformed pointer and for an anchor ajv does not find.
+ */
+export function fragmentPath(schema: Value, fragment: string): string[] | undefined {
+  if (fragment === "" || fragment.startsWith("/")) return pointer(fragment);
+  if (!isObj(schema)) return undefined;
+  let anchors = ajvAnchors.get(schema);
+  if (!anchors) ajvAnchors.set(schema, (anchors = anchorsIn(schema, true)));
+  return anchors.get(fragment);
+}
+
 /** The value a pointer leads to in `schema`, or undefined when nothing is there. */
 export function pointTo(schema: Value, segments: string[]): Value | undefined {
   let target: Value | undefined = schema;
@@ -144,12 +202,17 @@ export function collect(rootPath: string, root: Value, rootSource: string, draft
   for (let next = queue.shift(); next; next = queue.shift()) {
     const { path, schema, via } = next;
     for (const ref of refsIn(schema)) {
-      const target = fileOf(ref, path);
+      // A reference within the file is checked as one to another file is: what it points to.
+      const local = ref === "" || ref.startsWith("#");
+      const target = local ? { path, fragment: ref.slice(1) } : fileOf(ref, path);
       if (!target) continue;
       const place = via ?? placeOf(rootSource, ref);
       // A problem in a file the root reaches through another is reported at the root's reference, naming that file.
       const where = via ? `${specifierOf(rootPath, path)}: ` : "";
-      const report = (message: string) => problems.push({ message: `${where}${message}`, ...place, code: CODES.schema });
+      // A reference written twice is one problem, placed where it is first written.
+      const report = (message: string) => {
+        if (!problems.some((p) => p.message === `${where}${message}` && p.start === place.start)) problems.push({ message: `${where}${message}`, ...place, code: CODES.schema });
+      };
       if (failed.has(target.path)) continue;
       let schemaThere = schemas.get(target.path);
       if (schemaThere === undefined) {
@@ -185,8 +248,24 @@ export function collect(rootPath: string, root: Value, rootSource: string, draft
         places.set(target.path, place);
         queue.push({ path: target.path, schema: schemaThere, via: place });
       }
-      const segments = pointer(target.fragment);
-      if (segments && pointTo(schemaThere, segments) === undefined) report(`The $ref "${ref}" points to nothing: ${specifierOf(path, target.path)} has no #${target.fragment}.`);
+      const there = specifierOf(path, target.path);
+      const anchor = !(target.fragment === "" || target.fragment.startsWith("/"));
+      const segments = fragmentPath(schemaThere, target.fragment);
+      if (anchor && segments === undefined) {
+        // An anchor the spec finds where ajv does not, at the root or in `prefixItems`, has a pointer that ajv follows.
+        const declared = anchorsIn(schemaThere, false).get(target.fragment);
+        const uri = local ? "" : ref.slice(0, ref.indexOf("#"));
+        report(declared ? `The $ref "${ref}" names an anchor that ajv does not resolve where ${there} declares it, ${declared.length ? "inside prefixItems" : "at its root"}: write "${uri}#${fragmentOf(declared)}" in its place.` : `The $ref "${ref}" names no anchor: ${there} declares no anchor "${target.fragment}".`);
+        continue;
+      }
+      // A malformed pointer is ajv's to report.
+      if (segments === undefined) continue;
+      const value = pointTo(schemaThere, segments);
+      if (value === undefined) report(`The $ref "${ref}" points to nothing: ${there} has no #${target.fragment}.`);
+      else if (typeof value !== "boolean" && !isObj(value)) {
+        const kind = value === null ? "null" : Array.isArray(value) ? "an array" : typeof value === "string" ? "a string" : "a number";
+        report(`The $ref "${ref}" points to ${kind}, not a schema: a $ref points to an object or a boolean.`);
+      }
     }
   }
   return { schemas, places, watched, problems };
