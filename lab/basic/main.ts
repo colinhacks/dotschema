@@ -20,6 +20,14 @@ expect<Equal<StandardSchemaV1.InferOutput<typeof summary>, { name: string; role:
 const contact = user.omit("role", "tags", "address").pick("name", "email");
 expect<Equal<StandardSchemaV1.InferOutput<typeof contact>, { name: string; email?: string }>>();
 expect<Equal<StandardSchemaV1.InferOutput<ReturnType<typeof address.omit<"street">>>, { city: string }>>();
+// `.partial()` and `.required()` change which properties are required, and `.keyof()` is a schema of
+// the property names.
+const anywhere = address.partial();
+expect<Equal<StandardSchemaV1.InferOutput<typeof anywhere>, { street?: string; city?: string }>>();
+const located = user.required("address");
+expect<Equal<StandardSchemaV1.InferOutput<typeof located>["address"], address.Type>>();
+const field = user.keyof();
+expect<Equal<StandardSchemaV1.InferOutput<typeof field>, "name" | "email" | "role" | "tags" | "address">>();
 // @ts-expect-error a key the schema's properties do not name
 user.pick("nickname");
 // @ts-expect-error an event is a oneOf, whose properties picking would not filter: it has no pick

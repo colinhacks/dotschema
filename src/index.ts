@@ -119,16 +119,33 @@ export interface Schema<T, S = unknown> extends StandardSchemaV1<T, T>, Standard
     StandardJSONSchemaV1.Props<T, T>;
 }
 
+/** Whether the project turns on `exactOptionalPropertyTypes`: without it, `{ a: undefined }` is assignable to `{ a?: never }`. */
+type ExactOptional = { a: undefined } extends { a?: never } ? false : true;
+
+/** An intersection of object types as one object type, so a hover prints its properties: `& {}` leaves the mapped type itself, which TypeScript writes out, where an alias alone is printed by its name (`Flat<...>`). */
+type Flat<T> = { [Q in keyof T]: T[Q] } & {};
+
+/** A property `.partial()` makes optional: `| undefined` under `exactOptionalPropertyTypes`, as the emitter writes an optional property, since ajv passes `undefined` as absent. */
+type Optional<V> = ExactOptional extends true ? V | undefined : V;
+
 /**
  * A schema module, or one of its definitions, whose schema is a plain object (`type: "object"` with
- * `properties`, `required` and `additionalProperties`, and annotations): a `Schema` that also picks
- * and omits properties. `K` is the keys `properties` and `required` name. The schema each method
- * gives is the one whose `properties` and `required` keep the keys chosen, every other keyword as it
- * was, so `additionalProperties: false` refuses a property left out. Nothing on it throws, as on `Schema`.
+ * `properties`, `required` and `additionalProperties`, and annotations): a `Schema` that also gives
+ * other object schemas from its own. `K` is the keys `properties` and `required` name. `.pick()` and
+ * `.omit()` give the schema whose `properties` and `required` keep the keys chosen, every other keyword
+ * as it was, so `additionalProperties: false` refuses a property left out; `.partial()` and
+ * `.required()` change `required` alone. Their validators were compiled with the module, and nothing
+ * is compiled at run time. Nothing on it throws, as on `Schema`.
  */
 export interface ObjectSchema<T, S = unknown, K extends string = string> extends Schema<T, S> {
-  /** The schema with only these properties: `user.pick("name", "role")`. Its validators were compiled with the module; nothing is compiled at run time. */
+  /** The schema with only these properties: `user.pick("name", "role")`. */
   pick<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? Q : string extends Q ? Q : never]: T[Q] }, unknown, P>;
   /** The schema without these properties: `user.omit("email")`. */
   omit<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] }, unknown, Exclude<K, P>>;
+  /** The schema with these properties optional, or every property with none named: `user.partial()`, `user.partial("role")`. */
+  partial<P extends K = K>(...keys: P[]): ObjectSchema<Flat<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] } & { [Q in keyof T as Q extends P ? Q : never]?: Optional<T[Q]> }>, unknown, K>;
+  /** The schema with these properties required, or every property with none named: `user.required()`, `user.required("email")`. */
+  required<P extends K = K>(...keys: P[]): ObjectSchema<Flat<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] } & { [Q in keyof T as Q extends P ? Q : never]-?: Exclude<T[Q], undefined> }>, unknown, K>;
+  /** The keys `properties` and `required` name, as a schema of its own, `{ "enum": [...] }`: `user.keyof().is("name")`. */
+  keyof(): Schema<K>;
 }

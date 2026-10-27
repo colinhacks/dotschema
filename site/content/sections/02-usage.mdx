@@ -77,7 +77,48 @@ if (anonymous.is(input)) {
 }
 ```
 
-A schema that is more than an object of properties, such as a `oneOf`, has neither method.
+### `.partial()`
+
+The `.partial()` method makes the properties named optional, or every property when none is named:
+
+```ts twoslash title="main.ts"
+import user from "./user.schema.jsonc";
+
+user.partial().validate({});
+// { value: {} }
+```
+
+### `.required()`
+
+The `.required()` method makes the properties named required, or every property when none is named:
+
+```ts twoslash title="main.ts"
+import user from "./user.schema.jsonc";
+
+user.required("role").validate({ name: "Ada" });
+// { issues: [{
+//   message: "must have required property 'role'",
+//   path: ["role"],
+//   keyword: "required",
+// }] }
+```
+
+### `.keyof()`
+
+The `.keyof()` method gives a schema of the property names:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import user from "./user.schema.jsonc";
+
+if (user.keyof().is(input)) {
+  input;
+//^?
+}
+```
+
+A schema that is more than an object of properties, such as a `oneOf`, has none of these methods.
 
 ### `$defs`
 

@@ -699,21 +699,37 @@ const __filtered = (schema, keep) => {
   if (Array.isArray(schema.required)) out.required = schema.required.filter(keep);
   return out;
 };
+// The schema with \`required\` in place of its own; every other keyword as it was.
+const __requiring = (schema, required) => {
+  const out = { ...schema };
+  if (Array.isArray(schema.required) || required.length) out.required = required;
+  return out;
+};
 `;
 
-/** `.pick()` and `.omit()`, on a plain object's value. */
+/** `.pick()`, `.omit()`, `.partial()`, `.required()` and `.keyof()`, on a plain object's value. */
 const PICK = `
   if (shape) {
+    const documents = (edit) => Object.fromEntries(Object.entries(jsonSchemas).map(([target, entry]) => [target, entry.schema ? { schema: edit(entry.schema) } : entry]));
     const narrow = (keep) =>
-      __make(
-        allFns,
-        firstFns,
-        __filtered(schema, keep),
-        Object.fromEntries(Object.entries(jsonSchemas).map(([target, entry]) => [target, entry.schema ? { schema: __filtered(entry.schema, keep) } : entry])),
-        { properties: shape.properties.filter(([key]) => keep(key)), required: shape.required.filter(keep), additional: shape.additional },
-      );
+      __make(allFns, firstFns, __filtered(schema, keep), documents((document) => __filtered(document, keep)), { properties: shape.properties.filter(([key]) => keep(key)), required: shape.required.filter(keep), additional: shape.additional }, confirm);
+    const requiring = (required) => __make(allFns, firstFns, __requiring(schema, required), documents((document) => __requiring(document, required)), { ...shape, required }, confirm);
+    const properties = shape.properties.map(([key]) => key);
     made.pick = (...keys) => narrow((key) => keys.includes(key));
     made.omit = (...keys) => narrow((key) => !keys.includes(key));
+    made.partial = (...keys) => requiring(keys.length ? shape.required.filter((key) => !keys.includes(key)) : []);
+    made.required = (...keys) => requiring([...shape.required, ...properties.filter((key) => (!keys.length || keys.includes(key)) && !shape.required.includes(key))]);
+    // The keys \`properties\` and \`required\` name, as a schema of its own: \`{ "enum": [...] }\`.
+    made.keyof = () => {
+      const keys = [...new Set([...properties, ...shape.required])];
+      const check = (data) => {
+        const valid = typeof data === "string" && keys.includes(data);
+        check.errors = valid ? null : [{ instancePath: "", schemaPath: "#/enum", keyword: "enum", params: { allowedValues: keys }, message: "must be equal to one of the allowed values" }];
+        return valid;
+      };
+      const document = (uri) => ({ schema: { $schema: uri, enum: [...keys] } });
+      return __make(check, check, { enum: [...keys] }, { "draft-07": document("http://json-schema.org/draft-07/schema#"), "draft-2020-12": document("https://json-schema.org/draft/2020-12/schema") }, undefined, false);
+    };
   }
 `;
 
@@ -763,10 +779,11 @@ const __thrown = (error) => {
 ${objects ? OBJECTS : ""}
 // A schema module's value, or one of its definitions': \`.validate()\` with ajv's allErrors validator,
 // \`.is()\` with the one that stops at the first failure, Standard Schema, and for a plain object
-// (a \`shape\`), \`.pick()\` and \`.omit()\`, which give the same for the schema with only some of its
-// properties, from the same functions. Nothing on it throws but Standard JSON Schema's conversion
-// to a target it has no schema for, as that spec asks.
-const __make = (allFns, firstFns, schema, jsonSchemas, shape) => {
+// (a \`shape\`), \`.pick()\`, \`.omit()\`, \`.partial()\`, \`.required()\` and \`.keyof()\`, which give the
+// same for another schema made from the same functions. \`confirm\` is whether a pass of \`.is()\` is
+// confirmed (\`__confirm\`), which \`.keyof()\`'s check never needs. Nothing on it throws but Standard
+// JSON Schema's conversion to a target it has no schema for, as that spec asks.
+const __make = (allFns, firstFns, schema, jsonSchemas, shape, confirm = __confirm) => {
   const all = ${objects ? "shape ? __join(allFns, shape, true) : " : ""}allFns;
   const first = ${objects ? "shape ? __join(firstFns, shape, false) : " : ""}firstFns;
   // Every issue, from the validator compiled with allErrors; the value itself on success. Nothing
@@ -784,7 +801,7 @@ const __make = (allFns, firstFns, schema, jsonSchemas, shape) => {
   // refuses (\`contains\` beside a tuple, needsConfirmation in schema.ts), a pass is confirmed.
   const is = (value) => {
     try {
-      return first(value) && (!__confirm || all(value));
+      return first(value) && (!confirm || all(value));
     } catch {
       return false;
     }

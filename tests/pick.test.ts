@@ -1,7 +1,8 @@
-// A plain object's `.pick()` and `.omit()` (src/schema.ts, DESIGN.md "Pick and omit"). The proof: for each
-// set of keys, the schema they give is the filtered JSON Schema exactly, and its `.validate()` gives
-// the issues ajv gives for that filtered schema, compiled here with ajv itself, in ajv's order, and
-// its `.is()` ajv's first-failure verdict, on a spread of values.
+// A plain object's `.pick()`, `.omit()`, `.partial()`, `.required()` and `.keyof()` (src/schema.ts,
+// DESIGN.md "Pick, omit and the other object methods"). The proof: for each set of keys, the schema
+// a method gives is the JSON Schema it should be exactly, and its `.validate()` gives the issues ajv
+// gives for that schema, compiled here with ajv itself, in ajv's order, and its `.is()` ajv's
+// first-failure verdict, on a spread of values.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
@@ -130,13 +131,14 @@ for (const [draft, additional] of [[D2020, false], [D07, false], [D2020, undefin
 test("a picked schema has the same surface: Standard Schema, the same function under ~standard, nothing that throws", async () => {
   const { default: s } = await load(base(D2020, false));
   const picked = s.pick("a");
-  assert.deepEqual(Object.keys(picked), ["validate", "is", "schema", "~standard", "pick", "omit"]);
+  assert.deepEqual(Object.keys(picked), ["validate", "is", "schema", "~standard", "pick", "omit", "partial", "required", "keyof"]);
   assert.equal(picked.validate, picked["~standard"].validate);
   assert.equal(picked["~standard"].vendor, "dotschema");
   // Each call gives a fresh document.
   assert.notEqual(picked["~standard"].jsonSchema.input({ target: "draft-07" }), picked["~standard"].jsonSchema.input({ target: "draft-07" }));
   // Keys of any kind, or none, never throw.
-  for (const keys of [[], [1], [null], [{}], ["__proto__"], ["a", "a"]]) assert.doesNotThrow(() => s.pick(...keys).validate({}));
+  for (const keys of [[], [1], [null], [{}], ["__proto__"], ["a", "a"]])
+    for (const method of ["pick", "omit", "partial", "required"]) assert.doesNotThrow(() => s[method](...keys).validate({}));
   // A getter that throws is one issue, as for the module itself.
   const hostile = {
     get a() {
@@ -263,4 +265,87 @@ test("a file two properties refer to is compiled once for each validator, as the
   const path = join(ROOT, "lab/basic/team.schema.jsonc");
   const { code } = schemaCode(readFileSync(path, "utf8"), path);
   assert.equal(code.match(/schemaPath:"#\/properties\/name\/minLength"/g)?.length, 2);
+});
+
+for (const [draft, additional] of [[D2020, false], [D07, { type: "number" }], [D2020, undefined]] as const) {
+  test(`.partial() and .required() give ajv's issues for the schema with \`required\` changed: ${draft === D07 ? "draft-07" : "2020-12"}, additionalProperties ${JSON.stringify(additional)}`, async () => {
+    const { default: s } = await load(base(draft, additional));
+    const whole = { "draft-07": s["~standard"].jsonSchema.input({ target: "draft-07" }), "draft-2020-12": s["~standard"].jsonSchema.input({ target: "draft-2020-12" }) };
+    const requiring = (required: string[]) => ({ "draft-07": { ...whole["draft-07"], required }, "draft-2020-12": { ...whole["draft-2020-12"], required } });
+    agrees(s.partial(), requiring([]), VALUES, "partial()");
+    agrees(s.partial("a", "x", "c"), requiring(["b", "a/b"]), VALUES, "partial(a, x, c)");
+    agrees(s.required(), requiring(["a", "b", "x", "a/b", "c", "d", "e", "f", "g", "h", "~t", "50%"]), VALUES, "required()");
+    // A key already required, or one the schema does not name, changes nothing.
+    agrees(s.required("c", "a", "nope"), requiring(["a", "b", "x", "a/b", "c"]), VALUES, "required(c, a, nope)");
+    agrees(s.partial().required("g"), requiring(["g"]), VALUES, "partial() then required(g)");
+    agrees(
+      s.pick("a", "b", "c").partial("a"),
+      { "draft-07": filtered({ ...whole["draft-07"], required: ["b"] }, (key) => ["a", "b", "c"].includes(key)), "draft-2020-12": filtered({ ...whole["draft-2020-12"], required: ["b"] }, (key) => ["a", "b", "c"].includes(key)) },
+      VALUES,
+      "pick(a, b, c) then partial(a)",
+    );
+    assert.deepEqual(s.partial().schema.required, []);
+    assert.deepEqual(s.schema.required, ["a", "b", "x", "a/b"]);
+  });
+}
+
+test(".keyof() is the keys properties and required name, as a schema of their own", async () => {
+  const { default: s } = await load(base(D2020, false));
+  const keys = ["a", "b", "c", "d", "e", "f", "g", "h", "a/b", "~t", "50%", "x"];
+  agrees(s.keyof(), { "draft-07": { $schema: D07, enum: keys }, "draft-2020-12": { $schema: D2020, enum: keys } }, [...keys, "nope", "__proto__", 1, null, {}, ["a"]], "keyof()");
+  assert.deepEqual(s.keyof().schema, { enum: keys });
+  assert.deepEqual(s.pick("a", "x").keyof().schema, { enum: ["a", "x"] });
+  assert.equal(s.keyof().pick, undefined);
+  const keyof = s.keyof();
+  assert.equal(keyof.validate, keyof["~standard"].validate);
+});
+
+test("the types of .partial(), .required() and .keyof() follow the schema each gives, with exactOptionalPropertyTypes and without", () => {
+  for (const exact of [true, false]) {
+    const dir = mkdtempSync(join(tmpdir(), "dotschema-derive-types-"));
+    const schema = { type: "object", properties: { a: { type: "string" }, b: { type: "number" }, c: { type: "boolean" } }, required: ["a", "z"], additionalProperties: { type: ["string", "number", "boolean"] } };
+    writeFileSync(join(dir, "s.schema.jsonc"), JSON.stringify(schema));
+    writeFileSync(join(dir, "closed.schema.jsonc"), JSON.stringify({ ...schema, additionalProperties: false }));
+    // An optional property is `| undefined` only under the option, as the emitter writes one.
+    const u = exact ? " | undefined" : "";
+    writeFileSync(
+      join(dir, "main.ts"),
+      [
+        'import type { StandardSchemaV1 } from "dotschema";',
+        'import s from "./s.schema.jsonc";',
+        'import closed from "./closed.schema.jsonc";',
+        "type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;",
+        "const expect = <T extends true>() => {};",
+        "type Out<T extends StandardSchemaV1> = StandardSchemaV1.InferOutput<T>;",
+        "const all = closed.partial();",
+        `expect<Equal<Out<typeof all>, { a?: string${u}; b?: number${u}; c?: boolean${u}; z?: ${exact ? "undefined" : "never"} }>>();`,
+        'const someOptional = closed.partial("a");',
+        `expect<Equal<Out<typeof someOptional>, { a?: string${u}; b?: number${u}; c?: boolean${u}; z: never }>>();`,
+        "const allRequired = closed.required();",
+        "expect<Equal<Out<typeof allRequired>, { a: string; b: number; c: boolean; z: never }>>();",
+        'const someRequired = closed.required("b");',
+        `expect<Equal<Out<typeof someRequired>, { a: string; b: number; c?: boolean${u}; z: never }>>();`,
+        "// The index signature stays, as for .pick().",
+        "const open = s.partial();",
+        `expect<Equal<Out<typeof open>, { [key: string]: string | number | boolean | undefined; a?: string${u}; b?: number${u}; c?: boolean${u}; z?: string | number | boolean${u} }>>();`,
+        "const keys = closed.keyof();",
+        'expect<Equal<Out<typeof keys>, "a" | "b" | "c" | "z">>();',
+        "// Every value the validator accepts is of the type.",
+        'const value: unknown = { b: 1, extra: "x" };',
+        "if (open.is(value)) { const typed: Out<typeof open> = value; void typed; }",
+        "// @ts-expect-error a key the schema does not name",
+        'closed.partial("nope");',
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { target: "esnext", module: "nodenext", strict: true, exactOptionalPropertyTypes: exact, noEmit: true, skipLibCheck: true, types: [] }, contentMappers: [{ package: "dotschema", extensions: [".schema.jsonc"] }], include: ["main.ts"] }),
+    );
+    mkdirSync(join(dir, "node_modules"));
+    symlinkSync(ROOT, join(dir, "node_modules/dotschema"));
+    const { status, out } = run(TSC, ["-p", join(dir, "tsconfig.json"), "--runExternalCode"]);
+    assert.equal(out, "", `exactOptionalPropertyTypes: ${exact}`);
+    assert.equal(status, 0);
+  }
 });

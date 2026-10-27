@@ -32,7 +32,7 @@ test("the module validates with ajv's standalone code and imports nothing", asyn
   assert.equal(user["~standard"].version, 1);
   assert.equal(user["~standard"].vendor, "dotschema");
   assert.equal(user.schema.title, "User");
-  assert.deepEqual(Object.keys(user), ["validate", "is", "schema", "~standard", "pick", "omit"]);
+  assert.deepEqual(Object.keys(user), ["validate", "is", "schema", "~standard", "pick", "omit", "partial", "required", "keyof"]);
 });
 
 test(".validate() reports every issue, each with ajv's message and keyword and its path, and nothing else", async () => {
