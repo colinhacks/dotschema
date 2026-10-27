@@ -41,6 +41,9 @@ test("arrays and tuples, in 2020-12's spelling and draft-07's", () => {
   assert.equal(emit({ type: "array", prefixItems: [{ type: "string" }], minItems: 1, items: { type: "boolean" } }), "export type Type = [string, ...boolean[]];");
   assert.equal(emit({ type: "array", items: [{ type: "string" }, { type: "integer" }], additionalItems: false, minItems: 2 }), "export type Type = [string, number];");
   assert.equal(emit({ type: "array", items: [{ type: "string" }] }), "export type Type = [string?, ...unknown[]];");
+  // An optional element of a union is parenthesized, or `?` is a syntax error (TS17019).
+  assert.equal(emit({ type: "array", prefixItems: [{ type: "string" }, { type: ["string", "null"] }], minItems: 1, items: false }), "export type Type = [string, (string | null)?];");
+  assert.equal(emit({ type: "array", items: [{ enum: ["a", "b"] }] }), 'export type Type = [("a" | "b")?, ...unknown[]];');
 });
 
 test("const, enum, combinators, and the keywords that only narrow", () => {

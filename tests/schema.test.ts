@@ -559,6 +559,11 @@ test("an invalid schema is a problem in both texts", () => {
   const invalid = JSON.stringify({ type: "object", properties: { a: { type: "strng" } } });
   assert.match(schemaTypes(invalid, PATH).problems[0]!.message, /not valid/);
   assert.match(schemaCode(invalid, PATH).problems[0]!.message, /not valid/);
+  // ajv's message names the one mistake along each path its meta-schema reaches it by; it is said once.
+  const list = JSON.stringify({ $schema: "https://json-schema.org/draft/2020-12/schema", type: "array", items: [{ type: "string" }] });
+  for (const { problems } of [schemaTypes(list, PATH), schemaCode(list, PATH)]) {
+    assert.equal(problems[0]!.message, "The schema is not valid: schema is invalid: data/items must be object,boolean");
+  }
 });
 
 test("draft-04 is refused with the drafts ajv validates, by the type check as well as the build", () => {

@@ -91,6 +91,20 @@ type Codegen = { _: (strings: TemplateStringsArray, ...args: unknown[]) => unkno
 
 /** ajv compiles every validator with `new Function`, the one it writes out as standalone code too, which a process may disallow. */
 const disallowedCodegen = (error: unknown) => error instanceof EvalError || /code generation from strings/i.test(String((error as Error)?.message));
+/**
+ * What ajv threw for a schema it refuses. With allErrors, ajv checks a schema against its draft's
+ * meta-schema along every path that reaches a keyword, and writes a clause, each from `data`, for
+ * each: 2020-12's `items` given a list read "data/items must be object,boolean" eight times over
+ * (measured 2026-10-27). Each clause is kept once.
+ */
+function refusal(error: unknown): string {
+  const message = String((error as Error)?.message);
+  const at = /(?:^|: )data\b/.exec(message);
+  if (!at) return message;
+  const start = at.index + (at[0].startsWith(":") ? 2 : 0);
+  return message.slice(0, start) + [...new Set(message.slice(start).split(/, (?=data\b)/))].join(", ");
+}
+
 const codegenProblem = (path: string) =>
   `Building ${basename(path)}'s validator runs ajv, which compiles it with new Function, and this process disallows code generation from strings (--disallow-code-generation-from-strings, on the command line or in NODE_OPTIONS). Build the module in a process without that flag: a program bundled with esbuild then validates where the flag is set, since the bundle's validator needs no new Function.`;
 
@@ -197,13 +211,13 @@ function compile(ajv: Ajv, files: Files, path: string): { validate: unknown; id:
     try {
       ajv.addSchema(other.schema, other.id);
     } catch (error) {
-      return { problem: problem(disallowedCodegen(error) ? codegenProblem(path) : `${basename(other.path)} is not a valid schema: ${(error as Error).message}`, files.places.get(other.path)) };
+      return { problem: problem(disallowedCodegen(error) ? codegenProblem(path) : `${basename(other.path)} is not a valid schema: ${refusal(error)}`, files.places.get(other.path)) };
     }
   }
   try {
     return { validate: ajv.compile(root), id };
   } catch (error) {
-    return { problem: problem(disallowedCodegen(error) ? codegenProblem(path) : `The schema is not valid: ${(error as Error).message}`) };
+    return { problem: problem(disallowedCodegen(error) ? codegenProblem(path) : `The schema is not valid: ${refusal(error)}`) };
   }
 }
 
@@ -538,7 +552,7 @@ function definitionProblem(ajv: Ajv, compiled: { validate: unknown; id: string }
     try {
       entryCode(ajv, () => "", compiled, entry, wrappers);
     } catch (error) {
-      return problem(`The definition "${entry.entry![1]}" is not a valid schema: ${(error as Error).message}`);
+      return problem(`The definition "${entry.entry![1]}" is not a valid schema: ${refusal(error)}`);
     }
   }
   return undefined;
@@ -830,7 +844,7 @@ export function schemaCode(source: string, path: string, { discriminators = true
       try {
         codes.push(entryCode(loaded.ajv, standalone, compiled, entry, wrappers));
       } catch (error) {
-        return failed([problem(entry.entry ? `The definition "${entry.entry[1]}" is not a valid schema: ${(error as Error).message}` : `The schema is not valid: ${(error as Error).message}`)], files.watched);
+        return failed([problem(entry.entry ? `The definition "${entry.entry[1]}" is not a valid schema: ${refusal(error)}` : `The schema is not valid: ${refusal(error)}`)], files.watched);
       }
     }
     standalones.push(codes);

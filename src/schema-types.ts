@@ -432,7 +432,8 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     const restType = rest === undefined || rest === true ? "unknown" : emit(rest, indent);
     if (!tuple) return arrayOf(restType);
     const min = typeof schema["minItems"] === "number" ? schema["minItems"] : 0;
-    const elements = tuple.map((element, i) => `${emit(element, indent)}${i < min ? "" : "?"}`);
+    // An optional element's `?` binds to the whole type only in parentheses: `(string | null)?`.
+    const elements = tuple.map((element, i) => (i < min ? emit(element, indent) : `${paren(emit(element, indent))}?`));
     if (rest !== false) elements.push(`...${arrayOf(restType)}`);
     return `[${elements.join(", ")}]`;
   }
