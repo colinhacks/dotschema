@@ -77,6 +77,25 @@ function plainCode(value: string): string {
     .join('\n')}\n`;
 }
 
+/**
+ * The widest line a code block may have, in characters: what the narrowest block of the page holds
+ * on a desktop screen, the editors' settings files in their tabs, 60 (measured on 2026-10-27 in the
+ * headless shell at 1280 pixels wide, Geist Mono at 8.73 pixels a character; most blocks hold 67,
+ * and a phone 35). A wider line wraps, in the middle of a JSON object as often as not. Terminal
+ * output (`ansi`) is tsc's own text and is left as tsc prints it.
+ */
+const WIDEST = 60;
+
+/** The lines of a block, as a reader sees them, that are wider than WIDEST. */
+function tooWide(node: Code): string[] {
+  if (node.lang === 'ansi') return [];
+  const shown = node.meta?.includes('twoslash') ? plainCode(node.value) : node.value;
+  return shown
+    .split('\n')
+    .map((line) => line.replace(/\s*\/\/\s*\[!code [^\]]+\]\s*$/, ''))
+    .filter((line) => line.length > WIDEST);
+}
+
 /** A text's lines without the blank lines around them or the spaces after each. */
 const trimmedLines = (text: string) => text.split('\n').map((line) => line.trimEnd()).join('\n').replace(/^\n+|\n+$/g, '');
 /** A schema file the page shows: an import resolves to it. */
@@ -168,6 +187,8 @@ export function remarkSchemas() {
     // The page is several files, shown in order (lib/page-files.ts): its opening, then a file per
     // section, which are one page here.
     const own = codeBlocks(tree);
+    const wide = own.flatMap((node) => tooWide(node).map((line) => `${titleOf(node) ?? node.lang}: ${line.trim()}`));
+    if (wide.length) throw new Error(`dotschema: code lines wider than ${WIDEST} characters wrap on the page (${file.path}):\n${wide.join('\n')}`);
     const page = pageFiles(site);
     const at = file.path ? page.indexOf(path.resolve(file.path)) : -1;
     const around = (list: string[]) => list.flatMap((f) => blocksOf(f).map((node) => ({ node, file: f as string | undefined })));

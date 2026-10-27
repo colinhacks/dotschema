@@ -69,7 +69,11 @@ A keyword the schema's draft doesn't define is ignored, by the type and by the v
 {
   "type": "object",
   "properties": {
-    "id": { "type": "string", "x-internal": true, "tsType": "AccountId" }
+    "id": {
+      "type": "string",
+      "x-internal": true,
+      "tsType": "AccountId"
+    }
   },
   "required": ["id"],
   "additionalProperties": false

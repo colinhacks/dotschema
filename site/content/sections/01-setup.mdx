@@ -32,7 +32,10 @@ Add dotschema to `tsconfig.json` as a content mapper:
 {
   "compilerOptions": { /* ... */ },
   "contentMappers": [ // [!code ++]
-    { "package": "dotschema", "extensions": [".schema.jsonc"] } // [!code ++]
+    { // [!code ++]
+      "package": "dotschema", // [!code ++]
+      "extensions": [".schema.jsonc"] // [!code ++]
+    } // [!code ++]
   ] // [!code ++]
 }
 ```
@@ -142,12 +145,8 @@ Your server and client components can now import schemas, with Turbopack or webp
 
 To type-check without building, run `next typegen` first, which writes the route types:
 
-```json title="package.json"
-{
-  "scripts": {
-    "typecheck": "next typegen && tsc --noEmit --runExternalCode"
-  }
-}
+```sh
+next typegen && tsc --noEmit --runExternalCode
 ```
 
 <Details summary="How the build checks the types" id="nextjs-type-check">
@@ -195,7 +194,10 @@ export default {
   // ...
   module: {
     rules: [
-      { test: /\.schema\.(jsonc|json5)$/, use: "dotschema/webpack" },
+      {
+        test: /\.schema\.(jsonc|json5)$/,
+        use: "dotschema/webpack",
+      },
     ],
   },
 };
@@ -211,7 +213,10 @@ export default {
   // ...
   module: {
     rules: [
-      { test: /\.schema\.(jsonc|json5)$/, use: "dotschema/webpack" },
+      {
+        test: /\.schema\.(jsonc|json5)$/,
+        use: "dotschema/webpack",
+      },
     ],
   },
 };
@@ -241,7 +246,9 @@ Add dotschema's transformer to your Jest config:
 
 ```js title="jest.config.js"
 export default {
-  transform: { "\\.schema\\.(jsonc|json5)$": "dotschema/jest" },
+  transform: {
+    "\\.schema\\.(jsonc|json5)$": "dotschema/jest",
+  },
   extensionsToTreatAsEsm: [".jsonc", ".json5"],
 };
 ```
@@ -331,7 +338,8 @@ Set up your editor to use the TypeScript 7.1 language server, with content mappe
      },
      "lsp": {
        "typescript-ls": {
-         // the extension's own download is TypeScript 7.0, which has no content mappers
+         // the extension's own download is TypeScript 7.0,
+         // which has no content mappers
          "binary": {
            "path": "node_modules/typescript/bin/tsc",
            "arguments": ["--lsp", "--stdio"]

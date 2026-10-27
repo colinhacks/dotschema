@@ -35,12 +35,14 @@ if (result.issues) {
 The `.is()` method is a type guard, which stops at the first failure:
 
 ```ts twoslash title="main.ts"
-declare const values: unknown[];
+declare const input: unknown;
 // ---cut---
 import user from "./user.schema.jsonc";
 
-const users = values.filter(user.is);
-//    ^?
+if (user.is(input)) {
+  input;
+//^?
+}
 ```
 
 ### Definitions

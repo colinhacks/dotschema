@@ -93,7 +93,10 @@ A `prefixItems` list is a tuple, its items required up to `minItems`:
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "array",
-  "prefixItems": [{ "type": "number" }, { "type": "number" }],
+  "prefixItems": [
+    { "type": "number" },
+    { "type": "number" }
+  ],
   "minItems": 2,
   "items": false
 }
@@ -113,11 +116,17 @@ A `oneOf` whose variants a `const` tells apart is a union that narrows:
   "type": "object",
   "oneOf": [
     {
-      "properties": { "kind": { "const": "click" }, "x": { "type": "number" } },
+      "properties": {
+        "kind": { "const": "click" },
+        "x": { "type": "number" }
+      },
       "required": ["kind", "x"]
     },
     {
-      "properties": { "kind": { "const": "visit" }, "url": { "type": "string" } },
+      "properties": {
+        "kind": { "const": "visit" },
+        "url": { "type": "string" }
+      },
       "required": ["kind", "url"]
     }
   ]
@@ -148,8 +157,14 @@ An `if` that tests a property's listed values narrows the same way:
   "properties": { "method": { "enum": ["card", "bank"] } },
   "required": ["method"],
   "if": { "properties": { "method": { "const": "card" } } },
-  "then": { "properties": { "last4": { "type": "string" } }, "required": ["last4"] },
-  "else": { "properties": { "iban": { "type": "string" } }, "required": ["iban"] }
+  "then": {
+    "properties": { "last4": { "type": "string" } },
+    "required": ["last4"]
+  },
+  "else": {
+    "properties": { "iban": { "type": "string" } },
+    "required": ["iban"]
+  }
 }
 ```
 

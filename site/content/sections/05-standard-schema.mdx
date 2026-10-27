@@ -11,7 +11,8 @@ declare const input: unknown;
 // ---cut---
 import user from "./user.schema.jsonc";
 
-user["~standard"].validate(input); // the same function as user.validate
+// the same function as user.validate
+user["~standard"].validate(input);
 ```
 
 It's a Standard JSON Schema too, which gives the schema as one document in draft-07 or 2020-12, with every file it refers to folded in:
@@ -19,15 +20,23 @@ It's a Standard JSON Schema too, which gives the schema as one document in draft
 ```ts twoslash title="main.ts"
 import team from "./team.schema.jsonc";
 
-team["~standard"].jsonSchema.input({ target: "draft-2020-12" });
+team["~standard"].jsonSchema.input({
+  target: "draft-2020-12",
+});
 // {
-//   $schema: "https://json-schema.org/draft/2020-12/schema",
+//   $schema:
+//     "https://json-schema.org/draft/2020-12/schema",
 //   type: "object",
 //   properties: {
-//     members: { type: "array", items: { $ref: "#/$defs/user" } },
+//     members: {
+//       type: "array",
+//       items: { $ref: "#/$defs/user" },
+//     },
 //   },
 //   required: ["members"],
 //   additionalProperties: false,
-//   $defs: { user: { type: "object", properties: { ... }, ... } },
+//   $defs: {
+//     user: { type: "object", properties: { ... }, ... },
+//   },
 // }
 ```
