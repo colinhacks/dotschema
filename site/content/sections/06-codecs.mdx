@@ -1,0 +1,114 @@
+---
+title: "Codecs"
+---
+
+## Codecs
+
+A codec decodes the strings of a format into a richer value. A `dotschema.jsonc` beside `package.json` names a codec for each format:
+
+```jsonc title="dotschema.jsonc"
+{
+  "codecs": {
+    "date-time": "Temporal.Instant"
+  }
+}
+```
+
+The `.decode()` method validates the value, then gives a copy with each `date-time` string decoded:
+
+```jsonc title="reminder.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "at": { "type": "string", "format": "date-time" }
+  },
+  "required": ["at"],
+  "additionalProperties": false
+}
+```
+
+```ts twoslash title="main.ts"
+import reminder from "./reminder.schema.jsonc";
+
+const result = reminder.decode({ at: "2026-10-26T09:00:00Z" });
+if (result.value) {
+  result.value;
+  //     ^?
+}
+```
+
+The `.validate()` and `.is()` methods keep the string:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import reminder from "./reminder.schema.jsonc";
+
+if (reminder.is(input)) {
+  input;
+//^?
+}
+```
+
+The `.encode()` method turns the decoded value back into JSON:
+
+```ts twoslash title="main.ts"
+import reminder from "./reminder.schema.jsonc";
+
+reminder.encode({ at: Temporal.Instant.from("2026-10-26T11:00:00+02:00") });
+// { value: { at: "2026-10-26T09:00:00Z" } }
+```
+
+The decoded type is `.Type`, and the value as given is `.Input`:
+
+```ts twoslash title="main.ts"
+import reminder from "./reminder.schema.jsonc";
+
+const decoded: reminder.Type = { at: Temporal.Now.instant() };
+const given: reminder.Input = { at: "2026-10-26T09:00:00Z" };
+```
+
+These are the codecs:
+
+| Format | Codec |
+| --- | --- |
+| `date-time` | `Temporal.Instant` |
+| `date` | `Temporal.PlainDate` |
+| `duration` | `Temporal.Duration` |
+| `int64` | `bigint` |
+
+A string the codec can't hold exactly is an issue, never a lossy value:
+
+```ts twoslash title="main.ts"
+import reminder from "./reminder.schema.jsonc";
+
+reminder.decode({ at: "2016-12-31T23:59:60Z" });
+// { issues: [{
+//   message: "could not be decoded: a leap second, which a Temporal.Instant cannot hold",
+//   path: ["at"],
+//   keyword: "decode",
+// }] }
+```
+
+Where `Temporal` isn't defined, as in Cloudflare Workers, decoding gives an issue too:
+
+```ts twoslash title="main.ts"
+import reminder from "./reminder.schema.jsonc";
+
+reminder.decode({ at: "2026-10-26T09:00:00Z" });
+// { issues: [{
+//   message: "could not be decoded: Temporal is not defined in this runtime",
+//   path: ["at"],
+//   keyword: "decode",
+// }] }
+```
+
+A Standard Schema library gets the decoded value:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import reminder from "./reminder.schema.jsonc";
+
+reminder["~standard"].validate(input); // the same function as reminder.decode
+```

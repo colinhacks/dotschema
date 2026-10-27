@@ -1,0 +1,33 @@
+---
+title: "Errors"
+---
+
+## Errors
+
+An invalid schema is a type error, at its place in the file:
+
+```jsonc title="team.schema.jsonc" errors
+{
+  "type": "object",
+  "properties": {
+    "members": {
+      "type": "array",
+      "items": { "$ref": "./member.schema.jsonc" }
+    }
+  },
+  "required": ["members"]
+}
+```
+
+The type check prints it with its line and column:
+
+```ansi title="Terminal"
+$ tsc --noEmit --runExternalCode
+[96mteam.schema.jsonc[0m:[93m6[0m:[93m27[0m - [91merror[0m[90m dotschema4: [0mThe $ref "./member.schema.jsonc" names a file that does not exist.
+
+[90m6[0m       "items": { "$ref": "./member.schema.jsonc" }
+[90m [0m [91m                          ~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+Found 1 error in team.schema.jsonc[90m:6[0m
+```

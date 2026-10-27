@@ -1,0 +1,81 @@
+/* The docs sites' shared stylesheet (docs-kit/src/style.css, a copy of ~/Documents/docs-kit): the
+   layout, the reading measure, prose, headings, the table of contents, code, Twoslash's popups,
+   collapsibles, tabs and the cursors. Below it, only what is dotschema's own: its faces and its
+   palette. */
+@import 'docs-kit/style.css';
+
+/* The page's three faces (app/fonts.css, which app/root.tsx links), as the variables docs-kit's
+   stylesheet reads: Geist for text, behind it its size-adjusted Arial; Geist Mono for code, behind
+   it the system's monospace; Caveat for the "Leave a star!" note. Geist and Geist Mono are the faces
+   of the README's demo. */
+:root {
+  --font-text: 'Geist', 'Geist Fallback';
+  --font-code: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-hand: 'Caveat', 'Caveat Fallback';
+}
+
+/* ── dotschema: neutral greys and one blue ────────────────────────────────────
+   Every surface and rule is a colourless grey, white by day and near-black by
+   night (Reylo's greys), so the blue is the page's only colour: it marks links,
+   the open Twoslash name, the active table-of-contents entry, the selection and
+   the mark (docs-kit's `--dk-accent`). The blue is the README demo's
+   background, #3d5afe, by day; where it carries text (`--color-fd-primary`:
+   active tabs, links on hover, the star note) it deepens to #304ffe. By night
+   both are #8c9eff. Measured as WCAG contrast on the page, the code blocks, the
+   muted panels and the popups: #3d5afe 4.71 to 5.13 and #304ffe 5.24 to 5.71 by
+   day, #8c9eff 7.00 to 7.77 by night, each AA for text or better. The code
+   keeps docs-kit's GitHub colours. ── */
+
+:root {
+  --dk-accent: #3d5afe;
+
+  --color-fd-background: hsl(0, 0%, 100%);
+  --color-fd-foreground: hsl(0, 0%, 16%);
+  --color-fd-headings: hsl(0, 0%, 5%);
+  --color-fd-muted: hsl(0, 0%, 96%);
+  --color-fd-muted-foreground: hsl(0, 0%, 40%);
+  --color-fd-popover: hsl(0, 0%, 100%);
+  --color-fd-popover-foreground: hsl(0, 0%, 16%);
+  --color-fd-card: hsl(0, 0%, 98%);
+  --color-fd-card-foreground: hsl(0, 0%, 16%);
+  --color-fd-border: hsl(0, 0%, 89%);
+  --color-fd-primary: #304ffe;
+  --color-fd-primary-foreground: hsl(0, 0%, 100%);
+  --color-fd-secondary: hsl(0, 0%, 97%);
+  --color-fd-secondary-foreground: hsl(0, 0%, 16%);
+  --color-fd-accent: hsl(0, 0%, 94%);
+  --color-fd-accent-foreground: hsl(0, 0%, 5%);
+  --color-fd-ring: #3d5afe;
+
+  --color-fd-info: hsl(212, 45%, 42%);
+  --color-fd-warning: hsl(40, 92%, 36%);
+  --color-fd-success: hsl(150, 40%, 32%);
+  --color-fd-error: hsl(2, 60%, 45%);
+}
+
+.dark {
+  --dk-accent: #8c9eff;
+
+  --color-fd-background: hsl(0, 0%, 5.5%);
+  --color-fd-foreground: hsl(0, 0%, 86%);
+  --color-fd-headings: hsl(0, 0%, 98%);
+  --color-fd-muted: hsl(0, 0%, 10%);
+  --color-fd-muted-foreground: hsl(0, 0%, 63%);
+  --color-fd-popover: hsl(0, 0%, 8%);
+  --color-fd-popover-foreground: hsl(0, 0%, 86%);
+  --color-fd-card: hsl(0, 0%, 8.5%);
+  --color-fd-card-foreground: hsl(0, 0%, 86%);
+  --color-fd-border: hsl(0, 0%, 17%);
+  --color-fd-primary: #8c9eff;
+  --color-fd-primary-foreground: hsl(0, 0%, 5.5%);
+  --color-fd-secondary: hsl(0, 0%, 9%);
+  --color-fd-secondary-foreground: hsl(0, 0%, 98%);
+  --color-fd-accent: hsl(0, 0%, 14%);
+  --color-fd-accent-foreground: hsl(0, 0%, 98%);
+  --color-fd-ring: #8c9eff;
+
+  --color-fd-info: hsl(212, 60%, 70%);
+  --color-fd-warning: hsl(46, 90%, 60%);
+  --color-fd-success: hsl(150, 40%, 60%);
+  --color-fd-error: hsl(2, 70%, 68%);
+}

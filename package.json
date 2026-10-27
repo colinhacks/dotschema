@@ -9,7 +9,7 @@
     "type": "git",
     "url": "git+https://github.com/colinhacks/dotschema.git"
   },
-  "homepage": "https://github.com/colinhacks/dotschema#readme",
+  "homepage": "https://dotschema.vercel.app",
   "bugs": {
     "url": "https://github.com/colinhacks/dotschema/issues"
   },

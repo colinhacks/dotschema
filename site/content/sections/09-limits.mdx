@@ -1,0 +1,10 @@
+---
+title: "Limits"
+---
+
+## Limits
+
+| Limit | Instead |
+| --- | --- |
+| A `$ref` to a URL (`https:`, `urn:`) is not followed: the type check reports it, and its type is `unknown` | Save the schema as a `.schema.jsonc` file in the project, and `$ref` the file |
+| A draft-04 or draft-03 schema is refused | Declare draft-07 or a later draft in `$schema` |

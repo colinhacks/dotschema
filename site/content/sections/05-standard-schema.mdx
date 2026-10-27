@@ -1,0 +1,33 @@
+---
+title: "Standard Schema"
+---
+
+## Standard Schema
+
+The module is a [Standard Schema](https://standardschema.dev), so a library that accepts one accepts it:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import user from "./user.schema.jsonc";
+
+user["~standard"].validate(input); // the same function as user.validate
+```
+
+It's a Standard JSON Schema too, which gives the schema as one document in draft-07 or 2020-12, with every file it refers to folded in:
+
+```ts twoslash title="main.ts"
+import team from "./team.schema.jsonc";
+
+team["~standard"].jsonSchema.input({ target: "draft-2020-12" });
+// {
+//   $schema: "https://json-schema.org/draft/2020-12/schema",
+//   type: "object",
+//   properties: {
+//     members: { type: "array", items: { $ref: "#/$defs/user" } },
+//   },
+//   required: ["members"],
+//   additionalProperties: false,
+//   $defs: { user: { type: "object", properties: { ... }, ... } },
+// }
+```

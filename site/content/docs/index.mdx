@@ -1,0 +1,37 @@
+---
+title: dotschema
+description: Import a JSON Schema from a .schema.jsonc file into TypeScript, and get the type it describes and a validator compiled by ajv at build time. A TypeScript 7.1 content mapper.
+---
+
+<p className="dk-subheader">Import `.schema.jsonc` files into TypeScript, fully typed</p>
+
+If you have a JSON Schema like this:
+
+```jsonc title="user.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "role": { "enum": ["admin", "member"] }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}
+```
+
+You can import it directly from a TypeScript file, and get its type and a validator:
+
+```ts twoslash title="main.ts"
+// @hover: user data
+declare const request: Request;
+// ---cut---
+import user from "./user.schema.jsonc";
+
+const data = await request.json();
+
+if (user.is(data)) {
+  data; // hover over data to see its type
+}
+```
+
+It's powered by TypeScript's [_content mappers_](https://github.com/microsoft/typescript-go/pull/4712) (introduced in TypeScript 7.1), which let a package give `tsc` the types of a file it imports. The validator is compiled by [ajv](https://ajv.js.org) when the module is built, so a bundle carries the validator and no validator library.

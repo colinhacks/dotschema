@@ -1,0 +1,84 @@
+---
+title: "Schema files"
+---
+
+## Schema files
+
+A schema file is a JSON Schema written as JSONC, so it can hold comments and trailing commas:
+
+```jsonc title="user.schema.jsonc"
+{
+  // who can sign in
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "role": { "enum": ["admin", "member"] },
+  },
+  "required": ["name"],
+  "additionalProperties": false,
+}
+```
+
+<Callout>
+A schema can also be written in JSON5, as a `.schema.json5` file: add `.schema.json5` to the `extensions` list in `tsconfig.json`.
+</Callout>
+
+The `$schema` keyword picks the draft, 06, 07, 2019-09 or 2020-12, and a schema without it is draft-07:
+
+```jsonc
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string"
+}
+```
+
+A `$ref` can point to another schema file, by a path relative to this one:
+
+```jsonc title="team.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "members": {
+      "type": "array",
+      "items": { "$ref": "./user.schema.jsonc" }
+    }
+  },
+  "required": ["members"],
+  "additionalProperties": false
+}
+```
+
+The type imports the other file's, by its name:
+
+```ts twoslash title="main.ts"
+import team from "./team.schema.jsonc";
+
+type Members = team.Type["members"];
+//   ^?
+```
+
+A `$ref` with a fragment points into the other file, to a definition or an anchor:
+
+```jsonc
+{ "$ref": "./place.schema.jsonc#/$defs/address" }
+```
+
+A keyword the schema's draft doesn't define is ignored, by the type and by the validator, so a schema written for another validator still compiles:
+
+```jsonc title="account.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "id": { "type": "string", "x-internal": true, "tsType": "AccountId" }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}
+```
+
+```ts twoslash title="main.ts"
+import account from "./account.schema.jsonc";
+
+type Id = account.Type["id"];
+//   ^?
+```

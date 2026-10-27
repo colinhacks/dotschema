@@ -1,0 +1,17 @@
+---
+title: "Bundles"
+---
+
+## Bundles
+
+Each schema's module is built with its validator compiled, so it imports nothing, and a bundle carries the validator and no validator library. A bundled app needs dotschema only to build, as a devDependency.
+
+The opening example's `main.ts`, bundled and minified by esbuild, has two inputs:
+
+```text title="esbuild's analysis" bundle="main.ts"
+  dist/main.mjs         6.0kb  100.0%
+   ├ user.schema.jsonc  5.9kb   99.4%
+   └ main.ts             35b     0.6%
+```
+
+A module carries the code of only the formats it uses, and esbuild leaves out a definition nothing imports.
