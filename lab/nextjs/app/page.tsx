@@ -19,7 +19,9 @@ const stamped: Stamp = { at: Temporal.Instant.from("2026-10-20T06:00:00Z"), id: 
 const unstamped: Stamp = { at: "2026-10-20T06:00:00Z", id: BigInt(1) };
 
 export default function Page() {
-  const { value } = stamp.decode({ at: "2026-10-20T08:00:00+02:00", id: "9007199254740993" });
+  const decoded = stamp.decode({ at: "2026-10-20T08:00:00+02:00", id: "9007199254740993" });
+  const value = decoded.issues ? undefined : decoded.value;
+  const encoded = value && stamp.encode(value);
   const failed = user.validate({ name: "", role: "owner", email: "not an email" });
   const server = {
     vendor: user["~standard"].vendor,
@@ -28,7 +30,7 @@ export default function Page() {
     points: [point.is({ x: 1, y: 2 }), point.is({ x: 1.5, y: 2 })],
     team: [team.is({ lead: ada, members: [ada], office: { city: "London" } }), team.is({ lead: ada, members: [], office: { city: "" } })],
     events: [event.is({ at: "2026-10-20T09:00:00Z", kind: "click", x: 1, y: 2 }), event.is({ at: "yesterday", kind: "click", x: 1, y: 2 })],
-    codecs: value && [value.at instanceof Temporal.Instant, String(value.at), typeof value.id, String(value.id), stamp.encode(value).value],
+    codecs: value && [value.at instanceof Temporal.Instant, String(value.at), typeof value.id, String(value.id), encoded && !encoded.issues ? encoded.value : undefined],
   };
   return (
     <main>

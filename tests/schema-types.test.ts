@@ -19,6 +19,13 @@ test("an object root is an interface: required keys, optional keys, and no index
   );
 });
 
+test("an optional key is `| undefined` only under exactOptionalPropertyTypes, or where the project's options are not known: without it, the `?` already admits undefined", () => {
+  const schema = { type: "object", properties: { a: { type: "number" } }, additionalProperties: { type: "string" } } as never;
+  assert.equal(schemaDeclarations(schema, undefined, undefined, { exactOptionalPropertyTypes: false }), "export interface Type {\n  a?: number;\n  [key: string]: string | number | undefined;\n}");
+  assert.equal(schemaDeclarations(schema, undefined, undefined, { exactOptionalPropertyTypes: true }), "export interface Type {\n  a?: number | undefined;\n  [key: string]: string | number | undefined;\n}");
+  assert.equal(schemaDeclarations(schema), "export interface Type {\n  a?: number | undefined;\n  [key: string]: string | number | undefined;\n}");
+});
+
 test("keys outside `properties` are an index signature that covers the named ones", () => {
   assert.equal(emit({ type: "object", properties: { a: { type: "number" } } }), "export interface Type {\n  a?: number | undefined;\n  [key: string]: unknown;\n}");
   assert.equal(emit({ type: "object", properties: { a: { type: "number" } }, additionalProperties: { type: "string" } }), "export interface Type {\n  a?: number | undefined;\n  [key: string]: string | number | undefined;\n}");

@@ -42,7 +42,7 @@ import user from "./user.schema.jsonc";
 const data = await request.json();
 
 if (user.is(data)) {
-  data; // { name: string; role?: "admin" | "member" | undefined }
+  data; // { name: string; role?: "admin" | "member" }
 }
 ```
 

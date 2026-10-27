@@ -118,7 +118,7 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
   const emitted = run(join(dir, "node_modules/.bin/tsc"), ["-p", "tsconfig.json", "--runExternalCode"], dir);
   if (emitted !== "") throw new Error(`declaration: tsc printed\n${emitted}`);
   const declarations = readFileSync(join(dir, "out", "main.d.ts"), "utf8");
-  if (!/user: import\("dotschema"\)\.ObjectSchema<\{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\s+\}, \{\n\s+readonly type: "object";/.test(declarations)) throw new Error(`declaration: main.d.ts is\n${declarations}`);
+  if (!/user: import\("dotschema"\)\.ObjectSchema<\{\n\s+name: string;\n\s+role\?: "admin" \| "member";\n\s+\}, \{\n\s+readonly type: "object";/.test(declarations)) throw new Error(`declaration: main.d.ts is\n${declarations}`);
   console.log('declaration: a library re-exporting a schema module names import("dotschema").ObjectSchema in its declarations');
 }
 

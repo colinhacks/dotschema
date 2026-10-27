@@ -9,6 +9,7 @@
 import { basename } from "node:path";
 import type { Codec } from "./codecs.ts";
 import { literal, propertyName, type Value } from "./core/serialize.ts";
+import type { TypeOptions } from "./core/universal.ts";
 import type { Place } from "./decode.ts";
 import { docOfKey, docOfRoot } from "./parse.ts";
 import { fileOf, fragmentPath, pointTo, specifierOf } from "./refs.ts";
@@ -280,8 +281,8 @@ export type Draft = "draft-07" | "2019-09" | "2020-12";
  * in 2020-12 alone, a list of `items` and `additionalItems` before it, `unevaluatedProperties` from
  * 2019-09; without, every keyword is read.
  */
-export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Draft): string {
-  return schemaModuleTypes(root, files, draft).declarations;
+export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Draft, options?: TypeOptions): string {
+  return schemaModuleTypes(root, files, draft, options).declarations;
 }
 
 /** The declarations, as `schemaDeclarations` writes them; the root's name; and the root's type as text, which the module's default export takes so a hover prints its properties. */
@@ -289,10 +290,12 @@ export function schemaModuleTypes(
   root: Value,
   files?: SchemaFiles,
   draft?: Draft,
+  options?: TypeOptions,
 ): { declarations: string; rootName: string; rootType: string; rootInputName: string | undefined; rootInputType: string | undefined; definitions: Definition[] } {
   const prefixItems = draft === undefined || draft === "2020-12";
   const itemLists = draft === undefined || draft !== "2020-12";
   const unevaluated = draft === undefined || draft !== "draft-07";
+  const exactOptional = options?.exactOptionalPropertyTypes !== false;
   const codecs = files?.codecs;
   const reachesIn = (path: string | undefined) => (segments: string[]) => (codecs && path !== undefined ? codecs.reaches({ path, segments }) : false);
   const { rootName, rootInputName, names, inputNames, definitions, taken } = definitionNames(root, files?.path, reachesIn(files?.path));
@@ -431,9 +434,10 @@ export function schemaModuleTypes(
       const type = emit(property, inner);
       const optional = !required.has(key);
       valueTypes.push(type, ...(optional ? ["undefined"] : []));
-      // An optional property may hold `undefined`, which the validator passes as absent, so the type
-      // says so for a project with `exactOptionalPropertyTypes`.
-      lines.push(`${doc(property, inner, docOfKey(properties, key))}${inner}${propertyName(key)}${optional ? "?" : ""}: ${optional ? union([type, "undefined"]) : type};`);
+      // An optional property may hold `undefined`, which the validator passes as absent. Its `?`
+      // says so unless the project turns on `exactOptionalPropertyTypes`, so `| undefined` is written
+      // there, and where the project's options are not known.
+      lines.push(`${doc(property, inner, docOfKey(properties, key))}${inner}${propertyName(key)}${optional ? "?" : ""}: ${optional && exactOptional ? union([type, "undefined"]) : type};`);
     }
     // A required key that `properties` does not list takes the type of the `patternProperties` whose
     // pattern matches it (all of them apply, so their union admits it), or of `additionalProperties`

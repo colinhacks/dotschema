@@ -70,7 +70,9 @@ for (const project of request.projects ?? []) {
       modules[name] = { types: "", problems: [`no block on the page shows ${name}`] };
       continue;
     }
-    const result = await loader.types(file.text, path.join(project.dir, name));
+    // The blocks' compiler options (lib/twoslash.ts) leave exactOptionalPropertyTypes off, as the
+    // content mapper would tell the loader of such a project.
+    const result = await loader.types(file.text, path.join(project.dir, name), { exactOptionalPropertyTypes: false });
     modules[name] = { types: result.types, problems: result.problems.map((p) => p.message) };
     for (const [, spec] of result.types.matchAll(IMPORTS)) pending.push(path.posix.normalize(path.posix.join(path.posix.dirname(name), spec!)));
   }

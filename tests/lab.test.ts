@@ -49,21 +49,29 @@ test("a broken schema file is a diagnostic at its place in the file", () => {
 });
 
 test("a library that re-exports a schema module emits its declarations: the schema's literal type is inlined, though the module does not export its name", () => {
-  const out = mkdtempSync(join(tmpdir(), "dotschema-declaration-"));
-  const result = run(TSC, ["-p", "tests/fixtures/declaration/tsconfig.json", "--runExternalCode", "--outDir", out]);
-  assert.equal(result.out, "");
-  assert.equal(result.status, 0);
-  const declarations = readFileSync(join(out, "tests/fixtures/declaration/main.d.ts"), "utf8");
+  const emit = (...flags: string[]) => {
+    const out = mkdtempSync(join(tmpdir(), "dotschema-declaration-"));
+    const result = run(TSC, ["-p", "tests/fixtures/declaration/tsconfig.json", "--runExternalCode", "--outDir", out, ...flags]);
+    assert.equal(result.out, "");
+    assert.equal(result.status, 0);
+    const declarations = readFileSync(join(out, "tests/fixtures/declaration/main.d.ts"), "utf8");
+    rmSync(out, { recursive: true, force: true });
+    return declarations;
+  };
+  const declarations = emit();
   // Here `dotschema` is this repository, so TypeScript names its types by a relative path; installed,
   // it names them `import("dotschema")`, which scripts/check-dist.ts checks.
   // The module's default export writes its root's properties out, so the declarations do too.
   // A plain object is an ObjectSchema, and a picked schema's type is written out too.
   assert.match(declarations, /scores: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.Schema<\{/);
   assert.match(declarations, /export declare const summary: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.ObjectSchema<\{\n\s+name: string;\n\}, unknown, "name">;/);
-  assert.match(declarations, /user: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.ObjectSchema<\{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\s+\}, \{\n\s+readonly type: "object";/);
+  assert.match(declarations, /user: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.ObjectSchema<\{\n\s+name: string;\n\s+role\?: "admin" \| "member";\n\s+\}, \{\n\s+readonly type: "object";/);
   assert.doesNotMatch(declarations, /\bJson\b/);
-  assert.match(declarations, /export declare const check: \(value: unknown\) => value is \{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\};/);
-  rmSync(out, { recursive: true, force: true });
+  assert.match(declarations, /export declare const check: \(value: unknown\) => value is \{\n\s+name: string;\n\s+role\?: "admin" \| "member";\n\};/);
+  // The mapper writes an optional key as the project's compiler options read it: under
+  // exactOptionalPropertyTypes the `?` no longer admits undefined, which ajv passes as absent, so
+  // `| undefined` is written; without it, the `?` already does.
+  assert.match(emit("--exactOptionalPropertyTypes"), /export declare const check: \(value: unknown\) => value is \{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\};/);
 });
 
 // What lab/basic/main.ts prints, piece by piece.

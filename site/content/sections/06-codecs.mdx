@@ -31,7 +31,7 @@ The `.decode()` method validates the value, then gives a copy with each `date-ti
 import reminder from "./reminder.schema.jsonc";
 
 const result = reminder.decode({ at: "2026-10-26T09:00:00Z" });
-if (result.value) {
+if (!result.issues) {
   result.value;
   //     ^?
 }

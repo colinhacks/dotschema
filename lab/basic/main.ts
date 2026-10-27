@@ -33,6 +33,8 @@ const someone: unknown = { name: "Ada", role: "admin" };
 if (user.is(someone)) expect<Equal<typeof someone, User>>();
 // @ts-expect-error a schema module has no parse: nothing on it throws
 user.parse;
+// @ts-expect-error a failed result has no value, as in Standard Schema: its issues are checked first
+user.validate(someone).value;
 // A schema written in JSON5 is the same module.
 expect<Equal<Point, { x: number; y: number; label?: string }>>();
 expect<Equal<typeof point.schema.properties.label.maxLength, 16>>();

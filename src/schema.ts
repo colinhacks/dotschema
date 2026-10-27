@@ -18,6 +18,7 @@ import { createRequire, isBuiltin } from "node:module";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CODES, type Problem } from "./core/problems.ts";
+import type { TypeOptions } from "./core/universal.ts";
 import { literal, toJs, type Value } from "./core/serialize.ts";
 import { parseSchemaFile } from "./parse.ts";
 import { projectOf, type Project } from "./config.ts";
@@ -471,7 +472,7 @@ const keyUnion = (keys: readonly string[]): string => (keys.length ? keys.map((k
  * Each definition is a validator too, exported under its value name with its own `.Type`; a root or
  * a definition that is a plain object is an `ObjectSchema`, with `.pick()` and `.omit()`.
  */
-export function schemaTypes(source: string, path: string): { types: string; problems: Problem[] } {
+export function schemaTypes(source: string, path: string, options?: TypeOptions): { types: string; problems: Problem[] } {
   const parsed = parseSchemaFile(source, path);
   if (!parsed.ok) return { types: FAILED_TYPES, problems: parsed.problems };
   const schema = parsed.value;
@@ -502,6 +503,7 @@ export function schemaTypes(source: string, path: string): { types: string; prob
     files.schemas.get(path)!,
     { path, read: (other) => files.schemas.get(other), ...(decoding ? { codecs: { codecOf: decoding.codecOf, reaches: decoding.reaches } } : {}) },
     draft,
+    options,
   );
   // `Schema<Type, Json>`, or `CodecSchema<Type, Json, Input>` where a codec decodes something in it:
   // the decoded type first, and the value as given after the schema.

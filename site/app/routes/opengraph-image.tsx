@@ -7,7 +7,7 @@
 // The README demo's frame: its blue ground (#3d5afe), the wordmark and the headline in white on the
 // left, and on the right the hero's main.ts in a dark editor card, with the type of `data` after
 // `user.is(data)` in a popup, as the page's hover and the demo show it (the mapper's own text,
-// `{ name: string; role?: "admin" | "member" | undefined; }`, set over four lines). Drawn by
+// `{ name: string; role?: "admin" | "member"; }`, set over four lines). Drawn by
 // @vercel/og's ImageResponse (Satori) in Geist and Geist Mono (assets/fonts, SIL Open Font License),
 // the code in GitHub's dark colours. Satori lays out flex boxes only, so every element with more than
 // one child is a flex box. X lays the domain over the card's bottom-left corner, about 380 × 90 of it
@@ -52,7 +52,7 @@ const code: Token[][] = [
 const popup: Token[][] = [
   [['const', 'keyword'], [' data', 'plain'], [': {', 'plain']],
   [['    name', 'property'], [': ', 'plain'], ['string', 'func'], [';', 'plain']],
-  [['    role', 'property'], ['?: ', 'plain'], ['"admin"', 'string'], [' | ', 'plain'], ['"member"', 'string'], [' | ', 'plain'], ['undefined', 'property'], [';', 'plain']],
+  [['    role', 'property'], ['?: ', 'plain'], ['"admin"', 'string'], [' | ', 'plain'], ['"member"', 'string'], [';', 'plain']],
   [['}', 'plain']],
 ];
 

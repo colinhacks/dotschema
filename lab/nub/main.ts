@@ -3,5 +3,8 @@
 import "../basic/main.ts";
 import stamp from "./codecs/stamp.schema.jsonc";
 
-const value = stamp.decode({ at: "2026-10-20T08:00:00+02:00", id: "9007199254740993" }).value!;
-console.log(JSON.stringify({ codecs: [value.at instanceof Temporal.Instant, String(value.at), typeof value.id, String(value.id), stamp.encode(value).value] }));
+const decoded = stamp.decode({ at: "2026-10-20T08:00:00+02:00", id: "9007199254740993" });
+if (decoded.issues) throw new Error(JSON.stringify(decoded.issues));
+const value = decoded.value;
+const encoded = stamp.encode(value);
+console.log(JSON.stringify({ codecs: [value.at instanceof Temporal.Instant, String(value.at), typeof value.id, String(value.id), encoded.issues ? undefined : encoded.value] }));

@@ -21,6 +21,6 @@ export function standalone(plugin: LoaderPlugin): LoaderPlugin {
   return {
     ...plugin,
     load: (source, path) => (plugin.filter.test(path) ? plugin.load(source, path) : { code: "export default undefined;\n", problems: [unknown(path)] }),
-    types: (source, path) => (plugin.filter.test(path) ? plugin.types(source, path) : { types: FAILED_TYPES, problems: [unknown(path)] }),
+    types: (source, path, options) => (plugin.filter.test(path) ? plugin.types(source, path, options) : { types: FAILED_TYPES, problems: [unknown(path)] }),
   };
 }

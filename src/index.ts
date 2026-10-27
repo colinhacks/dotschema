@@ -74,10 +74,10 @@ export declare namespace StandardJSONSchemaV1 {
   export type InferOutput<Schema extends StandardTypedV1> = StandardTypedV1.InferOutput<Schema>;
 }
 
-/** The result of `.validate()`: Standard Schema's result, with dotschema's issues. */
+/** The result of `.validate()`: Standard Schema's result, with dotschema's issues. A failure has no `value`, as in Standard Schema, so `value` is read after `issues` is checked. */
 export type SchemaResult<T> =
   | { readonly value: T; readonly issues?: undefined }
-  | { readonly value?: undefined; readonly issues: readonly [SchemaIssue, ...SchemaIssue[]] };
+  | { readonly issues: readonly [SchemaIssue, ...SchemaIssue[]] };
 
 /** One way a value fails: ajv's message and keyword, with its place in the value as Standard Schema's path. */
 export interface SchemaIssue extends StandardSchemaV1.Issue {

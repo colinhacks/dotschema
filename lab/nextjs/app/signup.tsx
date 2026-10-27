@@ -6,11 +6,13 @@ import stamp from "../stamp.schema.jsonc";
 
 export function Signup() {
   const result = user.validate({ name: "", role: "admin", email: "not an email" });
-  const { value } = stamp.decode({ at: "2026-10-20T08:00:00+02:00", id: "9007199254740993" });
+  const decoded = stamp.decode({ at: "2026-10-20T08:00:00+02:00", id: "9007199254740993" });
+  const value = decoded.issues ? undefined : decoded.value;
+  const encoded = value && stamp.encode(value);
   return (
     <>
       <pre id="client">{JSON.stringify(result.issues?.map((issue) => `${issue.path.join(".")}: ${issue.message}`))}</pre>
-      <pre id="client-codecs">{JSON.stringify(value && [value.at instanceof Temporal.Instant, String(value.at), typeof value.id, String(value.id), stamp.encode(value).value])}</pre>
+      <pre id="client-codecs">{JSON.stringify(value && [value.at instanceof Temporal.Instant, String(value.at), typeof value.id, String(value.id), encoded && !encoded.issues ? encoded.value : undefined])}</pre>
     </>
   );
 }
