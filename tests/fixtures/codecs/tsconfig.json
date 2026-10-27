@@ -1,5 +1,0 @@
-{
-  "compilerOptions": { "target": "es2022", "module": "nodenext", "lib": ["es2022"], "types": [], "strict": true, "noEmit": true, "skipLibCheck": true },
-  "contentMappers": [{ "package": "dotschema", "extensions": [".schema.jsonc"] }],
-  "include": ["main.ts"]
-}

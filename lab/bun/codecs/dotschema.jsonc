@@ -1,6 +1,0 @@
-// The codecs of this directory's package. lab/bun has no package.json, so a schema file in it would
-// be the repository's, as lab/basic's are, and the repository has no dotschema.jsonc: the package.json
-// here puts stamp.schema.jsonc in a package of its own, whose project file this is.
-{
-  "codecs": { "date-time": "Temporal.Instant", "int64": "bigint" },
-}

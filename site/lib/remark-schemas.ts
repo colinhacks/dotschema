@@ -20,9 +20,6 @@ import { pageFiles } from './page-files.ts';
 //   nearest block above it with that name, across all the page's files, so a section can show a file
 //   another section shows, or a file again with a change; failing that, the first one below it, as
 //   in a group of tabs whose first tab is main.ts. A schema file with a problem fails the build.
-//   Each example is a package of its own, with a package.json, so that a project file shown in its
-//   section (```` ```jsonc title="dotschema.jsonc" ````) is the one dotschema reads beside it, as
-//   it reads the file beside a package's package.json; a section without one has none.
 // - The errors. A schema block marked `errors` (```` ```jsonc title="team.schema.jsonc" errors ````)
 //   is an error example: the content mapper's own `transform` reads it, beside the page's other files,
 //   and each diagnostic it returns is written into the block as docs-kit's `// @diagnostic:` line,
@@ -33,8 +30,6 @@ import { pageFiles } from './page-files.ts';
 //   row, each as inline code; a row of one format gives, as inline code, a value it accepts. The
 //   tables of a page file together must name every format dotschema has, each once, and each value
 //   must pass the module dotschema builds for that format, or the build fails.
-// - The codecs. A table headed Format and Codec must list every codec dotschema has, each by its
-//   format and its name in dotschema.jsonc, and nothing else.
 // - The bundle. A block marked `bundle="main.ts"` holds esbuild's analysis of the page's first block
 //   of that name, the opening example's, bundled and minified with dotschema's esbuild plugin beside
 //   the schema files it sees. The build measures it again and fails, printing the new analysis,
@@ -86,9 +81,6 @@ function plainCode(value: string): string {
 const trimmedLines = (text: string) => text.split('\n').map((line) => line.trimEnd()).join('\n').replace(/^\n+|\n+$/g, '');
 /** A schema file the page shows: an import resolves to it. */
 const isSchema = (node: Code) => SCHEMA.test(titleOf(node) ?? '') && !isErrors(node);
-/** The project file dotschema reads beside a package's package.json. */
-const PROJECT_FILE = 'dotschema.jsonc';
-const isProjectFile = (node: Code) => titleOf(node) === PROJECT_FILE && !isErrors(node);
 
 // `import user from "./user.schema.jsonc"`, `import { address } from "./shared/place.schema.jsonc"`.
 const IMPORT = /\bfrom\s+["']\.\/([^"']+\.schema\.(?:jsonc|json5))["']/g;
@@ -153,7 +145,6 @@ type Answer = {
   diagnostics: { messageText: string; code: number; start: number; length: number }[][];
   formats?: { all: string[]; verdicts: { format: string; ok: boolean; why: string }[] };
   bundles: string[];
-  codecs: { format: string; name: string }[];
 };
 
 /** What dotschema answered for a request, kept for as long as the dev server runs. */
@@ -187,19 +178,13 @@ export function remarkSchemas() {
     /** Every schema file of the page as a block at `index` sees it, and the other page files it came from. */
     const filesAt = (index: number): File[] => {
       const names = [...new Set(blocks.filter((b) => isSchema(b.node)).map((b) => titleOf(b.node)!))];
-      const schemas = names.map((name) => {
+      return names.map((name) => {
         const isFile = (block: (typeof blocks)[number]) => isSchema(block.node) && titleOf(block.node) === name;
         const shown = blocks.slice(0, index).findLast(isFile) ?? blocks.slice(index + 1).find(isFile)!;
         // A file another section shows is a dependency, so an edit to it types this section again.
         if (shown.file) compiler?.addDependency(shown.file);
         return { name, text: `${shown.node.value}\n` };
       });
-      // The project file a block sees is its own section's, the nearest above it, or else the first
-      // below it there; a section that shows none has none.
-      const sameFile = (block: (typeof blocks)[number]) => block.file === blocks[index]!.file;
-      const isProject = (block: (typeof blocks)[number]) => sameFile(block) && isProjectFile(block.node);
-      const project = blocks.slice(0, index).findLast(isProject) ?? blocks.slice(index + 1).find(isProject);
-      return project ? [...schemas, { name: PROJECT_FILE, text: `${project.node.value}\n` }] : schemas;
     };
 
     const typed: { node: Code; project: number }[] = [];
@@ -241,13 +226,7 @@ export function remarkSchemas() {
       request.formats = formatRows.flatMap((row) => (row.formats.length === 1 && row.examples.length === 1 ? [{ format: row.formats[0]!, example: row.examples[0]! }] : []));
     }
 
-    // The codec tables (above): each row's format and codec.
-    const codecRows = tables(tree)
-      .filter((table) => header(table)[0] === 'Format' && header(table)[1] === 'Codec')
-      .flatMap((table) => (table.children ?? []).slice(1))
-      .map((row) => `${inlineCode(row.children?.[0] ?? { type: 'text' }).join(', ')}: ${inlineCode(row.children?.[1] ?? { type: 'text' }).join(', ')}`);
-
-    if (!typed.length && !errors.length && !bundles.length && !formatRows.length && !codecRows.length) return;
+    if (!typed.length && !errors.length && !bundles.length && !formatRows.length) return;
     const answer = ask(site, request);
 
     for (const { node, project } of typed) {
@@ -278,14 +257,6 @@ export function remarkSchemas() {
     for (const { node, item } of bundles) {
       const analysis = trimmedLines(answer.bundles[item]!);
       if (trimmedLines(node.value) !== analysis) throw new Error(`dotschema: the bundle block of ${file.path} is not what esbuild gives now, which is:\n${analysis}`);
-    }
-
-    if (codecRows.length) {
-      const all = answer.codecs.map((c) => `${c.format}: ${c.name}`);
-      const missing = all.filter((row) => !codecRows.includes(row));
-      const unknown = codecRows.filter((row) => !all.includes(row));
-      if (missing.length || unknown.length)
-        throw new Error(`dotschema: the codec table of ${file.path} ${[missing.length ? `leaves out ${missing.join('; ')}` : '', unknown.length ? `lists what is no codec of dotschema's: ${unknown.join('; ')}` : ''].filter(Boolean).join(', and ')}`);
     }
 
     if (answer.formats) {

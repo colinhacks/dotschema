@@ -108,7 +108,6 @@ The rest is on [dotschema.vercel.app](https://dotschema.vercel.app):
 - [The type](https://dotschema.vercel.app/#the-type): what each keyword types as, and doc comments
 - [Validating](https://dotschema.vercel.app/#validating): `.validate()`, `.is()`, definitions, `.pick()` and `.omit()`, and every format
 - [Standard Schema](https://dotschema.vercel.app/#standard-schema), for the libraries that take one
-- [Codecs](https://dotschema.vercel.app/#codecs): a `date-time` string decoded into a `Temporal.Instant`, and back
 - [Errors](https://dotschema.vercel.app/#errors) and [limits](https://dotschema.vercel.app/#limits)
 
 ## License

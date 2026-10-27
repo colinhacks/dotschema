@@ -1,9 +1,0 @@
-// The codecs of this package's schema files: each string of these formats decodes into its value.
-{
-  "codecs": {
-    "date-time": "Temporal.Instant",
-    "date": "Temporal.PlainDate",
-    "duration": "Temporal.Duration",
-    "int64": "bigint",
-  },
-}

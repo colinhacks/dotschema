@@ -21,14 +21,12 @@ import { CODES, type Problem } from "./core/problems.ts";
 import type { TypeOptions } from "./core/universal.ts";
 import { literal, toJs, type Value } from "./core/serialize.ts";
 import { parseSchemaFile } from "./parse.ts";
-import { projectOf, type Project } from "./config.ts";
-import { plan, type Place, type Plan } from "./decode.ts";
-import { ajvIds, collect, dynamicRefProblems, eachSchema, embeddedIdProblems, fileOf, forAjv, fragmentOf, fragmentPath, mapSchemas, pointTo, withoutKeywords, type Files } from "./refs.ts";
+import { collect, dynamicRefProblems, eachSchema, embeddedIdProblems, fileOf, forAjv, fragmentOf, fragmentPath, mapSchemas, pointTo, withoutKeywords, type Files } from "./refs.ts";
 import { definitionsOf, LITERAL_NAME, schemaModuleTypes, type Draft } from "./schema-types.ts";
 import { jsonSchemas, type Entry, type JsonSchemaResult, type JsonSchemaTarget } from "./json-schema.ts";
 import { formatDefinitions, formatFile } from "./formats/index.ts";
 
-const FAILED_TYPES = ["declare const schema: any;", "declare namespace schema { export type Type = any; export type Input = any; }", "export default schema;", "export type Type = any;", "export type Input = any;", ""].join("\n");
+const FAILED_TYPES = ["declare const schema: any;", "declare namespace schema { export type Type = any; }", "export default schema;", "export type Type = any;", ""].join("\n");
 
 const problem = (message: string, place: { start: number; length: number } = { start: 0, length: 1 }): Problem => ({ message, ...place, code: CODES.schema });
 
@@ -479,12 +477,6 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
   const draft = draftOf(schema);
   const files = filesOf(source, path, schema);
   const problems: Problem[] = [...files.problems];
-  // The codecs of every file's project, which the decoded types follow, and the problems of the
-  // projects and of the places where the types and the pass would disagree, as the build reports them.
-  const { projects, problems: projectProblems } = projectsOf(files);
-  problems.push(...projectProblems);
-  const decoding = [...projects.values()].some((project) => project.codecs.size) ? codecPlan(files, path, projects) : undefined;
-  if (decoding && !files.problems.length) problems.push(...decoding.problems.map((message) => problem(message)));
   const loaded = loadAjv(path, schema, false);
   const entries = moduleEntries(files, path, "error" in loaded ? undefined : loaded.ajv.RULES.all);
   // A reference that cannot be followed is the problem; ajv would only add that it cannot resolve it.
@@ -499,61 +491,42 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
       if (failed) problems.push(failed);
     }
   }
-  const { declarations, rootName, rootType, rootInputName, rootInputType, definitions } = schemaModuleTypes(
-    files.schemas.get(path)!,
-    { path, read: (other) => files.schemas.get(other), ...(decoding ? { codecs: { codecOf: decoding.codecOf, reaches: decoding.reaches } } : {}) },
-    draft,
-    options,
-  );
-  // `Schema<Type, Json>`, or `CodecSchema<Type, Json, Input>` where a codec decodes something in it:
-  // the decoded type first, and the value as given after the schema.
-  const typeOf = (entry: ModuleEntry, type: string, literalType: string, inputType: string | undefined) => {
-    if (inputType === undefined) return entry.shape ? `__DotschemaObjectSchema<${type}, ${literalType}, ${keyUnion(entry.shape.keys)}>` : `__DotschemaSchema<${type}, ${literalType}>`;
-    return entry.shape ? `__DotschemaObjectCodecSchema<${type}, ${literalType}, ${keyUnion(entry.shape.keys)}, ${inputType}>` : `__DotschemaCodecSchema<${type}, ${literalType}, ${inputType}>`;
-  };
+  const { declarations, rootName, rootType, definitions } = schemaModuleTypes(files.schemas.get(path)!, { path, read: (other) => files.schemas.get(other) }, draft, options);
+  const typeOf = (entry: ModuleEntry, type: string, literalType: string) =>
+    entry.shape ? `__DotschemaObjectSchema<${type}, ${literalType}, ${keyUnion(entry.shape.keys)}>` : `__DotschemaSchema<${type}, ${literalType}>`;
   const [rootEntry, ...definitionEntries] = entries;
-  const inputTypes = [rootInputType, ...definitionEntries.map((entry) => definitions.find((d) => d.keyword === entry.entry![0] && d.key === entry.entry![1])!.inputType)];
-  // Each of dotschema's types the module names, imported once under a name of its own.
-  const uses = (name: string, used: boolean) => (used ? [`import type { ${name} as __Dotschema${name} } from "dotschema";`] : []);
-  const imports = [
-    ...uses("Schema", true),
-    ...uses("ObjectSchema", entries.some((entry, i) => entry.shape && inputTypes[i] === undefined)),
-    ...uses("CodecSchema", entries.some((entry, i) => !entry.shape && inputTypes[i] !== undefined)),
-    ...uses("ObjectCodecSchema", entries.some((entry, i) => entry.shape && inputTypes[i] !== undefined)),
-  ];
   const definitionLines = definitionEntries.map((entry) => {
     const definition = definitions.find((d) => d.keyword === entry.entry![0] && d.key === entry.entry![1])!;
     return [
-      `${definition.doc}export declare const ${definition.valueName}: ${typeOf(entry, definition.type, `${LITERAL_NAME}[${JSON.stringify(definition.keyword)}][${JSON.stringify(definition.key)}]`, definition.inputType)};`,
-      `export declare namespace ${definition.valueName} { export type { ${definition.typeName} as Type, ${definition.inputTypeName ?? definition.typeName} as Input }; }`,
+      `${definition.doc}export declare const ${definition.valueName}: ${typeOf(entry, definition.type, `${LITERAL_NAME}[${JSON.stringify(definition.keyword)}][${JSON.stringify(definition.key)}]`)};`,
+      `export declare namespace ${definition.valueName} { export type { ${definition.typeName} as Type }; }`,
     ].join("\n");
   });
-  const body = [
-    ...imports,
-    declarations,
-    // The schema as written, under a name of its own, so an error or a hover prints `Json` in its place.
-    `/** The JSON Schema as written in ${basename(path).replace(/\*\//g, "*\\/")}. */`,
-    `type ${LITERAL_NAME} = ${literal(schema)};`,
-    // The root's type written out rather than named, so a hover over a value `.validate()` or `.is()`
-    // gives prints the schema's properties, and a `$ref` within them by its name (the maintainer, on
-    // 2026-10-26: "People want to see the actual properties for visibility").
-    `declare const schema: ${typeOf(rootEntry!, rootType, LITERAL_NAME, rootInputType)};`,
-    // A namespace of types alone, which merges with the const, so the default import names the
-    // type too: `user.Type` (the maintainer, on 2026-10-26: "I think the default import should have
-    // a `.Type` property on it. That should be the recommended way to access it."), and `user.Input`,
-    // the value as given, where a codec decodes it into another.
-    `declare namespace schema { export type { ${rootName} as Type, ${rootInputName ?? rootName} as Input }; }`,
-    "export default schema;",
-    // Each definition's validator, named for its key in camelCase, with its type as `.Type` (the
-    // maintainer's pick of 2026-10-26: "import { address } from "./user.schema.jsonc", with
-    // address.validate() and address.is()").
-    ...definitionLines,
-    "",
-  ].join("\n");
-  // TypeScript declares Temporal under `lib: esnext.temporal`, which a decoded type of Temporal's
-  // brings into the program, so that a project on an older `lib` type-checks (DESIGN.md, "Codecs").
-  const temporal = decoding?.codecs.some((codec) => codec.temporal) ?? false;
-  return { types: temporal ? `/// <reference lib="esnext.temporal" />\n${body}` : body, problems };
+  return {
+    types: [
+      `import type { Schema as __DotschemaSchema } from "dotschema";`,
+      ...(entries.some((entry) => entry.shape) ? [`import type { ObjectSchema as __DotschemaObjectSchema } from "dotschema";`] : []),
+      declarations,
+      // The schema as written, under a name of its own, so an error or a hover prints `Json` in its place.
+      `/** The JSON Schema as written in ${basename(path).replace(/\*\//g, "*\\/")}. */`,
+      `type ${LITERAL_NAME} = ${literal(schema)};`,
+      // The root's type written out rather than named, so a hover over a value `.validate()` or `.is()`
+      // gives prints the schema's properties, and a `$ref` within them by its name (the maintainer, on
+      // 2026-10-26: "People want to see the actual properties for visibility").
+      `declare const schema: ${typeOf(rootEntry!, rootType, LITERAL_NAME)};`,
+      // A namespace of types alone, which merges with the const, so the default import names the
+      // type too: `user.Type` (the maintainer, on 2026-10-26: "I think the default import should have
+      // a `.Type` property on it. That should be the recommended way to access it.").
+      `declare namespace schema { export type { ${rootName} as Type }; }`,
+      "export default schema;",
+      // Each definition's validator, named for its key in camelCase, with its type as `.Type` (the
+      // maintainer's pick of 2026-10-26: "import { address } from "./user.schema.jsonc", with
+      // address.validate() and address.is()").
+      ...definitionLines,
+      "",
+    ].join("\n"),
+    problems,
+  };
 }
 
 /** The problem with the first definition ajv cannot compile on its own, as the build would report it. */
@@ -567,59 +540,6 @@ function definitionProblem(ajv: Ajv, compiled: { validate: unknown; id: string }
     }
   }
   return undefined;
-}
-
-// ---- codecs -------------------------------------------------------------------------------------
-
-/**
- * The project of every file a module is made from (config.ts): each file's codecs come from its own
- * package's dotschema.jsonc, so a schema another package wrote decodes as that package says. Its
- * problems, each placed at the start of the file the module is made for, and the project files
- * that exist, which a bundler watches as it watches a `$ref`'s file.
- */
-function projectsOf(files: Files): { projects: Map<string, Project>; problems: Problem[]; watched: string[] } {
-  const projects = new Map<string, Project>();
-  const problems: Problem[] = [];
-  const watched = new Set<string>();
-  for (const path of files.schemas.keys()) {
-    const project = projectOf(path);
-    projects.set(path, project);
-    if (project.found && project.path) watched.add(project.path);
-    for (const message of project.problems) if (!problems.some((p) => p.message === message)) problems.push({ ...problem(message), code: CODES.project });
-  }
-  return { projects, problems, watched: [...watched] };
-}
-
-/** The places of a module's entries, as `moduleEntries` lists them: the root, then each definition whose value is a schema. */
-function entryPlaces(files: Files, path: string): Place[] {
-  const root = files.schemas.get(path)!;
-  const definitions = definitionsOf(root, path).filter(({ keyword, key }) => {
-    const value = pointTo(root, [keyword, key]);
-    return isObj(value) || typeof value === "boolean";
-  });
-  return [{ path, segments: [] }, ...definitions.map(({ keyword, key }) => ({ path, segments: [keyword, key] }))];
-}
-
-/** The plan of a module's codecs (decode.ts), from every file's project. */
-function codecPlan(files: Files, path: string, projects: Map<string, Project>): Plan {
-  return plan({ files, rootPath: path, draft: draftOf(files.schemas.get(path)!) ?? "draft-07", projectOf: (file) => projects.get(file) ?? projectOf(file), ajvIds: ajvIds(files), entries: entryPlaces(files, path) });
-}
-
-/**
- * The validators the pass picks a union's member and an `if`'s branch with, compiled by pointer, as
- * a definition's is (`entryCode`), from the validator that stops at the first failure.
- */
-function selectorCode(ajv: Ajv, standalone: (ajv: Ajv, refs: unknown) => string, ids: string[], wrappers: { n: number }): { source: string; returns: string } {
-  const exported: Record<string, string> = {};
-  ids.forEach((id, i) => {
-    let key = id;
-    if (ajv.getSchema(id) === undefined) {
-      key = `dotschema-entry:${wrappers.n++}`;
-      ajv.addSchema({ $id: key, $ref: id });
-    }
-    exported[`s${i}`] = key;
-  });
-  return { source: standalone(ajv, exported), returns: `[${ids.map((_, i) => `module.exports.s${i}`).join(", ")}]` };
 }
 
 // ---- code ---------------------------------------------------------------------------------------
@@ -766,7 +686,7 @@ const __filtered = (schema, keep) => {
 `;
 
 /** `.pick()` and `.omit()`, on a plain object's value. */
-const PICK = (codecs: boolean) => `
+const PICK = `
   if (shape) {
     const narrow = (keep) =>
       __make(
@@ -774,8 +694,7 @@ const PICK = (codecs: boolean) => `
         firstFns,
         __filtered(schema, keep),
         Object.fromEntries(Object.entries(jsonSchemas).map(([target, entry]) => [target, entry.schema ? { schema: __filtered(entry.schema, keep) } : entry])),
-        { properties: shape.properties.filter(([key]) => keep(key)), required: shape.required.filter(keep), additional: shape.additional },${codecs ? `
-        decoder && __narrowPlan(decoder.plan, decoder.root, keep),` : ""}
+        { properties: shape.properties.filter(([key]) => keep(key)), required: shape.required.filter(keep), additional: shape.additional },
       );
     made.pick = (...keys) => narrow((key) => keys.includes(key));
     made.omit = (...keys) => narrow((key) => !keys.includes(key));
@@ -783,203 +702,10 @@ const PICK = (codecs: boolean) => `
 `;
 
 /**
- * `.decode()` and `.encode()`'s pass, for a module whose schema has a codec (decode.ts): it walks
- * the value along the plan's nodes and converts each string a codec decodes there, copying only the
- * objects and arrays on the way to one, so the caller's value is never changed. A codec's refusal,
- * or what Temporal throws, is an issue at its place; nothing here throws.
- */
-const CODEC_RUNTIME = `
-class __Refusal {
-  constructor(reason) {
-    this.reason = reason;
-  }
-}
-const __refuse = (reason) => new __Refusal(reason);
-const __patterns = new Map();
-const __pattern = (source) => {
-  let pattern = __patterns.get(source);
-  if (!pattern) __patterns.set(source, (pattern = new RegExp(source, "u")));
-  return pattern;
-};
-// The nodes that apply to a value from \`ids\`: each with the schemas that apply to it in place. With
-// "pick", the member of a union the value takes (its tag, or the first whose validator passes) and
-// the branch its \`if\` picks; with "every", every member and both branches, for a value already
-// decoded, which no validator reads; with "always", neither.
-const __expand = (plan, ids, value, mode) => {
-  const out = new Set();
-  const passes = (how) => how === true || (how !== false && plan.selectors[how](value));
-  const add = (id) => {
-    if (id === null || id === undefined || out.has(id)) return;
-    out.add(id);
-    const node = plan.nodes[id];
-    if (node.all) for (const n of node.all) add(n);
-    if (node.any && mode !== "always")
-      for (const [tag, members] of node.any) {
-        if (mode === "every") for (const [, n] of members) add(n);
-        else if (tag !== null) {
-          const own = typeof value === "object" && value !== null && Object.hasOwn(value, tag) ? value[tag] : undefined;
-          const member = members.find(([how]) => how === own);
-          if (member) add(member[1]);
-        } else for (const [how, n] of members) if (passes(how)) {
-          add(n);
-          break;
-        }
-      }
-    if (node.cond && mode !== "always")
-      for (const [how, then, otherwise] of node.cond) {
-        if (mode === "every") {
-          add(then);
-          add(otherwise);
-        } else add(passes(how) ? then : otherwise);
-      }
-  };
-  for (const id of ids) add(id);
-  return [...out].map((id) => plan.nodes[id]);
-};
-// The nodes of a property's value: its own in \`properties\`, each pattern its key matches, and
-// \`additionalProperties\` where neither names it, as ajv applies them.
-const __below = (nodes, key) => {
-  const out = [];
-  for (const node of nodes) {
-    let named = false;
-    if (node.p) for (const [name, n] of node.p) if (name === key) {
-      named = true;
-      if (n !== null) out.push(n);
-    }
-    if (node.pp) for (const [source, n] of node.pp) if (__pattern(source).test(key)) {
-      named = true;
-      if (n !== null) out.push(n);
-    }
-    if (!named && node.ap !== undefined && node.ap !== null) out.push(node.ap);
-  }
-  return out;
-};
-// The nodes of an array's item at \`index\`: a tuple's own, or the rest's.
-const __item = (nodes, index) => {
-  const out = [];
-  for (const node of nodes) {
-    const n = node.pi && index < node.pi.length ? node.pi[index] : node.it;
-    if (n !== null && n !== undefined) out.push(n);
-  }
-  return out;
-};
-const __convert = (fn, value, path, issues, direction) => {
-  let out;
-  try {
-    out = fn(value);
-  } catch (error) {
-    out = new __Refusal(__thrown(error));
-  }
-  if (!(out instanceof __Refusal)) return out;
-  issues.push({ message: "could not be " + direction + "d: " + out.reason, path, keyword: direction });
-  return value;
-};
-// The parts of an object or array below a place, each converted by \`at\`, in a copy only where one
-// changed; \`sure\`, for encoding, the nodes that apply here whichever member or branch a value took.
-const __parts = (plan, nodes, value, path, issues, at, sure = []) => {
-  if (Array.isArray(value)) {
-    let out = value;
-    for (let i = 0; i < value.length; i++) {
-      const ids = __item(nodes, i);
-      if (!ids.length) continue;
-      const converted = at(plan, ids, value[i], [...path, i], issues, __item(sure, i));
-      if (converted !== value[i]) {
-        if (out === value) out = value.slice();
-        out[i] = converted;
-      }
-    }
-    return out;
-  }
-  if (typeof value !== "object" || value === null) return value;
-  let out = value;
-  for (const key of Object.keys(value)) {
-    const ids = __below(nodes, key);
-    if (!ids.length) continue;
-    const converted = at(plan, ids, value[key], [...path, key], issues, __below(sure, key));
-    // A copy made by spreading holds a \`__proto__\` key as its own, which assigning then sets.
-    if (converted !== value[key]) {
-      if (out === value) out = { ...value };
-      out[key] = converted;
-    }
-  }
-  return out;
-};
-const __decodeAt = (plan, ids, value, path, issues) => {
-  const nodes = __expand(plan, ids, value, "pick");
-  if (typeof value === "string") {
-    const node = nodes.find((n) => n.c !== undefined);
-    return node ? __convert(__codecs[node.c].decode, value, path, issues, "decode") : value;
-  }
-  return __parts(plan, nodes, value, path, issues, __decodeAt);
-};
-// A decoded value has no validator to pick a union's member by, so every member's nodes are read,
-// each codec encoding only its own kind of value; \`sure\` holds those that apply whichever member a
-// value took, from the root down, where a string is the value as given and not the codec's.
-const __encodeAt = (plan, ids, value, path, issues, sure = ids) => {
-  const nodes = __expand(plan, ids, value, "every");
-  for (const node of nodes) if (node.c !== undefined && __codecs[node.c].is(value)) return __convert(__codecs[node.c].encode, value, path, issues, "encode");
-  const always = __expand(plan, sure, value, "always");
-  if (typeof value === "string") {
-    const node = always.find((n) => n.c !== undefined);
-    if (node) issues.push({ message: "must be " + __codecs[node.c].what + ", not a string", path, keyword: "encode" });
-    return value;
-  }
-  return __parts(plan, nodes, value, path, issues, __encodeAt, always);
-};
-// A pass from the root, every issue it finds, or what a value it cannot read threw, as one issue.
-const __pass = (at, direction, plan, root, value) => {
-  const issues = [];
-  let out;
-  try {
-    out = at(plan, [root], value, [], issues);
-  } catch (error) {
-    return { issues: [{ message: "could not be " + direction + "d: " + __thrown(error), path: [], keyword: direction }] };
-  }
-  return issues.length ? { issues } : { value: out };
-};
-// For .pick() and .omit() of a plain object, whose node holds \`properties\` and \`additionalProperties\` alone.
-const __narrowPlan = (plan, root, keep) => {
-  if (root === null) return { plan, root };
-  const node = plan.nodes[root];
-  const narrowed = { ...node, ...(node.p ? { p: node.p.filter(([key]) => keep(key)) } : {}) };
-  const decodes = (narrowed.p ?? []).some(([, n]) => n !== null) || (narrowed.pp ?? []).some(([, n]) => n !== null) || (narrowed.ap ?? null) !== null;
-  return decodes ? { plan: { ...plan, nodes: [...plan.nodes, narrowed] }, root: plan.nodes.length } : { plan, root: null };
-};
-`;
-
-/**
- * `.decode()` and `.encode()` of a schema with a codec: the value checked as given, then decoded;
- * the value encoded, then checked. Standard JSON Schema's output describes the decoded value, which
- * is no JSON value, so it throws, as Zod's does for a Date.
- */
-const DECODE = `
-  const decode = (value) => {
-    const checked = validate(value);
-    return checked.issues || !decoder || decoder.root === null ? checked : __pass(__decodeAt, "decode", decoder.plan, decoder.root, value);
-  };
-  const encode = (value) => {
-    if (!decoder || decoder.root === null) return validate(value);
-    const encoded = __pass(__encodeAt, "encode", decoder.plan, decoder.root, value);
-    return encoded.issues ? encoded : validate(encoded.value);
-  };
-  const output = (options) => {
-    if (decoder && decoder.root !== null) throw new TypeError("This schema decodes strings with a codec of dotschema.jsonc's, so its output holds values no JSON Schema describes; jsonSchema.input is the schema of the value as given.");
-    return jsonSchema(options);
-  };
-`;
-
-/** The same for a schema without one, where decoding is checking and the value is the same both ways. */
-const NO_DECODE = `
-  const decode = validate;
-  const encode = validate;
-  const output = jsonSchema;
-`;
-
-/**
  * The module's run time, beside its validators. `objects` adds the join and `.pick()` and `.omit()`,
  * which only a module whose root or a definition is a plain object uses, so another module carries neither.
  */
-const runtime = (objects: boolean, codecs: boolean) => `
+const runtime = (objects: boolean) => `
 // Standard Schema's path for an ajv error. ajv's instancePath is a JSON Pointer, which writes an
 // array index as it writes an object key, so each segment is read against the value it names: in
 // an array, a number. The key of a property that is missing, unexpected or misnamed, which ajv
@@ -1018,13 +744,13 @@ const __thrown = (error) => {
     return "a value that cannot be read";
   }
 };
-${objects ? OBJECTS : ""}${codecs ? CODEC_RUNTIME : ""}
+${objects ? OBJECTS : ""}
 // A schema module's value, or one of its definitions': \`.validate()\` with ajv's allErrors validator,
 // \`.is()\` with the one that stops at the first failure, Standard Schema, and for a plain object
 // (a \`shape\`), \`.pick()\` and \`.omit()\`, which give the same for the schema with only some of its
 // properties, from the same functions. Nothing on it throws but Standard JSON Schema's conversion
 // to a target it has no schema for, as that spec asks.
-const __make = (allFns, firstFns, schema, jsonSchemas, shape${codecs ? ", decoder" : ""}) => {
+const __make = (allFns, firstFns, schema, jsonSchemas, shape) => {
   const all = ${objects ? "shape ? __join(allFns, shape, true) : " : ""}allFns;
   const first = ${objects ? "shape ? __join(firstFns, shape, false) : " : ""}firstFns;
   // Every issue, from the validator compiled with allErrors; the value itself on success. Nothing
@@ -1056,9 +782,8 @@ const __make = (allFns, firstFns, schema, jsonSchemas, shape${codecs ? ", decode
     if (entry.error) throw new TypeError(entry.error);
     return structuredClone(entry.schema);
   };
-${codecs ? DECODE : NO_DECODE}
-  const made = { validate, is, decode, encode, schema, "~standard": { version: 1, vendor: "dotschema", validate: decode, encode, jsonSchema: { input: jsonSchema, output } } };
-${objects ? PICK(codecs) : ""}
+  const made = { validate, is, schema, "~standard": { version: 1, vendor: "dotschema", validate, jsonSchema: { input: jsonSchema, output: jsonSchema } } };
+${objects ? PICK : ""}
   return made;
 };
 `;
@@ -1078,14 +803,6 @@ export function schemaCode(source: string, path: string, { discriminators = true
   if (!parsed.ok) return failed(parsed.problems);
   const files = filesOf(source, path, parsed.value);
   if (files.problems.length) return failed(files.problems, files.watched);
-  const { projects, problems: projectProblems, watched: projectFiles } = projectsOf(files);
-  const watchFiles = [...files.watched, ...projectFiles];
-  if (projectProblems.length) return failed(projectProblems, watchFiles);
-  // Only a module whose files' projects turn on a codec has a plan; every other is as it was.
-  const decoding = [...projects.values()].some((project) => project.codecs.size) ? codecPlan(files, path, projects) : undefined;
-  if (decoding?.problems.length) return failed(decoding.problems.map((message) => problem(message)), watchFiles);
-  const codecs = decoding !== undefined && decoding.nodes.length > 0;
-  let selectors: { source: string; returns: string } | undefined;
   // Two validators from the same files, formats and meta-schemas: every error for `.validate()`, the first for `.is()`.
   const standalones: { source: string; returns: string }[][] = [];
   let entries: ModuleEntry[] | undefined;
@@ -1094,14 +811,14 @@ export function schemaCode(source: string, path: string, { discriminators = true
   const tagged = discriminators ? withDiscriminators(files) : { files, count: 0 };
   for (const allErrors of [true, false]) {
     let loaded = loadAjv(path, parsed.value, true, allErrors, tagged.count > 0);
-    if ("error" in loaded) return failed([problem(loaded.error)], watchFiles);
+    if ("error" in loaded) return failed([problem(loaded.error)], files.watched);
     let compiled = tagged.count > 0 ? compile(loaded.ajv, tagged.files, path) : compile(loaded.ajv, files, path);
     if ("problem" in compiled && tagged.count > 0) {
       loaded = loadAjv(path, parsed.value, true, allErrors);
-      if ("error" in loaded) return failed([problem(loaded.error)], watchFiles);
+      if ("error" in loaded) return failed([problem(loaded.error)], files.watched);
       compiled = compile(loaded.ajv, files, path);
     }
-    if ("problem" in compiled) return failed([compiled.problem], watchFiles);
+    if ("problem" in compiled) return failed([compiled.problem], files.watched);
     entries ??= moduleEntries(files, path, loaded.ajv.RULES.all);
     const standaloneModule = loaded.require("ajv/dist/standalone");
     const standalone = standaloneModule.default ?? standaloneModule;
@@ -1111,17 +828,10 @@ export function schemaCode(source: string, path: string, { discriminators = true
       try {
         codes.push(entryCode(loaded.ajv, standalone, compiled, entry, wrappers));
       } catch (error) {
-        return failed([problem(entry.entry ? `The definition "${entry.entry[1]}" is not a valid schema: ${(error as Error).message}` : `The schema is not valid: ${(error as Error).message}`)], watchFiles);
+        return failed([problem(entry.entry ? `The definition "${entry.entry[1]}" is not a valid schema: ${(error as Error).message}` : `The schema is not valid: ${(error as Error).message}`)], files.watched);
       }
     }
     standalones.push(codes);
-    if (!allErrors && decoding?.selectors.length) {
-      try {
-        selectors = selectorCode(loaded.ajv, standalone, decoding.selectors, wrappers);
-      } catch (error) {
-        return failed([problem(`The schema is not valid: ${(error as Error).message}`)], watchFiles);
-      }
-    }
   }
   // The standalone code requires ajv's run-time helpers, which resolve from this module, a dependent
   // of ajv's, and reaches each format checked by a function through `__formats` (`usedFormats`).
@@ -1131,9 +841,7 @@ export function schemaCode(source: string, path: string, { discriminators = true
   try {
     const shapeOf = (entry: ModuleEntry) => (entry.shape ? shapeCode(entry.shape) : "undefined");
     const [root, ...definitions] = entries!;
-    const formats = usedFormats(inline, [...all, ...first, ...(selectors ? [selectors] : [])].map((code) => code.source));
-    // Each entry's place in the plan, for a module with a codec.
-    const decoderOf = (i: number) => (codecs ? `, { plan: __plan, root: ${decoding!.roots[i]} }` : "");
+    const formats = usedFormats(inline, [...all, ...first].map((code) => code.source));
     body = [
       ...(formats ? [formats] : []),
       `const __validateAll = /* @__PURE__ */ ${inline.wrap(all[0]!.source, all[0]!.returns)};`,
@@ -1141,27 +849,21 @@ export function schemaCode(source: string, path: string, { discriminators = true
       `const __schema = ${toJs(parsed.value)};`,
       `const __jsonSchemas = ${toJs(root!.docs as unknown as Value)};`,
       `const __confirm = ${needsConfirmation(files)};`,
-      ...(codecs
-        ? [
-            `const __codecs = [${decoding!.codecs.map((codec) => `\n// ${codec.format} as ${codec.name}\n${codec.code}`).join(",")}\n];`,
-            `const __plan = { nodes: ${toJs(decoding!.nodes as unknown as Value)}, selectors: ${selectors ? `/* @__PURE__ */ ${inline.wrap(selectors.source, selectors.returns)}` : "[]"} };`,
-          ]
-        : []),
-      runtime(entries!.some((entry) => entry.shape), codecs),
-      `const schema = /* @__PURE__ */ __make(__validateAll, __validateFirst, __schema, __jsonSchemas, ${shapeOf(root!)}${decoderOf(0)});`,
+      runtime(entries!.some((entry) => entry.shape)),
+      `const schema = /* @__PURE__ */ __make(__validateAll, __validateFirst, __schema, __jsonSchemas, ${shapeOf(root!)});`,
       "export default schema;",
       ...definitions.map((entry, i) =>
         [
           `export const ${entry.name} = /* @__PURE__ */ (() => {`,
           `const all = ${inline.wrap(all[i + 1]!.source, all[i + 1]!.returns)};`,
           `const first = ${inline.wrap(first[i + 1]!.source, first[i + 1]!.returns)};`,
-          `return __make(all, first, __schema[${JSON.stringify(entry.entry![0])}][${JSON.stringify(entry.entry![1])}], ${toJs(entry.docs as unknown as Value)}, ${shapeOf(entry)}${decoderOf(i + 1)});`,
+          `return __make(all, first, __schema[${JSON.stringify(entry.entry![0])}][${JSON.stringify(entry.entry![1])}], ${toJs(entry.docs as unknown as Value)}, ${shapeOf(entry)});`,
           "})();",
         ].join("\n"),
       ),
     ];
   } catch (error) {
-    return failed([problem((error as Error).message)], watchFiles);
+    return failed([problem((error as Error).message)], files.watched);
   }
-  return { code: [inline.table(), ...body, ""].join("\n"), problems: [], watchFiles };
+  return { code: [inline.table(), ...body, ""].join("\n"), problems: [], watchFiles: files.watched };
 }

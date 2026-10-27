@@ -342,24 +342,18 @@ export function embeddedIdProblems(files: Files, rootPath: string, rootSource: s
   return problems;
 }
 
-/** Each file's id inside ajv: its own absolute `$id` (one with a scheme), or `dotschema:<n>`, in the order the files were reached. */
-export function ajvIds(files: Files): Map<string, string> {
-  const ids = new Map<string, string>();
-  let n = 0;
-  for (const [path, schema] of files.schemas) {
-    const own = isObj(schema) && typeof schema["$id"] === "string" && /^[A-Za-z][A-Za-z0-9+.-]*:/.test(schema["$id"]) ? schema["$id"] : undefined;
-    ids.set(path, own ?? `dotschema:${n++}`);
-  }
-  return ids;
-}
-
 /**
  * Every file of `files` for ajv, each under an id that holds no path, because ajv's standalone code
  * embeds ids: a file's own absolute `$id` (one with a scheme), or `dotschema:<n>`. Each reference
  * to another of the files is rewritten to that file's id, so ajv never resolves a file path.
  */
 export function forAjv(files: Files, rootPath: string): { root: Value; others: { path: string; id: string; schema: Value }[] } {
-  const ids = ajvIds(files);
+  const ids = new Map<string, string>();
+  let n = 0;
+  for (const [path, schema] of files.schemas) {
+    const own = isObj(schema) && typeof schema["$id"] === "string" && /^[A-Za-z][A-Za-z0-9+.-]*:/.test(schema["$id"]) ? schema["$id"] : undefined;
+    ids.set(path, own ?? `dotschema:${n++}`);
+  }
   const prepare = (path: string, schema: Value): Value => {
     const rewritten = mapRefs(schema, (ref) => {
       const target = fileOf(ref, path);

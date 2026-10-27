@@ -130,7 +130,7 @@ for (const [draft, additional] of [[D2020, false], [D07, false], [D2020, undefin
 test("a picked schema has the same surface: Standard Schema, the same function under ~standard, nothing that throws", async () => {
   const { default: s } = await load(base(D2020, false));
   const picked = s.pick("a");
-  assert.deepEqual(Object.keys(picked), ["validate", "is", "decode", "encode", "schema", "~standard", "pick", "omit"]);
+  assert.deepEqual(Object.keys(picked), ["validate", "is", "schema", "~standard", "pick", "omit"]);
   assert.equal(picked.validate, picked["~standard"].validate);
   assert.equal(picked["~standard"].vendor, "dotschema");
   // Each call gives a fresh document.

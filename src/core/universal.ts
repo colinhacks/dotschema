@@ -28,12 +28,6 @@ export interface LoaderPlugin {
   load(source: string, path: string): { code: string; problems: Problem[]; watchFiles?: string[] };
   /** TypeScript for the type checker, written for the compiler options of the project that asks, where they are known. */
   types(source: string, path: string, options?: TypeOptions): Promise<{ types: string; problems: Problem[] }> | { types: string; problems: Problem[] };
-  /**
-   * dotschema's own, for a content mapper with `dynamicConfig`: the settings a project opened from
-   * `configFileName` (its tsconfig) reads, as the files TypeScript watches and a fingerprint of them,
-   * and what a key in the tsconfig entry's `options` should say.
-   */
-  project?(configFileName: string): { watchedFiles: string[]; configIdentity: string; option(key: string): string };
 }
 
 /** dotschema's own: the compiler options the types follow, as the content mapper's `openProject` gives them; absent where no project is known. */
@@ -387,15 +381,13 @@ export function toMapperHandlers(plugin: LoaderPlugin): MapperHandlers {
     },
     openProject(params) {
       // dotschema takes no options; a key in a tsconfig entry's `options` is a mistake worth showing.
-      const { options, configFileName, projectHandle, compilerOptions } = (params ?? {}) as { options?: Record<string, unknown> | null; configFileName?: string; projectHandle?: string; compilerOptions?: Record<string, unknown> | null };
+      const { options, projectHandle, compilerOptions } = (params ?? {}) as { options?: Record<string, unknown> | null; projectHandle?: string; compilerOptions?: Record<string, unknown> | null };
       const typeOptions: TypeOptions = { exactOptionalPropertyTypes: compilerOptions?.["exactOptionalPropertyTypes"] === true };
       if (typeof projectHandle === "string") projects.set(projectHandle, typeOptions);
-      const project = plugin.project && typeof configFileName === "string" ? plugin.project(configFileName) : undefined;
-      const optionDiagnostics = Object.keys(options ?? {}).map((key) => ({ path: [key], messageText: project ? project.option(key) : `dotschema takes no options; remove "${key}".`, code: CODES.option }));
-      // With `dynamicConfig`, the files whose change re-opens the project, and their fingerprint, which
-      // takes in the compiler options the types follow, so that turning one on types the schemas again.
-      const configIdentity = project && `${project.configIdentity}:${typeOptions.exactOptionalPropertyTypes ? "exact" : "loose"}`;
-      return project ? { configIdentity, watchedFiles: project.watchedFiles, optionDiagnostics } : { optionDiagnostics };
+      const optionDiagnostics = Object.keys(options ?? {}).map((key) => ({ path: [key], messageText: `dotschema takes no options; remove "${key}".`, code: CODES.option }));
+      // With `dynamicConfig`, the project's fingerprint is the compiler options the types follow, so
+      // that turning one on types the schemas again; no file is watched.
+      return { configIdentity: typeOptions.exactOptionalPropertyTypes ? "exact" : "loose", watchedFiles: [], optionDiagnostics };
     },
     async transform(params) {
       const { fileName, content, projectHandle } = params as { fileName: string; content: string; projectHandle?: string };

@@ -1,6 +1,0 @@
-// The codecs of this lab's package: a schema file below this directory finds this file beside the
-// package.json, so stamp.schema.jsonc decodes; lab/basic's schemas are the repository's package,
-// which has no dotschema.jsonc, and decode nothing.
-{
-  "codecs": { "date-time": "Temporal.Instant", "int64": "bigint" },
-}

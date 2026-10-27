@@ -12,7 +12,6 @@
 // - `formats`: the page's format tables, each row a format and a value it is said to accept; the
 //   answer is every format dotschema has, and each row's verdict from the module dotschema builds
 //   for `{ "format": … }`.
-// - `codecs`: every codec dotschema has, each its format and its name in `dotschema.jsonc`.
 // - `bundles`: a file written into its directory beside the schema files it sees, and esbuild's
 //   analysis of it bundled and minified with dotschema's esbuild plugin (esbuild, the repository's
 //   development dependency, as its own resolution from here finds it).
@@ -21,7 +20,6 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import * as esbuild from "esbuild";
 import dotschema from "../../src/esbuild.ts";
-import { CODECS } from "../../src/codecs.ts";
 import { FORMATS } from "../../src/formats/index.ts";
 import { loader } from "../../src/loader.ts";
 import { schemaCode } from "../../src/schema.ts";
@@ -40,11 +38,7 @@ let input = "";
 for await (const chunk of process.stdin) input += chunk;
 const request = JSON.parse(input) as Request;
 
-/**
- * The files of an example, written into a directory of its own with a package.json, so that the
- * directory is the package dotschema finds from each schema file there (src/config.ts) and the
- * project file it reads is the example's `dotschema.jsonc`, or none.
- */
+/** The files of an example, written into a directory of its own with a package.json. */
 function write(dir: string, files: File[]) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "package.json"), "{}\n");
@@ -132,4 +126,4 @@ for (const item of request.bundles ?? []) {
   bundles.push(await esbuild.analyzeMetafile(result.metafile));
 }
 
-process.stdout.write(JSON.stringify({ projects, diagnostics, formats: request.formats ? { all: Object.keys(FORMATS), verdicts } : undefined, bundles, codecs: CODECS.map(({ format, name }) => ({ format, name })) }));
+process.stdout.write(JSON.stringify({ projects, diagnostics, formats: request.formats ? { all: Object.keys(FORMATS), verdicts } : undefined, bundles }));

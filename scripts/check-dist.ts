@@ -96,10 +96,6 @@ function check(name: string, dir: string, commands: [string, string[], string][]
 const VALIDATE = '"valid":"Ada","invalid":"name: must NOT have fewer than 1 characters; email: must match format \\"email\\"; role: must be equal to one of the allowed values","keywords":["minLength","format","enum"],"standard":[true,["role"]],"vendor":"dotschema","memberPath":["members",1,"name"]';
 const TEAM = '"team":[true,false,false]';
 const EVENTS = '"events":[true,true,false,false,false],"described":"3,4","clickX":5';
-// What a lab's own stamp.schema.jsonc decodes with the codecs of the dotschema.jsonc beside the lab's
-// package.json, which the copy keeps beside the package.json written for it.
-const STAMP = '[true,"2026-10-20T06:00:00Z","bigint","9007199254740993",{"at":"2026-10-20T06:00:00Z","id":"9007199254740993"}]';
-const CODECS = `"codecs":${STAMP}`;
 const preload = (expected: string): [string, string[], string] => [process.execPath, ["--import", "dotschema/register", "main.ts"], expected];
 const bundled = (expected: string): [string, string[], string] => [process.execPath, ["dist/main.mjs"], expected];
 
@@ -145,7 +141,6 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
     [process.execPath, [`dist/${bundler}/${file}`], VALIDATE],
     [process.execPath, [`dist/${bundler}/${file}`], TEAM],
     [process.execPath, [`dist/${bundler}/${file}`], EVENTS],
-    [process.execPath, [`dist/${bundler}/${file}`], CODECS],
   ];
   check("bundlers", dir, [...bundle("webpack", "main.cjs"), ...bundle("rspack", "main.cjs"), ...bundle("vite", "main.mjs"), ...bundle("vite-browser", "main.mjs"), ...bundle("rollup", "main.mjs"), ...bundle("rolldown", "main.mjs")]);
   console.log("bundlers: webpack and Rspack through dotschema/webpack, Vite (for Node and the browser), Rollup and Rolldown through dotschema/vite, from the dotschema tarball, with no warning");
@@ -164,13 +159,10 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
   });
   const SERVER = "&quot;vendor&quot;:&quot;dotschema&quot;,&quot;valid&quot;:true,&quot;issues&quot;:[&quot;name: minLength&quot;,&quot;email: format&quot;,&quot;role: enum&quot;]";
   const CLIENT = "id=\"client\">[&quot;name: must NOT have fewer than 1 characters&quot;";
-  const html = (text: string) => text.replaceAll('"', "&quot;");
   const next = (args: string[]): [string, string[], string][] => [
     [join(dir, "node_modules/.bin/next"), ["build", ...args], "prerendered as static content"],
     ["cat", [".next/server/app/index.html"], SERVER],
     ["cat", [".next/server/app/index.html"], CLIENT],
-    ["cat", [".next/server/app/index.html"], html(CODECS)],
-    ["cat", [".next/server/app/index.html"], `id="client-codecs">${html(STAMP)}`],
     ["grep", ["-rl", "must NOT have fewer than 1 characters", ".next/static/chunks"], ".next/static/chunks/"],
   ];
   check("nextjs", dir, [...next([]), ...next(["--webpack"])]);
@@ -182,10 +174,9 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
   const dir = project("jest", join(root, "lab", "jest"), { dotschema: tarball }, { extra: labDependencies("jest") });
   const jest = join(dir, "node_modules/.bin/jest");
   check("jest", dir, [
-    // Each test file's second test decodes the lab's stamp.schema.jsonc with its dotschema.jsonc's codecs.
-    [jest, ["-c", "jest.cjs.config.cjs", "--ci"], "Tests:       2 passed, 2 total"],
-    ["env", ["NODE_OPTIONS=--experimental-vm-modules", jest, "-c", "jest.esm.config.cjs", "--ci"], "Tests:       4 passed, 4 total"],
-    [join(dir, "node_modules/.bin/vitest"), ["run"], "Tests  2 passed (2)"],
+    [jest, ["-c", "jest.cjs.config.cjs", "--ci"], "Tests:       1 passed, 1 total"],
+    ["env", ["NODE_OPTIONS=--experimental-vm-modules", jest, "-c", "jest.esm.config.cjs", "--ci"], "Tests:       2 passed, 2 total"],
+    [join(dir, "node_modules/.bin/vitest"), ["run"], "Tests  1 passed (1)"],
   ]);
   console.log("jest: Jest's CommonJS and ES module runs through dotschema/jest, and Vitest through dotschema/vite, from the dotschema tarball");
 }
@@ -200,9 +191,6 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
     [process.execPath, ["serve.mjs", "dev"], '"get":{"vendor":"dotschema","valid":true'],
     // The formats' files in the built Worker, as tests/lab.test.ts checks them.
     [process.execPath, ["serve.mjs", "preview"], '"formats":[true,["token","data","network","card","at","id","mood","digest","host","mail","link"]]'],
-    // The codecs of the dotschema.jsonc beside the copy's package.json, under the build and the dev
-    // server alike: workerd defines no Temporal, so `.decode()` gives the issue and `.is()` takes the value.
-    ...(["preview", "dev"] as const).map((mode): [string, string[], string] => [process.execPath, ["serve.mjs", mode], '"codecs":["undefined",{"issues":[{"message":"could not be decoded: Temporal is not defined in this runtime","path":["at"],"keyword":"decode"}]},true]']),
   ]);
   console.log("cloudflare: the Worker built with dotschema/vite and Cloudflare's plugin, validating in workerd under vite preview and vite dev, its formats with it, from the dotschema tarball");
 }
