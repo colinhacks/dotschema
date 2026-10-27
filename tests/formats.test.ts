@@ -1,9 +1,10 @@
 // dotschema's formats (src/formats/): the JSON Schema Test Suite's format tests, which assume that
-// `format` asserts, as it does here; the copies of ajv-formats' formats against ajv-formats itself;
-// Zod's formats against Zod itself; and the files a module carries, which are the formats it uses. The suite's files are in
-// tests/fixtures/format-suite, copied from json-schema-org/JSON-Schema-Test-Suite at 89e83a7
-// (2026-10-22), tests/draft2020-12/optional/format; its tests/draft7/optional/format holds the same
-// tests but for duration and uuid, which draft-07 does not name, and each runs under both drafts here.
+// `format` asserts, as it does here, and which all pass; the copies of ajv-formats' formats against
+// ajv-formats itself; Zod's formats against Zod itself; and the files a module carries, which are the
+// formats it uses. The suite's files are in tests/fixtures/format-suite, copied from
+// json-schema-org/JSON-Schema-Test-Suite at 89e83a7 (2026-10-22), tests/draft2020-12/optional/format;
+// its tests/draft7/optional/format holds the same tests but for duration and uuid, which draft-07 does
+// not name, and each runs under both drafts here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -19,74 +20,6 @@ const PATH = join(ROOT, "tests/fixtures/format.schema.jsonc");
 const SUITE = join(ROOT, "tests/fixtures/format-suite");
 type Group = { description: string; schema: Record<string, unknown>; tests: { description: string; data: unknown; valid: boolean }[] };
 const suite: Record<string, Group[]> = Object.fromEntries(readdirSync(SUITE).filter((file) => file.endsWith(".json")).map((file) => [file.slice(0, -".json".length), JSON.parse(readFileSync(join(SUITE, file), "utf8"))]));
-
-/**
- * The suite's tests dotschema fails, by file, each test by its description, with why. Each is a
- * format dotschema keeps as ajv-formats 3.0.1 has it (DESIGN.md, "Formats").
- */
-const FAILING: Record<string, string[]> = {
-  // ajv-formats' `regex` reads a pattern without the `u` flag, where `\a` is an identity escape.
-  "ecmascript-regex": ["when used as a pattern"],
-  // ajv-formats' `email` is a regular expression for the common form: no quoted local part, no address literal.
-  email: [
-    "a quoted string with a space in the local part is valid",
-    "a quoted string with a double dot in the local part is valid",
-    "a quoted string with a @ in the local part is valid",
-    "an IPv4-address-literal after the @ is valid",
-    "an IPv6-address-literal after the @ is valid",
-    "an empty quoted string in the local part is valid",
-    "a quoted string containing only a space in the local part is valid",
-    "a single-label domain is valid",
-    "a quoted string with no special characters in the local part is valid",
-    "a quoted pair in the local part is valid",
-    "an escaped double quote in the local part is valid",
-    "an escaped backslash in the local part is valid",
-    "a lowercase IPv6 tag in an address literal is valid",
-  ],
-  // ajv-formats' `hostname` reads an A-label as letters, digits and hyphens, and takes a trailing dot.
-  hostname: [
-    "trailing dot",
-    "invalid Punycode",
-    "contains illegal char U+302E Hangul single dot tone mark",
-    "Begins with a Spacing Combining Mark",
-    "Begins with a Nonspacing Mark",
-    "Begins with an Enclosing Mark",
-    "Exceptions that are DISALLOWED, right-to-left chars",
-    "Exceptions that are DISALLOWED, left-to-right chars",
-    "MIDDLE DOT with no preceding 'l'",
-    "MIDDLE DOT with nothing preceding",
-    "MIDDLE DOT with no following 'l'",
-    "MIDDLE DOT with nothing following",
-    "Greek KERAIA not followed by Greek",
-    "Greek KERAIA not followed by anything",
-    "Hebrew GERESH not preceded by Hebrew",
-    "Hebrew GERESH not preceded by anything",
-    "Hebrew GERSHAYIM not preceded by Hebrew",
-    "Hebrew GERSHAYIM not preceded by anything",
-    "KATAKANA MIDDLE DOT with no Hiragana, Katakana, or Han",
-    "KATAKANA MIDDLE DOT with no other characters",
-    "Arabic-Indic digits mixed with Extended Arabic-Indic digits",
-    "ZERO WIDTH JOINER not preceded by Virama",
-    "ZERO WIDTH JOINER not preceded by anything",
-    'contains "--" in the 3rd and 4th position',
-  ],
-  // ajv-formats' `uri`, `uri-reference` and `uri-template` are regular expressions looser than RFC 3986 and RFC 6570 in places.
-  uri: [
-    "non-numeric port is invalid",
-    "leading zero in an embedded IPv4 address is invalid",
-    "square brackets are not allowed in a path segment",
-    "an IPv6 address without enclosing brackets is invalid",
-  ],
-  "uri-reference": [
-    "a double quote in a path",
-    "square brackets outside an authority",
-    "a non-numeric port in a network-path reference",
-    "more than one at-sign in the authority",
-    "a colon in the first segment of a relative-path reference",
-    "a leading zero in the IPv4 part of an IPv6 literal",
-  ],
-  "uri-template": ["a dotted variable name is valid", "a delete character in a literal is invalid", "an apostrophe in a literal is valid"],
-};
 
 /** Zod's formats, each by the name z.toJSONSchema writes, with the Zod schema that checks it. */
 const ZOD: Record<string, z.ZodType> = {
@@ -154,7 +87,7 @@ async function moduleOf(schema: Record<string, unknown>, draft: "2020-12" | "dra
 }
 
 for (const draft of ["2020-12", "draft-07"] as const) {
-  test(`the JSON Schema Test Suite's format tests pass under ${draft}, but for the ones a format kept from ajv-formats fails`, async () => {
+  test(`every format test of the JSON Schema Test Suite passes under ${draft}`, async () => {
     for (const [file, groups] of Object.entries(suite)) {
       const failing: string[] = [];
       for (const group of groups) {
@@ -165,7 +98,7 @@ for (const draft of ["2020-12", "draft-07"] as const) {
           if (module.is(data) !== valid) failing.push(description);
         }
       }
-      assert.deepEqual(failing.sort(), [...(FAILING[file] ?? [])].sort(), file);
+      assert.deepEqual(failing, [], file);
     }
   });
 }
@@ -195,7 +128,9 @@ test("dotschema's copies of ajv-formats' formats give its verdicts and its order
   // Every format ajv-formats has, and no other but Zod's and the internationalized ones.
   assert.deepEqual(Object.keys(ours).filter((name) => !(name in ZOD) && !["idn-hostname", "idn-email", "iri", "iri-reference"].includes(name)).sort(), Object.keys(theirs).sort());
   const differ: Record<string, string[]> = {};
-  for (const name of Object.keys(theirs))
+  // ajv-formats' email, hostname, uri, uri-reference, uri-template and regex are replaced, not copied; the suite tests them.
+  const replaced = ["email", "hostname", "uri", "uri-reference", "uri-template", "regex"];
+  for (const name of Object.keys(theirs).filter((name) => !replaced.includes(name)))
     for (const value of values) if (verdict(ours[name], value) !== verdict(theirs[name], value)) (differ[name] ??= []).push(String(value));
   assert.deepEqual(Object.fromEntries(Object.entries(differ).map(([name, list]) => [name, list.sort()])), Object.fromEntries(Object.entries(expected).map(([name, list]) => [name, list.sort()])));
   // Where they differ, dotschema has the suite's verdict.
@@ -248,7 +183,7 @@ test("a module carries the file of each format it checks with a function, and th
     return { code, module: (await evaluate(code)).default };
   };
   // No format, and a format ajv writes as a regular expression: no file and no table of formats.
-  for (const properties of [{ a: { type: "string" } }, { a: { type: "string", format: "email" } }]) {
+  for (const properties of [{ a: { type: "string" } }, { a: { type: "string", format: "uuid" } }]) {
     const { code } = await build(properties);
     assert.deepEqual(formatFiles(code), []);
     assert.doesNotMatch(code, /__formats/);
@@ -263,12 +198,20 @@ test("a module carries the file of each format it checks with a function, and th
   assert.deepEqual(formatFiles(jwt.code), ["jwt"]);
   assert.deepEqual([jwt.module.is({ token: "eyJhbGciOiJub25lIn0.e30." }), jwt.module.is({ token: "a.b.c" })], [true, false]);
   assert.deepEqual(formatFiles((await build({ data: { type: "string", format: "base64url" } })).code), ["base64", "base64url"]);
-  // idn-email requires idn-hostname and ipv6; iri and iri-reference each require RFC 3987's grammar, carried once.
+  // idn-hostname and hostname require IDNA2008's checks, idn-email idn-hostname and ipv6, email ipv6; iri and iri-reference RFC 3987's grammar, and it RFC 3986's, each carried once.
   assert.deepEqual(formatFiles((await build({ host: { type: "string", format: "idn-hostname" } })).code), ["idn-hostname"]);
   assert.deepEqual(formatFiles((await build({ mail: { type: "string", format: "idn-email" } })).code), ["idn-email", "idn-hostname", "ipv6"]);
+  assert.deepEqual(formatFiles((await build({ mail: { type: "string", format: "email" } })).code), ["email", "ipv6"]);
+  const host = (await build({ host: { type: "string", format: "hostname" } })).code;
+  assert.deepEqual(formatFiles(host), ["hostname"]);
+  assert.equal(host.match(/^\/\/ IDNA2008's validity of a host name/gm)?.length, 1);
+  const uri = (await build({ link: { type: "string", format: "uri" } })).code;
+  assert.deepEqual(formatFiles(uri), ["uri"]);
+  assert.doesNotMatch(uri, /The grammar of RFC 3987/);
   const iri = await build({ a: { type: "string", format: "iri" }, b: { type: "string", format: "iri-reference" } });
   assert.deepEqual(formatFiles(iri.code), ["iri", "iri-reference"]);
   assert.equal(iri.code.match(/^\/\/ The grammar of RFC 3987/gm)?.length, 1);
+  assert.equal(iri.code.match(/^\/\/ The grammar of RFC 3986/gm)?.length, 1);
   // Each file once, for both validators and for each property that uses it.
   const several = await build({ a: { format: "date-time" }, b: { format: "date-time", formatMinimum: "2026-01-01T00:00:00Z" }, c: { format: "date" }, d: { format: "uri" } });
   assert.deepEqual(formatFiles(several.code), ["date", "date-time", "time", "uri"]);

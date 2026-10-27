@@ -1,28 +1,29 @@
-// Checks the Unicode tables of src/formats/idn-hostname.cjs against the Unicode Character Database
-// (DESIGN.md, "Formats"), for every code point the file's ALLOWED takes, and prints the tables the data
+// Checks the Unicode tables of src/formats/idna.cjs and idn-hostname.cjs against the Unicode Character
+// Database (DESIGN.md, "Formats"), for every code point idna.cjs's ALLOWED takes, and prints the tables the data
 // gives where they differ: the viramas (canonical combining class 9), the joining types (T; L or D; R
 // or D, of code points that are not marks), the Bidi class each code point gets, and the code points
 // UTS #46 ignores (for every code point); then runs the format on UTS #46's conformance tests, but
 // for the lines with a code point IDNA2008 does not allow (NV8 or XV8), which the file says an IDNA2008
-// implementation skips. Run by hand when the Unicode version changes, with a directory that holds
+// implementation skips, and the format `hostname` on them, which must refuse every line that is not
+// ASCII and give idn-hostname's verdict on the rest. Run by hand when the Unicode version changes, with a directory that holds
 // DerivedJoiningType.txt, DerivedCombiningClass.txt and DerivedBidiClass.txt
 // (https://www.unicode.org/Public/<version>/ucd/extracted/), IdnaMappingTable.txt and IdnaTestV2.txt
 // (https://www.unicode.org/Public/idna/<version>/): `nub scripts/idna-tables.ts <dir>`. The engine's
-// Unicode, which the file's property escapes read, must be the data's.
+// Unicode, which the files' property escapes read, must be the data's.
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: nub scripts/idna-tables.ts <directory of the Unicode data files>");
-const file = join(import.meta.dirname, "..", "src", "formats", "idn-hostname.cjs");
+const formats = join(import.meta.dirname, "..", "src", "formats");
 
-// The file's regular expressions, by name, each `const NAME = /.../flags;` on a line of its own.
+// The files' regular expressions, by name, each `const NAME = /.../flags;` on a line of its own.
 const found = new Map<string, RegExp>();
-for (const [, name = "", body = "", flags = ""] of readFileSync(file, "utf8").matchAll(/^const (\w+) = \/(.*)\/([a-z]*);$/gm)) found.set(name, new RegExp(body, flags));
+for (const file of ["idna.cjs", "idn-hostname.cjs"]) for (const [, name = "", body = "", flags = ""] of readFileSync(join(formats, file), "utf8").matchAll(/^const (\w+) = \/(.*)\/([a-z]*);$/gm)) found.set(name, new RegExp(body, flags));
 const rx = (name: string): RegExp => {
   const regex = found.get(name);
-  if (!regex) throw new Error(`src/formats/idn-hostname.cjs has no regular expression ${name}`);
+  if (!regex) throw new Error(`src/formats/idna.cjs and idn-hostname.cjs have no regular expression ${name}`);
   return regex;
 };
 
@@ -94,7 +95,9 @@ for (const { name, data, ours, over, free } of checks) {
 // UTS #46's conformance tests: the source of each line (column 1), and whether toASCII, nontransitional, finds no error (column 5, or 3 when it is empty), but for X4_2, an empty label toUnicode alone reports.
 const idna2008 = read("IdnaMappingTable.txt", (fields) => fields[3] ?? "").map;
 const unescape = (text: string) => (text === '""' ? "" : text.replace(/\\u([0-9A-F]{4})|\\x\{([0-9A-F]+)\}/gi, (_, a?: string, b?: string) => String.fromCodePoint(parseInt(a ?? b ?? "", 16))));
-const idnHostname: (str: string) => boolean = createRequire(import.meta.url)(file);
+const require = createRequire(import.meta.url);
+const idnHostname: (str: string) => boolean = require(join(formats, "idn-hostname.cjs"));
+const hostname: (str: string) => boolean = require(join(formats, "hostname.cjs"));
 let run = 0, skipped = 0;
 const wrong: string[] = [];
 for (const line of readFileSync(join(dir, "IdnaTestV2.txt"), "utf8").split("\n")) {
@@ -108,8 +111,9 @@ for (const line of readFileSync(join(dir, "IdnaTestV2.txt"), "utf8").split("\n")
   const status = (asciiStatus || unicodeStatus).replace(/^\[|\]$/g, "").split(",").map((code) => code.trim()).filter((code) => code && code !== "X4_2");
   run++;
   if (idnHostname(input) !== (status.length === 0)) wrong.push(`${JSON.stringify(input)} (${status.join(", ") || "valid"})`);
+  if (hostname(input) !== (/^[\x00-\x7f]*$/.test(input) && idnHostname(input))) wrong.push(`${JSON.stringify(input)} as a hostname`);
 }
 if (wrong.length) failed = true;
 console.log(`IdnaTestV2.txt: ${run} lines run, ${wrong.length} with another verdict${wrong.length ? `: ${wrong.slice(0, 20).join(", ")}` : ""}; ${skipped} skipped for an NV8 or XV8 code point`);
-console.log(`Unicode ${process.versions.unicode}, ${found.size} regular expressions read from src/formats/idn-hostname.cjs`);
+console.log(`Unicode ${process.versions.unicode}, ${found.size} regular expressions read from src/formats/idna.cjs and idn-hostname.cjs`);
 process.exitCode = failed ? 1 : 0;

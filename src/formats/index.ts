@@ -17,10 +17,11 @@
 //
 // The formats ajv-formats 3.0.1 defines are copies of its own (MIT, credited in each file), unchanged
 // but where the JSON Schema Test Suite shows a defect: `date-time`, `time`, `duration` and `uuid`
-// (DESIGN.md, "Formats"). Zod's formats are copies of Zod 4.6.7's checks, unchanged. The IDN and IRI
-// formats are dotschema's own. The regular
-// expressions below are ajv-formats' (Copyright (c) 2020 Evgeny Poberezkin) and Zod's (Copyright (c)
-// 2025 Colin McDonnell), both under the MIT license, whose text each file here carries.
+// are changed copies, and `email`, `hostname`, `uri`, `uri-reference`, `uri-template` and
+// `regex` dotschema's own (DESIGN.md, "Formats"). Zod's formats are copies of Zod 4.6.7's checks,
+// unchanged. The IDN and IRI formats are dotschema's own. The regular expressions below are
+// ajv-formats' (Copyright (c) 2020 Evgeny Poberezkin) and Zod's (Copyright (c) 2025 Colin
+// McDonnell), both under the MIT license, whose text each file here carries.
 import { createRequire } from "node:module";
 
 export type Format = RegExp | true | { file: string };
@@ -39,7 +40,13 @@ export const FORMATS: Readonly<Record<string, Format>> = Object.freeze(Object.as
   duration: /^P(?:(?:\d+D|\d+M(?:\d+D)?|\d+Y(?:\d+M(?:\d+D)?)?)(?:T(?:\d+H(?:\d+M(?:\d+S)?)?|\d+M(?:\d+S)?|\d+S))?|T(?:\d+H(?:\d+M(?:\d+S)?)?|\d+M(?:\d+S)?|\d+S)|\d+W)$/,
   uri: { file: "uri.cjs" },
   "uri-reference": { file: "uri-reference.cjs" },
-  "uri-template": /^(?:(?:[^\x00-\x20"'<>%\\^`{|}]|%[0-9a-f]{2})|\{[+#./;?&=,!@|]?(?:[a-z0-9_]|%[0-9a-f]{2})+(?::[1-9][0-9]{0,3}|\*)?(?:,(?:[a-z0-9_]|%[0-9a-f]{2})+(?::[1-9][0-9]{0,3}|\*)?)*\})*$/i,
+  // RFC 6570's URI Template (section 2), with its erratum 6937, which puts the apostrophe among the
+  // literals (the JSON Schema Test Suite's reading): a literal is a character its ABNF lists, a
+  // `ucschar` or an `iprivate` (a code point from U+00A0 up but the surrogates, U+FFF0 to U+FFFD,
+  // U+E0000 to U+E0FFF and the noncharacters), or a percent-encoded octet; an expression an operator
+  // and variables, a name dotted between its characters, each with a prefix of 1 to 9999 or an
+  // explode. dotschema's, where ajv-formats' refused a dotted name and an apostrophe and took a DEL.
+  "uri-template": /^(?:(?:(?![\uFFF0-\uFFFD\u{E0000}-\u{E0FFF}]|\p{Noncharacter_Code_Point})[\x21\x23\x24\x26-\x3B\x3D\x3F-\x5B\x5D\x5F\x61-\x7A\x7E\u00A0-\uD7FF\uE000-\u{10FFFF}]|%[0-9A-Fa-f]{2})|\{[+#./;?&=,!@|]?(?:[A-Za-z0-9_]|%[0-9A-Fa-f]{2})(?:\.?(?:[A-Za-z0-9_]|%[0-9A-Fa-f]{2}))*(?::[1-9][0-9]{0,3}|\*)?(?:,(?:[A-Za-z0-9_]|%[0-9A-Fa-f]{2})(?:\.?(?:[A-Za-z0-9_]|%[0-9A-Fa-f]{2}))*(?::[1-9][0-9]{0,3}|\*)?)*\})*$/u,
   url: { file: "url.cjs" },
   // The internationalized formats, dotschema's own: idn-hostname as IDNA2008 has it after UTS #46's
   // mapping, idn-email as RFC 6531 has it, iri and iri-reference as RFC 3987 has them.
@@ -47,8 +54,8 @@ export const FORMATS: Readonly<Record<string, Format>> = Object.freeze(Object.as
   "idn-email": { file: "idn-email.cjs" },
   iri: { file: "iri.cjs" },
   "iri-reference": { file: "iri-reference.cjs" },
-  email: /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i,
-  hostname: /^(?=.{1,253}\.?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[-0-9a-z]{0,61}[0-9a-z])?)*\.?$/i,
+  email: { file: "email.cjs" },
+  hostname: { file: "hostname.cjs" },
   ipv4: /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/,
   ipv6: { file: "ipv6.cjs" },
   regex: { file: "regex.cjs" },

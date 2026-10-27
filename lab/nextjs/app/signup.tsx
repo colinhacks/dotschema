@@ -3,6 +3,6 @@
 import user from "../../basic/user.schema.jsonc";
 
 export function Signup() {
-  const result = user.validate({ name: "", role: "admin", email: "ada@example" });
+  const result = user.validate({ name: "", role: "admin", email: "not an email" });
   return <pre id="client">{JSON.stringify(result.issues?.map((issue) => `${issue.path.join(".")}: ${issue.message}`))}</pre>;
 }

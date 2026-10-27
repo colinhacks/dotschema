@@ -753,8 +753,8 @@ test("a format checked by a function, such as date-time or uri, is inlined: the 
 test("every format ajv-formats defines, and its formatMinimum, formatMaximum and exclusive keywords, give ajv-formats' own verdicts and errors", async () => {
   // dotschema registers its copies of ajv-formats' formats (src/formats/) and writes the limit
   // keywords with its own ajv (loadAjv); the reference is ajv-formats' plugin, a development
-  // dependency, run by the same ajv, which compiles with new Function, on values where the four
-  // formats dotschema changed (tests/formats.test.ts) agree with ajv-formats'.
+  // dependency, run by the same ajv, which compiles with new Function, on values where the formats
+  // dotschema changed or replaced (tests/formats.test.ts) agree with ajv-formats'.
   const { createRequire } = await import("node:module");
   const require = createRequire(join(ROOT, "src/schema.ts"));
   const Ajv = require("ajv").default;
