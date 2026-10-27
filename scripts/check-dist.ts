@@ -181,7 +181,7 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
   console.log("jest: Jest's CommonJS and ES module runs through dotschema/jest, and Vitest through dotschema/vite, from the dotschema tarball");
 }
 
-// lab/cloudflare: the Worker built by Vite with Cloudflare's plugin and dotschema/vite, then served in workerd by vite preview.
+// lab/cloudflare: the Worker built by Vite with Cloudflare's plugin and dotschema/vite, then served in workerd by vite preview, its formats checked there.
 {
   const dir = project("cloudflare", join(root, "lab", "cloudflare"), { dotschema: tarball }, { extra: labDependencies("cloudflare") });
   check("cloudflare", dir, [
@@ -189,7 +189,9 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
     ["cat", ["dist/dotschema_lab/index.js"], 'vendor: "dotschema"'],
     [process.execPath, ["serve.mjs", "preview"], '"post":[400,{"issues":[{"message":"must NOT have fewer than 1 characters","path":["name"],"keyword":"minLength"}'],
     [process.execPath, ["serve.mjs", "dev"], '"get":{"vendor":"dotschema","valid":true'],
+    // The formats' files in the built Worker, as tests/lab.test.ts checks them.
+    [process.execPath, ["serve.mjs", "preview"], '"formats":[true,["token","data","network","card","at","id","mood","digest","host","mail","link"]]'],
   ]);
-  console.log("cloudflare: the Worker built with dotschema/vite and Cloudflare's plugin, validating in workerd under vite preview and vite dev, from the dotschema tarball");
+  console.log("cloudflare: the Worker built with dotschema/vite and Cloudflare's plugin, validating in workerd under vite preview and vite dev, its formats with it, from the dotschema tarball");
 }
 rmSync(work, { recursive: true, force: true });
