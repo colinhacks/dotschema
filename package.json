@@ -1,6 +1,6 @@
 {
   "name": "dotschema",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Import a JSON Schema in a .schema.jsonc or .schema.json5 file as its TypeScript type and a validator compiled with ajv. A TypeScript 7.1 content mapper, a preload, and plugins for esbuild, Vite, webpack, Next.js and Jest.",
   "license": "MIT",
