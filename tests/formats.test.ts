@@ -136,7 +136,7 @@ const ZOD_SAMPLES: string[] = [
   // cidrv4 and cidrv6: in range and out; a prefix with a leading zero; no prefix; a zone; what the URL parser would read past.
   ...["192.168.0.0/16", "10.0.0.0/33", "10.0.0.0", "1.2.3.4/0", "01.2.3.4/8", "2001:db8::/32", "2001:db8::/129", "::/0", "::1/128", "2001:db8::/032", "::ffff:192.168.1.1/96", "2001:db8::", "fe80::1%eth0/64", "::@1\\/8", "::1\n/64", "2001:DB8::/+32", "1:2:3:4:5:6:7:8:9/64"],
   // mac, e164, emoji.
-  ...["00:1A:2B:3C:4D:5E", "00:1a:2b:3c:4d:5e", "00-1A-2B-3C-4D-5E", "00:1A:2b:3C:4D:5E", "+14155552671", "+1415555", "14155552671", "+0123456789", "+1234567890123456", "😀", "👍🏽", "🇺🇸", "1️⃣", "a😀", "☺", "♥", "#", "‍"],
+  ...["00:1A:2B:3C:4D:5E", "00:1a:2b:3c:4d:5e", "00-1A-2B-3C-4D-5E", "00:1A:2b:3C:4D:5E", "+14155552671", "+1415555", "14155552671", "+0123456789", "+1234567890123456", "😀", "👍🏽", "🇺🇸", "1️⃣", "a😀", "☺", "♥", "#", "\u200d"],
   // nanoid, cuid, cuid2, ulid, xid, ksuid.
   ...["V1StGXR8_Z5jdHi6B-myT", "V1StGXR8_Z5jdHi6B-my", "cjld2cjxh0000qzrmn831i7rn", "c123456", "C1", "tz4a98xxat96iws9zmbrgj3a", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "8ARZ3NDEKTSV4RRFFQ69G5FAV0", "01ARZ3NDEKTSV4RRFFQ69G5FAI", "9m4e2mr0ui3e8a215n4g", "9m4e2mr0ui3e8a215n4w", "0ujtsYcgvSTl8PAuAdqWYSMnLOv", "0ujtsYcgvSTl8PAuAdqWYSMnLO_"],
   // hex, currency_code.
@@ -192,8 +192,8 @@ test("dotschema's copies of ajv-formats' formats give its verdicts and its order
     duration: ["P1Y2D", "PT1H2S"],
     uuid: ["urn:uuid:2eb8aa08-aa98-11ea-b4aa-73b441d16380"],
   };
-  // Every format ajv-formats has, and no other but Zod's.
-  assert.deepEqual(Object.keys(ours).filter((name) => !(name in ZOD)).sort(), Object.keys(theirs).sort());
+  // Every format ajv-formats has, and no other but Zod's and the internationalized ones.
+  assert.deepEqual(Object.keys(ours).filter((name) => !(name in ZOD) && !["idn-hostname", "idn-email", "iri", "iri-reference"].includes(name)).sort(), Object.keys(theirs).sort());
   const differ: Record<string, string[]> = {};
   for (const name of Object.keys(theirs))
     for (const value of values) if (verdict(ours[name], value) !== verdict(theirs[name], value)) (differ[name] ??= []).push(String(value));
@@ -263,6 +263,12 @@ test("a module carries the file of each format it checks with a function, and th
   assert.deepEqual(formatFiles(jwt.code), ["jwt"]);
   assert.deepEqual([jwt.module.is({ token: "eyJhbGciOiJub25lIn0.e30." }), jwt.module.is({ token: "a.b.c" })], [true, false]);
   assert.deepEqual(formatFiles((await build({ data: { type: "string", format: "base64url" } })).code), ["base64", "base64url"]);
+  // idn-email requires idn-hostname and ipv6; iri and iri-reference each require RFC 3987's grammar, carried once.
+  assert.deepEqual(formatFiles((await build({ host: { type: "string", format: "idn-hostname" } })).code), ["idn-hostname"]);
+  assert.deepEqual(formatFiles((await build({ mail: { type: "string", format: "idn-email" } })).code), ["idn-email", "idn-hostname", "ipv6"]);
+  const iri = await build({ a: { type: "string", format: "iri" }, b: { type: "string", format: "iri-reference" } });
+  assert.deepEqual(formatFiles(iri.code), ["iri", "iri-reference"]);
+  assert.equal(iri.code.match(/^\/\/ The grammar of RFC 3987/gm)?.length, 1);
   // Each file once, for both validators and for each property that uses it.
   const several = await build({ a: { format: "date-time" }, b: { format: "date-time", formatMinimum: "2026-01-01T00:00:00Z" }, c: { format: "date" }, d: { format: "uri" } });
   assert.deepEqual(formatFiles(several.code), ["date", "date-time", "time", "uri"]);

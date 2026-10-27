@@ -17,7 +17,8 @@
 //
 // The formats ajv-formats 3.0.1 defines are copies of its own (MIT, credited in each file), unchanged
 // but where the JSON Schema Test Suite shows a defect: `date-time`, `time`, `duration` and `uuid`
-// (DESIGN.md, "Formats"). Zod's formats are copies of Zod 4.6.7's checks, unchanged. The regular
+// (DESIGN.md, "Formats"). Zod's formats are copies of Zod 4.6.7's checks, unchanged. The IDN and IRI
+// formats are dotschema's own. The regular
 // expressions below are ajv-formats' (Copyright (c) 2020 Evgeny Poberezkin) and Zod's (Copyright (c)
 // 2025 Colin McDonnell), both under the MIT license, whose text each file here carries.
 import { createRequire } from "node:module";
@@ -40,6 +41,12 @@ export const FORMATS: Readonly<Record<string, Format>> = Object.freeze(Object.as
   "uri-reference": { file: "uri-reference.cjs" },
   "uri-template": /^(?:(?:[^\x00-\x20"'<>%\\^`{|}]|%[0-9a-f]{2})|\{[+#./;?&=,!@|]?(?:[a-z0-9_]|%[0-9a-f]{2})+(?::[1-9][0-9]{0,3}|\*)?(?:,(?:[a-z0-9_]|%[0-9a-f]{2})+(?::[1-9][0-9]{0,3}|\*)?)*\})*$/i,
   url: { file: "url.cjs" },
+  // The internationalized formats, dotschema's own: idn-hostname as IDNA2008 has it after UTS #46's
+  // mapping, idn-email as RFC 6531 has it, iri and iri-reference as RFC 3987 has them.
+  "idn-hostname": { file: "idn-hostname.cjs" },
+  "idn-email": { file: "idn-email.cjs" },
+  iri: { file: "iri.cjs" },
+  "iri-reference": { file: "iri-reference.cjs" },
   email: /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i,
   hostname: /^(?=.{1,253}\.?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[-0-9a-z]{0,61}[0-9a-z])?)*\.?$/i,
   ipv4: /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/,

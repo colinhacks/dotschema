@@ -18,8 +18,12 @@ const valid = {
   id: "2eb8aa08-aa98-11ea-b4aa-73b441d16380",
   mood: "👍🏽",
   digest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  // A U-label not in NFC, which the mapping normalizes; a ZWJ after a virama.
+  host: "cafe\u0301.\u0915\u094D\u200D\u0937",
+  mail: "\u03B4\u03BF\u03BA\u03B9\u03BC\u03AE@example.com",
+  link: "http://\u0192\u00F8\u00F8.\u00DF\u00E5r/?q=\u{F0000}",
 };
-const invalid = { token: "a.b.c", data: "SGVsbG8", network: "2001:db8::/129", card: "4111 1111 1111 1112", at: "2026-10-20 09:00:00Z", id: "urn:uuid:2eb8aa08-aa98-11ea-b4aa-73b441d16380", mood: "1", digest: "e3b0" };
+const invalid = { token: "a.b.c", data: "SGVsbG8", network: "2001:db8::/129", card: "4111 1111 1111 1112", at: "2026-10-20 09:00:00Z", id: "urn:uuid:2eb8aa08-aa98-11ea-b4aa-73b441d16380", mood: "1", digest: "e3b0", host: "\u0915\u200D\u0937", mail: "\u03B4@example-.com", link: "/\u00E2\u03C0\u03C0" };
 
 export default {
   async fetch(request: Request): Promise<Response> {

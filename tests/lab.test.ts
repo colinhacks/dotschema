@@ -301,7 +301,7 @@ test("lab/jest: Vitest's watch mode makes a schema again when a file it refers t
 // server and as the build `wrangler deploy` would upload, with no Cloudflare account.
 const CLOUDFLARE = `${ROOT}lab/cloudflare`;
 const WORKER = {
-  get: { vendor: "dotschema", valid: true, issues: ["name: minLength", "email: format", "role: enum"], team: [true, false], events: [true, false], formats: [true, ["token", "data", "network", "card", "at", "id", "mood", "digest"]] },
+  get: { vendor: "dotschema", valid: true, issues: ["name: minLength", "email: format", "role: enum"], team: [true, false], events: [true, false], formats: [true, ["token", "data", "network", "card", "at", "id", "mood", "digest", "host", "mail", "link"]] },
   post: [400, { issues: [{ message: "must NOT have fewer than 1 characters", path: ["name"], keyword: "minLength" }, { message: "must be equal to one of the allowed values", path: ["role"], keyword: "enum" }] }],
 };
 

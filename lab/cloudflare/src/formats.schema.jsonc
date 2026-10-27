@@ -1,6 +1,7 @@
 // Formats checked in workerd: Zod's jwt, base64, cidrv6 (which reads the address with the URL parser)
-// and credit_card, and date-time, each checked by a function in a file of its own; and uuid, emoji
-// and sha256_hex, regular expressions.
+// and credit_card, date-time, and idn-hostname, idn-email and iri, which read Unicode properties and
+// normalize, each checked by a function in a file of its own; and uuid, emoji and sha256_hex, regular
+// expressions.
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
@@ -13,5 +14,8 @@
     "id": { "type": "string", "format": "uuid" },
     "mood": { "type": "string", "format": "emoji" },
     "digest": { "type": "string", "format": "sha256_hex" },
+    "host": { "type": "string", "format": "idn-hostname" },
+    "mail": { "type": "string", "format": "idn-email" },
+    "link": { "type": "string", "format": "iri" },
   },
 }
