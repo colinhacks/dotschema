@@ -17,7 +17,9 @@
 //
 // The formats ajv-formats 3.0.1 defines are copies of its own (MIT, credited in each file), unchanged
 // but where the JSON Schema Test Suite shows a defect: `date-time`, `time`, `duration` and `uuid`
-// (DESIGN.md, "Formats").
+// (DESIGN.md, "Formats"). Zod's formats are copies of Zod 4.6.7's checks, unchanged. The regular
+// expressions below are ajv-formats' (Copyright (c) 2020 Evgeny Poberezkin) and Zod's (Copyright (c)
+// 2025 Colin McDonnell), both under the MIT license, whose text each file here carries.
 import { createRequire } from "node:module";
 
 export type Format = RegExp | true | { file: string };
@@ -56,6 +58,48 @@ export const FORMATS: Readonly<Record<string, Format>> = Object.freeze(Object.as
   double: { file: "double.cjs" },
   password: true,
   binary: true,
+  // Zod's formats, by the names z.toJSONSchema writes, each checked as Zod 4.6.7 checks it: by its
+  // regular expression, copied from Zod's src/v4/core/regexes.ts, or by a function, copied from its
+  // src/v4/core/schemas.ts into a file (MIT, credited in each). Zod writes each with a `pattern`
+  // beside it but for jwt; a schema written by hand needs only the `format`.
+  jwt: { file: "jwt.cjs" },
+  credit_card: { file: "credit_card.cjs" },
+  iban: { file: "iban.cjs" },
+  base64: { file: "base64.cjs" },
+  base64url: { file: "base64url.cjs" },
+  cidrv4: /^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/([0-9]|[1-2][0-9]|3[0-2])$/,
+  cidrv6: { file: "cidrv6.cjs" },
+  // z.mac() with its default delimiter, a colon; z.mac({ delimiter }) writes the same format beside its own pattern.
+  mac: /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$|^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/,
+  e164: /^\+[1-9]\d{6,14}$/,
+  emoji: /^(?=[\s\S]*[\p{Extended_Pictographic}\p{Regional_Indicator}\u20E3])[\p{Extended_Pictographic}\p{Emoji_Component}]+$/u,
+  // z.nanoid() with its default length, 21.
+  nanoid: /^[a-zA-Z0-9_-]{21}$/,
+  cuid: /^[cC][0-9a-z]{6,}$/,
+  cuid2: /^[0-9a-z]+$/,
+  ulid: /^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$/,
+  xid: /^[0-9a-vA-V]{20}$/,
+  ksuid: /^[A-Za-z0-9]{27}$/,
+  hex: /^[0-9a-fA-F]*$/,
+  currency_code: { file: "currency_code.cjs" },
+  lowercase: /^[^A-Z]*$/,
+  uppercase: /^[^a-z]*$/,
+  // z.hash(algorithm, { enc }), each digest's length in hex, in base64 with its padding, and in base64url without.
+  md5_hex: /^[0-9a-fA-F]{32}$/,
+  md5_base64: /^[A-Za-z0-9+/]{22}==$/,
+  md5_base64url: /^[A-Za-z0-9_-]{22}$/,
+  sha1_hex: /^[0-9a-fA-F]{40}$/,
+  sha1_base64: /^[A-Za-z0-9+/]{27}=$/,
+  sha1_base64url: /^[A-Za-z0-9_-]{27}$/,
+  sha256_hex: /^[0-9a-fA-F]{64}$/,
+  sha256_base64: /^[A-Za-z0-9+/]{43}=$/,
+  sha256_base64url: /^[A-Za-z0-9_-]{43}$/,
+  sha384_hex: /^[0-9a-fA-F]{96}$/,
+  sha384_base64: /^[A-Za-z0-9+/]{64}$/,
+  sha384_base64url: /^[A-Za-z0-9_-]{64}$/,
+  sha512_hex: /^[0-9a-fA-F]{128}$/,
+  sha512_base64: /^[A-Za-z0-9+/]{86}==$/,
+  sha512_base64url: /^[A-Za-z0-9_-]{86}$/,
 }));
 
 const require = createRequire(import.meta.url);

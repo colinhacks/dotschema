@@ -431,6 +431,24 @@ if (event.is(input)) {
 }
 ```
 
+Zod's string formats are checked as Zod checks them, `jwt` among them:
+
+```jsonc
+{
+  "type": "object",
+  "properties": {
+    "token": { "type": "string", "format": "jwt" }
+  }
+}
+```
+
+```ts
+import session from "./session.schema.jsonc";
+
+session.validate({ token: "not a token" });
+// { issues: [{ message: "must match format \"jwt\"", path: ["token"], keyword: "format" }] }
+```
+
 The module is a [Standard Schema](https://standardschema.dev), so a library that accepts one accepts it:
 
 ```ts
