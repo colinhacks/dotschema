@@ -32,7 +32,10 @@ test("the module validates with ajv's standalone code and imports nothing", asyn
   assert.equal(user["~standard"].version, 1);
   assert.equal(user["~standard"].vendor, "dotschema");
   assert.equal(user.schema.title, "User");
-  assert.deepEqual(Object.keys(user), ["validate", "is", "schema", "~standard", "pick", "omit"]);
+  assert.deepEqual(Object.keys(user), ["validate", "is", "decode", "encode", "schema", "~standard", "pick", "omit"]);
+  // Without a codec, decoding is checking, and encoding too.
+  assert.equal(user.decode, user.validate);
+  assert.equal(user["~standard"].encode, user.validate);
 });
 
 test(".validate() reports every issue, each with ajv's message and keyword and its path, and nothing else", async () => {
@@ -242,9 +245,9 @@ test("the types name the root for its file, export it as Type too, and write its
   const { types, problems } = schemaTypes(SCHEMA, PATH);
   assert.deepEqual(problems, []);
   // user.schema.jsonc declares `User`, so a `$ref` to it from another file prints `User`.
-  assert.match(types, /\ninterface User \{\n  name: string;\n[^]*?\n\}\nexport type \{ User as Type \};\n/);
+  assert.match(types, /\ninterface User \{\n  name: string;\n[^]*?\n\}\nexport type \{ User as Type, User as Input \};\n/);
   // The default import names the type too, as `user.Type`.
-  assert.match(types, /\ndeclare namespace schema \{ export type \{ User as Type \}; \}\nexport default schema;\n/);
+  assert.match(types, /\ndeclare namespace schema \{ export type \{ User as Type, User as Input \}; \}\nexport default schema;\n/);
   assert.match(types, /\ntype Json = \{ readonly \$schema: "https:\/\/json-schema.org\/draft\/2020-12\/schema";/);
   // The schema as written is a type of its own, so an error or a hover prints `Json` in its place;
   // the root's type is written out, so a hover over a value prints its properties. A plain object is

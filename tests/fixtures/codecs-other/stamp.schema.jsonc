@@ -1,0 +1,2 @@
+// In a package with no dotschema.jsonc: nothing here decodes, wherever it is imported from.
+{ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "properties": { "on": { "type": "string", "format": "date-time" } } }

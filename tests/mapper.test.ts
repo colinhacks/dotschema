@@ -38,11 +38,11 @@ test("the mapper answers the protocol as dotschema, reports options, places erro
     const init = await mapper.call("initialize", { protocolVersion: 1 });
     assert.deepEqual(init.result, { protocolVersion: 1, positionEncoding: "utf-8", diagnosticSource: "dotschema" });
     const open = await mapper.call("openProject", { configFileName: `${ROOT}tsconfig.json`, projectHandle: "p", compilerOptions: {}, options: { strict: true } });
-    assert.deepEqual(open.result.optionDiagnostics, [{ path: ["strict"], messageText: 'dotschema takes no options; remove "strict".', code: 5 }]);
+    assert.deepEqual(open.result.optionDiagnostics, [{ path: ["strict"], messageText: 'dotschema takes no options: its settings go in dotschema.jsonc, beside package.json. Remove "strict" here.', code: 5 }]);
     const ok = await mapper.call("transform", { fileName: `${ROOT}tests/fixtures/x.schema.jsonc`, content: '{ "type": "string" }', projectHandle: "p" });
     assert.equal(ok.result.extension, ".mts");
     assert.match(ok.result.text, /^import type \{ Schema as __DotschemaSchema \} from "dotschema";\n/);
-    assert.match(ok.result.text, /\ntype X = string;\nexport type \{ X as Type \};/);
+    assert.match(ok.result.text, /\ntype X = string;\nexport type \{ X as Type, X as Input \};/);
     // "é" is two bytes in UTF-8: the error after it starts one byte later than its UTF-16 offset.
     const content = '{ "description": "é", "type": }';
     const bad = await mapper.call("transform", { fileName: `${ROOT}tests/fixtures/x.schema.jsonc`, content, projectHandle: "p" });

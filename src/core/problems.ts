@@ -9,8 +9,9 @@ export type Problem = { message: string; start: number; length: number; code: nu
 export type Parsed = { ok: true; value: Value } | { ok: false; problems: Problem[] };
 
 // Diagnostic codes, shown as `dotschema<code>` by the type check: Motherload's numbers, of which 2
-// (a value no module can carry) has no case here, since JSONC and JSON5 hold only such values.
-export const CODES = { syntax: 1, unknownFormat: 3, schema: 4, option: 5 } as const;
+// (a value no module can carry) has no case here, since JSONC and JSON5 hold only such values; 6, a
+// problem in the project file (dotschema.jsonc), is dotschema's own.
+export const CODES = { syntax: 1, unknownFormat: 3, schema: 4, option: 5, project: 6 } as const;
 
 /** The UTF-16 offset of a 1-based line and column. */
 export function offsetOf(source: string, line: number, column: number): number {

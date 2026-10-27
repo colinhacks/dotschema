@@ -92,7 +92,8 @@ export interface SchemaIssue extends StandardSchemaV1.Issue {
 /**
  * The default export of a `.schema.jsonc` or `.schema.json5` module: `T` is the type the schema
  * describes, `S` the schema itself as a literal type. Nothing on it throws, except a Standard JSON
- * Schema target it cannot produce, as that spec requires.
+ * Schema target it cannot produce, as that spec requires. A module whose schema a codec of the
+ * project's dotschema.jsonc decodes is a `CodecSchema`.
  */
 export interface Schema<T, S = unknown> extends StandardSchemaV1<T, T>, StandardJSONSchemaV1<T, T> {
   /**
@@ -103,6 +104,10 @@ export interface Schema<T, S = unknown> extends StandardSchemaV1<T, T>, Standard
   validate(value: unknown): SchemaResult<T>;
   /** Whether `value` is valid, as a type guard. Stops at the first failure (a second validator, without `allErrors`); `false` for a value it cannot check. Never throws. */
   is(value: unknown): value is T;
+  /** The same function as `.validate()`: without a codec, decoding is checking. */
+  decode(value: unknown): SchemaResult<T>;
+  /** The same function as `.validate()`: without a codec, encoding is checking. */
+  encode(value: T): SchemaResult<T>;
   /** The JSON Schema as written in the file. A `$ref` to another file stays a reference here. */
   readonly schema: S;
   /**
@@ -115,8 +120,46 @@ export interface Schema<T, S = unknown> extends StandardSchemaV1<T, T>, Standard
   readonly "~standard": {
     /** The same function as `.validate()`. */
     readonly validate: (value: unknown) => SchemaResult<T>;
+    /** The same function as `.validate()`, as the Standard Codec draft has it for a schema that transforms nothing. */
+    readonly encode: (value: unknown) => SchemaResult<T>;
   } & StandardSchemaV1.Props<T, T> &
     StandardJSONSchemaV1.Props<T, T>;
+}
+
+/**
+ * The default export of a module whose schema a codec of the project's dotschema.jsonc decodes (a
+ * `date-time` string into a `Temporal.Instant`): `T` is the decoded type, `S` the schema as a literal
+ * type, and `I` the value as given, which `.validate()` and `.is()` keep. Nothing on it throws, as on
+ * `Schema`.
+ */
+export interface CodecSchema<T, S = unknown, I = unknown> extends StandardSchemaV1<I, T>, StandardJSONSchemaV1<I, T> {
+  /** Checks the value as given and reports every way it fails, as `Schema`'s does: on success, `value` is the value passed in, typed `I`, nothing decoded. */
+  validate(value: unknown): SchemaResult<I>;
+  /** Whether `value` is valid as given, as a type guard, as `Schema`'s is. */
+  is(value: unknown): value is I;
+  /**
+   * Checks the value as `.validate()` does, then decodes each string a codec decodes, in a copy:
+   * the value passed in is not changed. A string a codec cannot hold exactly, or a runtime without
+   * `Temporal`, is an issue at its place, `keyword: "decode"`. Never throws.
+   */
+  decode(value: unknown): SchemaResult<T>;
+  /** The inverse of `.decode()`: each codec's value written back as its string, then checked as `.validate()` checks a value; a value of the wrong kind at a codec's place is an issue, `keyword: "encode"`. Never throws. */
+  encode(value: T): SchemaResult<I>;
+  /** The JSON Schema as written in the file. A `$ref` to another file stays a reference here. */
+  readonly schema: S;
+  /**
+   * Standard Schema v1 and Standard JSON Schema v1: `validate` is `.decode()` and `encode` is
+   * `.encode()`, as the Standard Codec draft has them, so a library that takes a Standard Schema gets
+   * the decoded value. `jsonSchema.input` is the schema of the value as given, and `.output` throws:
+   * the decoded value is no JSON value.
+   */
+  readonly "~standard": {
+    /** The same function as `.decode()`. */
+    readonly validate: (value: unknown) => SchemaResult<T>;
+    /** The same function as `.encode()`. */
+    readonly encode: (value: unknown) => SchemaResult<I>;
+  } & StandardSchemaV1.Props<I, T> &
+    StandardJSONSchemaV1.Props<I, T>;
 }
 
 /**
@@ -131,4 +174,14 @@ export interface ObjectSchema<T, S = unknown, K extends string = string> extends
   pick<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? Q : string extends Q ? Q : never]: T[Q] }, unknown, P>;
   /** The schema without these properties: `user.omit("email")`. */
   omit<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] }, unknown, Exclude<K, P>>;
+}
+
+/** An `ObjectSchema` whose properties a codec decodes: its picks and omits keep the codecs of the properties they keep. */
+export interface ObjectCodecSchema<T, S = unknown, K extends string = string, I = unknown> extends CodecSchema<T, S, I> {
+  /** The schema with only these properties: `event.pick("at")`. */
+  pick<P extends K>(
+    ...keys: P[]
+  ): ObjectCodecSchema<{ [Q in keyof T as Q extends P ? Q : string extends Q ? Q : never]: T[Q] }, unknown, P, { [Q in keyof I as Q extends P ? Q : string extends Q ? Q : never]: I[Q] }>;
+  /** The schema without these properties: `event.omit("at")`. */
+  omit<P extends K>(...keys: P[]): ObjectCodecSchema<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] }, unknown, Exclude<K, P>, { [Q in keyof I as Q extends P ? never : Q]: I[Q] }>;
 }

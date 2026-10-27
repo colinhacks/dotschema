@@ -469,6 +469,88 @@ The `$schema` keyword picks the draft: 06, 07, 2019-09 or 2020-12, and draft-07 
 > [!NOTE]
 > A schema can also be written in JSON5, as a `.schema.json5` file: add `.schema.json5` to the `extensions` list.
 
+## Codecs
+
+A codec decodes the strings of a format into a richer value, named in a `dotschema.jsonc` beside `package.json`:
+
+```jsonc
+// dotschema.jsonc
+{
+  "codecs": {
+    "date-time": "Temporal.Instant"
+  }
+}
+```
+
+The `.decode()` method validates the value, then gives a copy with each `date-time` string decoded:
+
+```jsonc
+// event.schema.jsonc
+{
+  "type": "object",
+  "properties": {
+    "at": { "type": "string", "format": "date-time" }
+  },
+  "required": ["at"]
+}
+```
+
+```ts
+import event from "./event.schema.jsonc";
+
+const result = event.decode({ at: "2026-10-26T09:00:00Z" });
+result.value?.at; // Temporal.Instant
+```
+
+The `.validate()` and `.is()` methods keep the string:
+
+```ts
+event.validate({ at: "2026-10-26T09:00:00Z" }).value?.at; // string
+```
+
+The `.encode()` method turns the decoded value back into JSON:
+
+```ts
+event.encode({ at: Temporal.Instant.from("2026-10-26T11:00:00+02:00") });
+// { value: { at: "2026-10-26T09:00:00Z" } }
+```
+
+The decoded type is `.Type`, and the value as given is `.Input`:
+
+```ts
+const decoded: event.Type = { at: Temporal.Now.instant() };
+const given: event.Input = { at: "2026-10-26T09:00:00Z" };
+```
+
+These are the codecs:
+
+| Format | Codec |
+| --- | --- |
+| `date-time` | `Temporal.Instant` |
+| `date` | `Temporal.PlainDate` |
+| `duration` | `Temporal.Duration` |
+| `int64` | `bigint` |
+
+A string the codec can't hold exactly is an issue, never a lossy value:
+
+```ts
+event.decode({ at: "2016-12-31T23:59:60Z" });
+// { issues: [{ message: "could not be decoded: a leap second, which a Temporal.Instant cannot hold", path: ["at"], keyword: "decode" }] }
+```
+
+Where `Temporal` isn't defined, as in Cloudflare Workers, decoding gives an issue too:
+
+```ts
+event.decode({ at: "2026-10-26T09:00:00Z" });
+// { issues: [{ message: "could not be decoded: Temporal is not defined in this runtime", path: ["at"], keyword: "decode" }] }
+```
+
+A Standard Schema library gets the decoded value:
+
+```ts
+event["~standard"].validate(input); // the same function as event.decode
+```
+
 ## Errors
 
 An invalid schema is a type error, at its place in the file:

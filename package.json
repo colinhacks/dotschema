@@ -33,7 +33,8 @@
         "node",
         "src/mapper.ts"
       ],
-      "compilerOptions": []
+      "compilerOptions": [],
+      "dynamicConfig": true
     }
   },
   "scripts": {

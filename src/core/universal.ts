@@ -28,6 +28,12 @@ export interface LoaderPlugin {
   load(source: string, path: string): { code: string; problems: Problem[]; watchFiles?: string[] };
   /** TypeScript for the type checker. */
   types(source: string, path: string): Promise<{ types: string; problems: Problem[] }> | { types: string; problems: Problem[] };
+  /**
+   * dotschema's own, for a content mapper with `dynamicConfig`: the settings a project opened from
+   * `configFileName` (its tsconfig) reads, as the files TypeScript watches and a fingerprint of them,
+   * and what a key in the tsconfig entry's `options` should say.
+   */
+  project?(configFileName: string): { watchedFiles: string[]; configIdentity: string; option(key: string): string };
 }
 
 /** Every diagnostic is shown as `dotschema<code>`. */
@@ -374,9 +380,11 @@ export function toMapperHandlers(plugin: LoaderPlugin): MapperHandlers {
     },
     openProject(params) {
       // dotschema takes no options; a key in a tsconfig entry's `options` is a mistake worth showing.
-      const { options } = (params ?? {}) as { options?: Record<string, unknown> | null };
-      const optionDiagnostics = Object.keys(options ?? {}).map((key) => ({ path: [key], messageText: `dotschema takes no options; remove "${key}".`, code: CODES.option }));
-      return { optionDiagnostics };
+      const { options, configFileName } = (params ?? {}) as { options?: Record<string, unknown> | null; configFileName?: string };
+      const project = plugin.project && typeof configFileName === "string" ? plugin.project(configFileName) : undefined;
+      const optionDiagnostics = Object.keys(options ?? {}).map((key) => ({ path: [key], messageText: project ? project.option(key) : `dotschema takes no options; remove "${key}".`, code: CODES.option }));
+      // With `dynamicConfig`, the files whose change re-opens the project, and their fingerprint.
+      return project ? { configIdentity: project.configIdentity, watchedFiles: project.watchedFiles, optionDiagnostics } : { optionDiagnostics };
     },
     async transform(params) {
       const { fileName, content } = params as { fileName: string; content: string };

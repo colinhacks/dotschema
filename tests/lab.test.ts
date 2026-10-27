@@ -4,8 +4,11 @@
 // webpack loader under webpack and Rspack and the Vite plugin under Vite (for Node and the
 // browser), Rollup and Rolldown (lab/bundlers), Next.js with Turbopack and with webpack
 // (lab/nextjs), Jest and Vitest (lab/jest), and a Cloudflare Worker built and served by Vite in
-// workerd (lab/cloudflare). Each of those labs has its own dependencies, installed with
-// `nub install` in it, and its tests are skipped where it is not installed.
+// workerd (lab/cloudflare). Each of those labs also has a stamp.schema.jsonc of its own, beside a
+// dotschema.jsonc beside its package.json (in lab/nub and lab/bun, a codecs directory with a
+// package.json), so that every host shows it finds the project file from the schema file's path;
+// lab/basic has none, so its schemas decode nothing. Each of those labs has its own dependencies,
+// installed with `nub install` in it, and its tests are skipped where it is not installed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -79,6 +82,10 @@ const ADDRESS = '"address":[true,["city: required","zip: additionalProperties"]]
 // `.pick()` and `.omit()`: the picked schema's issues in ajv's order, a chain, and its Standard JSON Schema.
 const PICKED = `"picked":[["role: must have required property 'role'","email: must NOT have additional properties","name: must NOT have fewer than 1 characters"],true,"name,role"]`;
 const EXPECTED = [VALIDATE, POINTS, TEAM, JSON_SCHEMA, EVENTS, ADDRESS, PICKED];
+// What a lab with a package of its own prints of its stamp.schema.jsonc, decoded with the codecs of
+// the dotschema.jsonc beside that package's package.json: the instant a Temporal.Instant, in Z; the
+// int64 a bigint, exact past 2^53; and `.encode()` giving the strings back.
+const CODECS = '"codecs":[true,"2026-10-20T06:00:00Z","bigint","9007199254740993",{"at":"2026-10-20T06:00:00Z","id":"9007199254740993"}]';
 
 test("lab/basic runs under the preload", () => {
   const { status, out } = run(process.execPath, ["--import", "dotschema/register", "main.ts"], `${ROOT}lab/basic`);
@@ -112,14 +119,14 @@ function runAlone(file: string): { status: number | null; out: string } {
   }
 }
 
-// lab/nub: the preload from nub.jsonc, with no flag.
-test("lab/nub runs lab/basic and a test under the preload nub.jsonc names", { skip: missing("nub") }, () => {
+// lab/nub: the preload from nub.jsonc, with no flag; lab/nub/codecs is a package of its own, with a dotschema.jsonc.
+test("lab/nub runs lab/basic, its own codecs, and tests under the preload nub.jsonc names", { skip: missing("nub") }, () => {
   const ran = run("nub", ["main.ts"], `${ROOT}lab/nub`);
   assert.equal(ran.status, 0, ran.out);
-  for (const expected of EXPECTED) assert.ok(ran.out.includes(expected), ran.out);
+  for (const expected of [...EXPECTED, CODECS]) assert.ok(ran.out.includes(expected), ran.out);
   const tested = run("nub", ["--test"], `${ROOT}lab/nub`);
   assert.equal(tested.status, 0, tested.out);
-  assert.match(tested.out, /ℹ pass 1\nℹ fail 0/);
+  assert.match(tested.out, /ℹ pass 2\nℹ fail 0/);
 });
 
 test("control: under NODE_COMPAT=1 nub runs as plain Node, reads no nub.jsonc, and cannot import a schema", { skip: missing("nub") }, () => {
@@ -128,24 +135,25 @@ test("control: under NODE_COMPAT=1 nub runs as plain Node, reads no nub.jsonc, a
   assert.match(ran.out, /ERR_UNKNOWN_FILE_EXTENSION.*\.jsonc/);
 });
 
-// lab/bun: the preload from bunfig.toml, and Bun.build with the esbuild plugin.
-test("lab/bun runs lab/basic and a test under the preload bunfig.toml names, and bundles it with Bun.build", { skip: missing("bun") }, () => {
+// lab/bun: the preload from bunfig.toml, and Bun.build with the esbuild plugin; lab/bun/codecs is a package of its own, with a dotschema.jsonc.
+test("lab/bun runs lab/basic, its own codecs, and tests under the preload bunfig.toml names, and bundles them with Bun.build", { skip: missing("bun") }, () => {
   const ran = run("bun", ["main.ts"], `${ROOT}lab/bun`);
   assert.equal(ran.status, 0, ran.out);
-  for (const expected of EXPECTED) assert.ok(ran.out.includes(expected), ran.out);
+  for (const expected of [...EXPECTED, CODECS]) assert.ok(ran.out.includes(expected), ran.out);
   const tested = run("bun", ["test"], `${ROOT}lab/bun`);
   assert.equal(tested.status, 0, tested.out);
-  assert.match(tested.out, / 1 pass\n 0 fail/);
+  assert.match(tested.out, / 2 pass\n 0 fail/);
   rmSync(`${ROOT}lab/bun/dist`, { recursive: true, force: true });
   const built = run("bun", ["build.ts"], `${ROOT}lab/bun`);
   assert.equal(built.status, 0, built.out);
   assert.match(built.out, /success=true outputs=dist\/main\.js/);
   const alone = runAlone(`${ROOT}lab/bun/dist/main.js`);
   assert.equal(alone.status, 0, alone.out);
-  for (const expected of EXPECTED) assert.ok(alone.out.includes(expected), alone.out);
+  for (const expected of [...EXPECTED, CODECS]) assert.ok(alone.out.includes(expected), alone.out);
 });
 
-// lab/bundlers: lab/basic's schemas through dotschema/webpack and dotschema/vite.
+// lab/bundlers: lab/basic's schemas through dotschema/webpack and dotschema/vite, and the lab's own
+// stamp.schema.jsonc with the codecs of the dotschema.jsonc beside its package.json.
 const BUNDLERS = `${ROOT}lab/bundlers`;
 for (const [bundler, through, file] of [["webpack", "the webpack loader", "main.cjs"], ["rspack", "the webpack loader", "main.cjs"], ["vite", "the Vite plugin", "main.mjs"], ["vite-browser", "the Vite plugin, for the browser", "main.mjs"], ["rollup", "the Vite plugin", "main.mjs"], ["rolldown", "the Vite plugin", "main.mjs"]] as const) {
   test(`lab/bundlers bundles with ${bundler} through ${through}, and the bundle runs with nothing installed`, { skip: installed("bundlers") }, () => {
@@ -155,7 +163,7 @@ for (const [bundler, through, file] of [["webpack", "the webpack loader", "main.
     assert.match(built.out, /errors=0 warnings=0 node_modules=0/);
     const ran = runAlone(`${BUNDLERS}/dist/${bundler}/${file}`);
     assert.equal(ran.status, 0, ran.out);
-    for (const expected of EXPECTED) assert.ok(ran.out.includes(expected), ran.out);
+    for (const expected of [...EXPECTED, CODECS]) assert.ok(ran.out.includes(expected), ran.out);
   });
 }
 
@@ -174,15 +182,18 @@ test("lab/bundlers: Vite's, Rollup's and Rolldown's config types each take the p
   assert.equal(status, 0);
 });
 
-// lab/nextjs: a server component and a client component that import lab/basic's schemas.
+// lab/nextjs: a server component and a client component that import lab/basic's schemas, and the
+// lab's own stamp.schema.jsonc with the codecs of the dotschema.jsonc beside its package.json.
 const NEXT_LAB = `${ROOT}lab/nextjs`;
 const NEXT = `${NEXT_LAB}/node_modules/.bin/next`;
-/** What the server component and the client component printed, as the build prerendered them. */
-const SERVER = { vendor: "dotschema", valid: true, issues: ["name: minLength", "email: format", "role: enum"], points: [true, false], team: [true, false], events: [true, false] };
+/** What the server component and the client component printed, as the build prerendered them; each decodes stamp.schema.jsonc as CODECS has it. */
+const STAMP = [true, "2026-10-20T06:00:00Z", "bigint", "9007199254740993", { at: "2026-10-20T06:00:00Z", id: "9007199254740993" }];
+const SERVER = { vendor: "dotschema", valid: true, issues: ["name: minLength", "email: format", "role: enum"], points: [true, false], team: [true, false], events: [true, false], codecs: STAMP };
 const CLIENT = ["name: must NOT have fewer than 1 characters", 'email: must match format "email"'];
-function prerendered(): { server: unknown; client: unknown } {
+function prerendered(): { server: unknown; client: unknown; clientCodecs: unknown } {
   const html = readFileSync(`${NEXT_LAB}/.next/server/app/index.html`, "utf8").replaceAll("&quot;", '"');
-  return { server: JSON.parse(html.match(/id="server">([^<]*)/)![1]!), client: JSON.parse(html.match(/id="client">([^<]*)/)![1]!) };
+  const element = (id: string) => JSON.parse(html.match(new RegExp(`id="${id}">([^<]*)`))![1]!);
+  return { server: element("server"), client: element("client"), clientCodecs: element("client-codecs") };
 }
 
 test("lab/nextjs type-checks through the content mapper after next typegen", { skip: installed("nextjs") }, () => {
@@ -199,7 +210,7 @@ for (const args of [[], ["--webpack"]]) {
     const built = run(NEXT, ["build", ...args], NEXT_LAB);
     assert.equal(built.status, 0, built.out);
     assert.match(built.out, /Completed runAfterProductionCompile/);
-    assert.deepEqual(prerendered(), { server: SERVER, client: CLIENT });
+    assert.deepEqual(prerendered(), { server: SERVER, client: CLIENT, clientCodecs: STAMP });
     // The client component's validator is in a browser chunk.
     const chunks = `${NEXT_LAB}/.next/static/chunks`;
     const files = readdirSync(chunks, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".js"));
@@ -213,16 +224,17 @@ for (const args of [[], ["--webpack"]]) {
 const JEST_LAB = `${ROOT}lab/jest`;
 const jest = (config: string, extra: Record<string, string> = {}) => run(`${JEST_LAB}/node_modules/.bin/jest`, ["-c", config, "--ci", "--no-cache"], JEST_LAB, extra);
 
+// Each test file has a second test, of the lab's own stamp.schema.jsonc and the codecs of its dotschema.jsonc.
 test("lab/jest: a CommonJS test requires lab/basic's schemas through the Jest transformer", { skip: installed("jest") }, () => {
   const { status, out } = jest("jest.cjs.config.cjs");
   assert.equal(status, 0, out);
-  assert.match(out, /Tests:\s+1 passed, 1 total/);
+  assert.match(out, /Tests:\s+2 passed, 2 total/);
 });
 
 test("lab/jest: CommonJS and ES module tests load lab/basic's schemas under --experimental-vm-modules", { skip: installed("jest") }, () => {
   const { status, out } = jest("jest.esm.config.cjs", { NODE_OPTIONS: "--experimental-vm-modules" });
   assert.equal(status, 0, out);
-  assert.match(out, /Tests:\s+2 passed, 2 total/);
+  assert.match(out, /Tests:\s+4 passed, 4 total/);
 });
 
 test("lab/jest: with dotschema's pattern before a .jsonc transformer's, each file goes to its own", { skip: installed("jest") }, () => {
@@ -234,74 +246,132 @@ test("lab/jest: with dotschema's pattern before a .jsonc transformer's, each fil
 test("lab/jest: Vitest imports lab/basic's schemas through the Vite plugin", { skip: installed("jest") }, () => {
   const { status, out } = run(`${JEST_LAB}/node_modules/.bin/vitest`, ["run"], JEST_LAB);
   assert.equal(status, 0, out);
-  assert.match(out, /Tests\s+1 passed \(1\)/);
+  assert.match(out, /Tests\s+2 passed \(2\)/);
 });
 
 // Vitest keeps each module on disk across runs, keyed by its file's text, so a schema whose $ref'd
 // file changed came back from the cache as it was, in one run after another and in watch mode, until
-// 2026-10-26. A project outside the repository, where `team.schema.jsonc` refers to
-// `user.schema.jsonc`, whose `minLength` changes between runs: the test writes `team`'s verdict.
-function vitestProject(): { dir: string; verdict: () => string; minLength: (n: number) => void } {
-  const dir = mkdtempSync(join(tmpdir(), "dotschema-vitest-"));
+// 2026-10-26. Two projects outside the repository, each with a file a module is made from that
+// changes between runs, and a test that writes a verdict. In one, `team.schema.jsonc` refers to
+// `user.schema.jsonc`, whose `minLength` goes from 3 to 1, and the verdict is `team`'s. In the
+// other, the project file, dotschema.jsonc, turns `stamp.schema.jsonc`'s codec on and then off, and
+// the verdict is the type of what `.decode()` gives.
+type VitestProject = { dir: string; verdict: () => string; change: (changed: boolean) => void; verdicts: readonly [string, string] };
+function vitestProject(name: string, files: Record<string, string>, verdict: string, change: (dir: string, changed: boolean) => void, verdicts: readonly [string, string]): VitestProject {
+  const dir = mkdtempSync(join(tmpdir(), `dotschema-vitest-${name}-`));
   mkdirSync(join(dir, "node_modules"));
   symlinkSync(ROOT, join(dir, "node_modules", "dotschema"));
   writeFileSync(join(dir, "package.json"), '{ "private": true, "type": "module" }\n');
-  writeFileSync(join(dir, "vitest.config.mjs"), 'import dotschema from "dotschema/vite";\nexport default { plugins: [dotschema()], test: { include: ["ref.test.mjs"], globals: true } };\n');
-  writeFileSync(join(dir, "team.schema.jsonc"), '{ "type": "object", "properties": { "lead": { "$ref": "./user.schema.jsonc" } } }\n');
-  writeFileSync(join(dir, "ref.test.mjs"), 'import { writeFileSync } from "node:fs";\nimport team from "./team.schema.jsonc";\ntest("ref", () => writeFileSync(new URL("verdict.txt", import.meta.url), String(team.is({ lead: { name: "Al" } }))));\n');
-  const minLength = (n: number) => writeFileSync(join(dir, "user.schema.jsonc"), `{ "type": "object", "properties": { "name": { "type": "string", "minLength": ${n} } }, "required": ["name"] }\n`);
-  minLength(3);
-  return { dir, minLength, verdict: () => (existsSync(join(dir, "verdict.txt")) ? readFileSync(join(dir, "verdict.txt"), "utf8") : "") };
+  writeFileSync(join(dir, "vitest.config.mjs"), `import dotschema from "dotschema/vite";\nexport default { plugins: [dotschema()], test: { include: ["${name}.test.mjs"], globals: true } };\n`);
+  for (const [file, text] of Object.entries(files)) writeFileSync(join(dir, file), text);
+  writeFileSync(join(dir, `${name}.test.mjs`), `import { writeFileSync } from "node:fs";\n${verdict}\ntest("${name}", () => writeFileSync(new URL("verdict.txt", import.meta.url), String(verdict())));\n`);
+  change(dir, false);
+  return { dir, change: (changed) => change(dir, changed), verdicts, verdict: () => (existsSync(join(dir, "verdict.txt")) ? readFileSync(join(dir, "verdict.txt"), "utf8") : "") };
+}
+const VITEST_PROJECTS: [string, () => VitestProject][] = [
+  [
+    "a file it refers to",
+    () =>
+      vitestProject(
+        "ref",
+        { "team.schema.jsonc": '{ "type": "object", "properties": { "lead": { "$ref": "./user.schema.jsonc" } } }\n' },
+        'import team from "./team.schema.jsonc";\nconst verdict = () => team.is({ lead: { name: "Al" } });',
+        (dir, changed) => writeFileSync(join(dir, "user.schema.jsonc"), `{ "type": "object", "properties": { "name": { "type": "string", "minLength": ${changed ? 1 : 3} } }, "required": ["name"] }\n`),
+        ["false", "true"],
+      ),
+  ],
+  [
+    "its project file",
+    () =>
+      vitestProject(
+        "codecs",
+        { "stamp.schema.jsonc": '{ "type": "string", "format": "date-time" }\n' },
+        'import stamp from "./stamp.schema.jsonc";\nconst verdict = () => { const { value } = stamp.decode("2026-10-20T08:00:00Z"); return value instanceof Temporal.Instant ? "Temporal.Instant" : typeof value; };',
+        (dir, changed) => writeFileSync(join(dir, "dotschema.jsonc"), changed ? '{ "codecs": {} }\n' : '{ "codecs": { "date-time": "Temporal.Instant" } }\n'),
+        ["Temporal.Instant", "string"],
+      ),
+  ],
+];
+
+for (const [what, make] of VITEST_PROJECTS) {
+  test(`lab/jest: Vitest makes a schema again when ${what} changes between runs`, { skip: installed("jest") }, () => {
+    const project = make();
+    try {
+      const vitest = () => run(`${JEST_LAB}/node_modules/.bin/vitest`, ["run"], project.dir);
+      const verdicts = [];
+      for (const changed of [false, true, true, false]) {
+        project.change(changed);
+        const { status, out } = vitest();
+        assert.equal(status, 0, out);
+        verdicts.push(project.verdict());
+      }
+      const [before, after] = project.verdicts;
+      assert.deepEqual(verdicts, [before, after, after, before]);
+    } finally {
+      rmSync(project.dir, { recursive: true, force: true });
+    }
+  });
+
+  test(`lab/jest: Vitest's watch mode makes a schema again when ${what} changes`, { skip: installed("jest") }, async () => {
+    const project = make();
+    const child = spawn(`${JEST_LAB}/node_modules/.bin/vitest`, ["watch"], { cwd: project.dir, env: env() });
+    let out = "";
+    child.stdout.on("data", (chunk) => (out += chunk));
+    child.stderr.on("data", (chunk) => (out += chunk));
+    // Waits for the verdict a run writes, up to 30 seconds.
+    const verdict = async (expected: string) => {
+      for (const end = Date.now() + 30_000; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 100))) if (project.verdict() === expected) return;
+      assert.fail(`no verdict ${expected}, the last ${project.verdict() || "none"}:\n${out}`);
+    };
+    try {
+      await verdict(project.verdicts[0]);
+      // Vitest watches files once it has run, so the change comes after the first run's summary.
+      for (const end = Date.now() + 30_000; !/Waiting for file changes/.test(out) && Date.now() < end; ) await new Promise((resolve) => setTimeout(resolve, 100));
+      project.change(true);
+      await verdict(project.verdicts[1]);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill();
+        await once(child, "exit");
+      }
+      rmSync(project.dir, { recursive: true, force: true });
+    }
+  });
 }
 
-test("lab/jest: Vitest makes a schema again when a file it refers to changes between runs", { skip: installed("jest") }, () => {
-  const project = vitestProject();
+// Jest keeps a transformer's output across runs too, keyed by the transformer's getCacheKey, which
+// is the module itself: a project outside the repository, with Jest's cache in it, whose
+// dotschema.jsonc turns `stamp.schema.jsonc`'s codec on and then off between cached runs.
+test("lab/jest: Jest makes a schema again from its cache when its project file changes between runs", { skip: installed("jest") }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "dotschema-jest-codecs-"));
   try {
-    const vitest = () => run(`${JEST_LAB}/node_modules/.bin/vitest`, ["run"], project.dir);
+    mkdirSync(join(dir, "node_modules"));
+    symlinkSync(ROOT, join(dir, "node_modules", "dotschema"));
+    writeFileSync(join(dir, "package.json"), '{ "private": true }\n');
+    writeFileSync(join(dir, "jest.config.cjs"), 'module.exports = { testMatch: ["<rootDir>/codecs.test.cjs"], transform: { "\\\\.schema\\\\.jsonc$": "dotschema/jest" }, cacheDirectory: "<rootDir>/.jest-cache" };\n');
+    writeFileSync(join(dir, "stamp.schema.jsonc"), '{ "type": "string", "format": "date-time" }\n');
+    writeFileSync(join(dir, "codecs.test.cjs"), 'const stamp = require("./stamp.schema.jsonc").default;\ntest("codecs", () => require("node:fs").writeFileSync(`${__dirname}/verdict.txt`, typeof stamp.decode("2026-10-20T08:00:00Z").value));\n');
     const verdicts = [];
-    for (const n of [3, 1, 1, 3]) {
-      project.minLength(n);
-      const { status, out } = vitest();
+    for (const on of [true, false, false, true]) {
+      writeFileSync(join(dir, "dotschema.jsonc"), on ? '{ "codecs": { "date-time": "Temporal.Instant" } }\n' : '{ "codecs": {} }\n');
+      const { status, out } = run(`${JEST_LAB}/node_modules/.bin/jest`, ["-c", "jest.config.cjs", "--ci"], dir);
       assert.equal(status, 0, out);
-      verdicts.push(project.verdict());
+      verdicts.push(readFileSync(join(dir, "verdict.txt"), "utf8"));
     }
-    assert.deepEqual(verdicts, ["false", "true", "true", "false"]);
+    assert.deepEqual(verdicts, ["object", "string", "string", "object"]);
+    assert.ok(readdirSync(join(dir, ".jest-cache")).length > 0, "Jest kept no cache");
   } finally {
-    rmSync(project.dir, { recursive: true, force: true });
-  }
-});
-
-test("lab/jest: Vitest's watch mode makes a schema again when a file it refers to changes", { skip: installed("jest") }, async () => {
-  const project = vitestProject();
-  const child = spawn(`${JEST_LAB}/node_modules/.bin/vitest`, ["watch"], { cwd: project.dir, env: env() });
-  let out = "";
-  child.stdout.on("data", (chunk) => (out += chunk));
-  child.stderr.on("data", (chunk) => (out += chunk));
-  // Waits for the verdict a run writes, up to 30 seconds.
-  const verdict = async (expected: string) => {
-    for (const end = Date.now() + 30_000; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 100))) if (project.verdict() === expected) return;
-    assert.fail(`no verdict ${expected}, the last ${project.verdict() || "none"}:\n${out}`);
-  };
-  try {
-    await verdict("false");
-    // Vitest watches files once it has run, so the change comes after the first run's summary.
-    for (const end = Date.now() + 30_000; !/Waiting for file changes/.test(out) && Date.now() < end; ) await new Promise((resolve) => setTimeout(resolve, 100));
-    project.minLength(1);
-    await verdict("true");
-  } finally {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill();
-      await once(child, "exit");
-    }
-    rmSync(project.dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
 // lab/cloudflare: a Worker built with Vite and Cloudflare's plugin, run in workerd under the dev
-// server and as the build `wrangler deploy` would upload, with no Cloudflare account.
+// server and as the build `wrangler deploy` would upload, with no Cloudflare account. workerd defines
+// no Temporal, so the Worker's stamp.schema.jsonc, which the dotschema.jsonc beside the lab's
+// package.json gives a Temporal codec, refuses in `.decode()` with an issue, and `.is()` takes the value.
 const CLOUDFLARE = `${ROOT}lab/cloudflare`;
 const WORKER = {
-  get: { vendor: "dotschema", valid: true, issues: ["name: minLength", "email: format", "role: enum"], team: [true, false], events: [true, false], formats: [true, ["token", "data", "network", "card", "at", "id", "mood", "digest", "host", "mail", "link"]] },
+  get: { vendor: "dotschema", valid: true, issues: ["name: minLength", "email: format", "role: enum"], team: [true, false], events: [true, false], formats: [true, ["token", "data", "network", "card", "at", "id", "mood", "digest", "host", "mail", "link"]], codecs: ["undefined", { issues: [{ message: "could not be decoded: Temporal is not defined in this runtime", path: ["at"], keyword: "decode" }] }, true] },
   post: [400, { issues: [{ message: "must NOT have fewer than 1 characters", path: ["name"], keyword: "minLength" }, { message: "must be equal to one of the allowed values", path: ["role"], keyword: "enum" }] }],
 };
 

@@ -1,0 +1,11 @@
+// A plain object, which picks and omits: a picked schema keeps the codecs of the properties it keeps.
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "at": { "type": "string", "format": "date-time" },
+    "message": { "type": "string" }
+  },
+  "required": ["at", "message"],
+  "additionalProperties": false
+}

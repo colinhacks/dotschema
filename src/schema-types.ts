@@ -7,7 +7,9 @@
 // widens that part of the type to `unknown`. A `$ref` to another schema file is a type imported
 // from that file's own module (refs.ts).
 import { basename } from "node:path";
+import type { Codec } from "./codecs.ts";
 import { literal, propertyName, type Value } from "./core/serialize.ts";
+import type { Place } from "./decode.ts";
 import { docOfKey, docOfRoot } from "./parse.ts";
 import { fileOf, fragmentPath, pointTo, specifierOf } from "./refs.ts";
 
@@ -139,8 +141,12 @@ const fileTypeName = (path: string, taken: Set<string>): string => typeName(base
  * `Type` and `Json`. The definitions are named first, so a definition's name is its key whatever the
  * file is called, and the root, which is exported as `Type` as well, is the one that gives way.
  */
-function definitionNames(root: Value, path?: string): { rootName: string; names: Map<string, string>; definitions: [string, Value, string | undefined, Definition][]; taken: Set<string> } {
-  const taken = new Set(["Type", LITERAL_NAME, "__DotschemaSchema", "__DotschemaObjectSchema"]);
+function definitionNames(
+  root: Value,
+  path?: string,
+  reaches: (segments: string[]) => boolean = () => false,
+): { rootName: string; rootInputName: string | undefined; names: Map<string, string>; inputNames: Map<string, string>; definitions: [string, Value, string | undefined, Definition][]; taken: Set<string> } {
+  const taken = new Set(["Type", "Input", LITERAL_NAME, "__DotschemaSchema", "__DotschemaObjectSchema", "__DotschemaCodecSchema", "__DotschemaObjectCodecSchema"]);
   const names = new Map<string, string>();
   // Each definition's name, its schema, the doc comment before its key, and its names in the module.
   const definitions: [string, Value, string | undefined, Definition][] = [];
@@ -156,10 +162,19 @@ function definitionNames(root: Value, path?: string): { rootName: string; names:
     }
   }
   const rootName = path === undefined ? "Type" : fileTypeName(path, taken);
+  // Where a codec decodes something below it (decode.ts), the type the module declares under the name
+  // is the decoded one, and the value as given is another, the name with `Input` after it.
+  const inputNames = new Map<string, string>();
+  for (const [name, , , definition] of definitions) {
+    if (!reaches([definition.keyword, definition.key])) continue;
+    definition.inputTypeName = typeName(`${name}Input`, taken);
+    inputNames.set(`${definition.keyword}\0${definition.key}`, definition.inputTypeName);
+  }
+  const rootInputName = path !== undefined && reaches([]) ? typeName(`${rootName}Input`, taken) : undefined;
   // Each definition's validator is named after the types, so it never takes a type's name.
   const values = new Set(taken);
   for (const [, , , definition] of definitions) definition.valueName = valueName(definition.key, values);
-  return { rootName, names, definitions, taken };
+  return { rootName, rootInputName, names, inputNames, definitions, taken };
 }
 
 /** The root's definitions, each with the names its type and its validator take in the module, in the order the module declares them. */
@@ -171,6 +186,13 @@ export interface SchemaFiles {
   path: string;
   /** The schema in another file, or undefined when it cannot be read (a problem reported at the reference). */
   read(path: string): Value | undefined;
+  /** The codecs of each file's project, where a module has any: the decoded types follow them (decode.ts). */
+  codecs?: {
+    /** The codec a schema's own format turns on in its file. */
+    codecOf(path: string, schema: Value): Codec | undefined;
+    /** Whether a codec decodes anything below a place. */
+    reaches(place: Place): boolean;
+  };
 }
 
 /** An entry of the root's `$defs` or `definitions`: its keyword and key, the names of its type and its validator, and its type written out. */
@@ -180,12 +202,15 @@ export interface Definition {
   typeName: string;
   valueName: string;
   type: string;
+  /** Where a codec decodes something in it: the name and the type of the value as given, beside the decoded one, `typeName` and `type`. */
+  inputTypeName?: string;
+  inputType?: string;
   /** Its doc comment, as the module writes it before its type: for its validator too. */
   doc: string;
 }
 
 /** A schema file whose pointers a reference can follow: the root's own, or another file's, whose names are imported. */
-type Document = { schema: Value; path: string | undefined; rootName: string; names: Map<string, string>; own: boolean };
+type Document = { schema: Value; path: string | undefined; rootName: string; rootInputName: string | undefined; names: Map<string, string>; inputNames: Map<string, string>; own: boolean };
 
 /**
  * The keywords that evaluate properties in place, beside `properties` and `patternProperties`: a
@@ -260,12 +285,20 @@ export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Dra
 }
 
 /** The declarations, as `schemaDeclarations` writes them; the root's name; and the root's type as text, which the module's default export takes so a hover prints its properties. */
-export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft): { declarations: string; rootName: string; rootType: string; definitions: Definition[] } {
+export function schemaModuleTypes(
+  root: Value,
+  files?: SchemaFiles,
+  draft?: Draft,
+): { declarations: string; rootName: string; rootType: string; rootInputName: string | undefined; rootInputType: string | undefined; definitions: Definition[] } {
   const prefixItems = draft === undefined || draft === "2020-12";
   const itemLists = draft === undefined || draft !== "2020-12";
   const unevaluated = draft === undefined || draft !== "draft-07";
-  const { rootName, names, definitions, taken } = definitionNames(root, files?.path);
-  const main: Document = { schema: root, path: files?.path, rootName, names, own: true };
+  const codecs = files?.codecs;
+  const reachesIn = (path: string | undefined) => (segments: string[]) => (codecs && path !== undefined ? codecs.reaches({ path, segments }) : false);
+  const { rootName, rootInputName, names, inputNames, definitions, taken } = definitionNames(root, files?.path, reachesIn(files?.path));
+  const main: Document = { schema: root, path: files?.path, rootName, rootInputName, names, inputNames, own: true };
+  // Whether the types being written are the decoded ones, a codec's place typed as its value, or those of the value as given.
+  let decoded = false;
   const documents = new Map<string, Document>();
   // The types imported from other files: specifier, then exported name, then the name used here.
   const imports = new Map<string, Map<string, string>>();
@@ -280,8 +313,8 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     if (!document) {
       const schema = files!.read(path);
       if (schema === undefined) return undefined;
-      const { rootName, names } = definitionNames(schema, path);
-      document = { schema, path, rootName, names, own: false };
+      const { rootName, rootInputName, names, inputNames } = definitionNames(schema, path, reachesIn(path));
+      document = { schema, path, rootName, rootInputName, names, inputNames, own: false };
       documents.set(path, document);
     }
     return document;
@@ -289,7 +322,7 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
 
   /** `exported`, a name `document`'s module declares, as a name in this module: itself, or the name it is imported under. */
   function nameIn(document: Document, exported: string): string {
-    if (document.own) return exported === "Type" ? rootName : exported;
+    if (document.own) return exported === "Type" ? rootName : exported === "Input" ? (rootInputName ?? rootName) : exported;
     const specifier = specifierOf(files!.path, document.path!);
     let byName = imports.get(specifier);
     if (!byName) imports.set(specifier, (byName = new Map()));
@@ -298,7 +331,7 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       // Another file's root is imported as its `Type`, the re-export of the root its module declares
       // and does not export, named here for the file: `./address.schema.jsonc` gives `Address`. A
       // hover prints the root's own name, or `address.Type` where the file imports that module.
-      local = typeName(exported === "Type" ? document.rootName : exported, taken);
+      local = typeName(exported === "Type" ? document.rootName : exported === "Input" ? (document.rootInputName ?? document.rootName) : exported, taken);
       byName.set(exported, local);
     }
     return local;
@@ -360,9 +393,11 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     const at = locate(ref);
     if (!at) return "unknown";
     const { document, path } = at;
-    if (path.length === 0) return nameIn(document, "Type");
-    const named = path.length === 2 ? document.names.get(`${path[0]}\0${path[1]}`) : undefined;
-    if (named) return nameIn(document, named);
+    // The decoded type of another root or definition, or the one of its value as given.
+    if (path.length === 0) return nameIn(document, !decoded && document.rootInputName ? "Input" : "Type");
+    const definitionKey = path.length === 2 ? `${path[0]}\0${path[1]}` : undefined;
+    const named = definitionKey === undefined ? undefined : document.names.get(definitionKey);
+    if (named) return nameIn(document, (!decoded && document.inputNames.get(definitionKey!)) || named);
     // By where it points, so a pointer and an anchor to one schema stop each other's recursion.
     const key = JSON.stringify([document.path, ...path]);
     const target = inlining.has(key) ? undefined : pointTo(document.schema, path);
@@ -511,7 +546,36 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
    * have already, when the schema is a member of another's `allOf`, `anyOf` or `oneOf` (the other's
    * own), or a `then` or `else` read as an object; the type leaves out every other JSON type.
    */
+  /** The codec a schema carries, by its own format or one of its `allOf` members', as decode.ts reads it. */
+  function carried(schema: Value, seen = new Set<Value>()): Codec | undefined {
+    if (!codecs || current.path === undefined || !isObj(schema) || seen.has(schema)) return undefined;
+    seen.add(schema);
+    const own = codecs.codecOf(current.path, schema);
+    if (own) return own;
+    for (const member of Array.isArray(schema["allOf"]) ? schema["allOf"] : []) {
+      const codec = carried(member, seen);
+      if (codec) return codec;
+    }
+    return undefined;
+  }
+
+  /**
+   * The type of the values `schema` accepts, or, when the types written are the decoded ones and the
+   * schema carries a codec, of what decoding them gives: the codec's value in place of a string.
+   */
   function emit(schema: Value, indent: string, within?: ReadonlySet<JsonType>): string {
+    const codec = decoded ? carried(schema) : undefined;
+    if (codec && isObj(schema)) {
+      const possible = new Set([...possibleTypes(schema)].filter((type) => !within || within.has(type)));
+      if (possible.has("string")) {
+        possible.delete("string");
+        return union([codec.type, possible.size ? emitAs(schema, indent, possible) : "never"]);
+      }
+    }
+    return emitAs(schema, indent, within);
+  }
+
+  function emitAs(schema: Value, indent: string, within?: ReadonlySet<JsonType>): string {
     if (schema === true) return "unknown";
     if (schema === false) return "never";
     if (!isObj(schema)) return "unknown";
@@ -550,19 +614,32 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     const keyword = exported ? "export " : "";
     return objectLiteral(type) ? `${doc(schema, "", comment)}${keyword}interface ${name} ${type}` : `${doc(schema, "", comment)}${keyword}type ${name} = ${type};`;
   };
+  // The decoded types first, under the names; then, where a codec decodes something, the value as
+  // given under the name with `Input` after it. A module without a codec writes one of each.
+  decoded = true;
   const rootType = emit(root, "");
-  // Named for the file, the root is exported only as `Type`, by a re-export rather than
+  const definitionTypes = definitions.map(([, schema]) => emit(schema, ""));
+  decoded = false;
+  const rootInputType = rootInputName === undefined ? undefined : emit(root, "");
+  const definitionInputs = definitions.map(([, schema, , definition]) => (definition.inputTypeName === undefined ? undefined : emit(schema, "")));
+  // Named for the file, the root is exported only as `Type` and `Input`, by a re-export rather than
   // `type Type = User`, whose name a hover would print in place of `User`.
   const named = rootName !== "Type";
-  const rootDeclaration = [declare(rootName, root, docOfRoot(root), rootType, !named), ...(named ? [`export type { ${rootName} as Type };`] : [])].join("\n");
+  const rootDeclaration = [
+    declare(rootName, root, docOfRoot(root), rootType, !named),
+    ...(rootInputName !== undefined && rootInputType !== undefined ? [declare(rootInputName, root, docOfRoot(root), rootInputType, false)] : []),
+    ...(named ? [`export type { ${rootName} as Type, ${rootInputName ?? rootName} as Input };`] : []),
+  ].join("\n");
   const declarations = [
     rootDeclaration,
-    ...definitions.map(([name, schema, comment, definition]) => {
-      definition.type = emit(schema, "");
+    ...definitions.map(([name, schema, comment, definition], i) => {
+      definition.type = definitionTypes[i]!;
       definition.doc = doc(schema, "", comment);
-      return declare(name, schema, comment, definition.type);
+      const input = definitionInputs[i];
+      if (input !== undefined) definition.inputType = input;
+      return [declare(name, schema, comment, definition.type), ...(input !== undefined ? [declare(definition.inputTypeName!, schema, comment, input)] : [])].join("\n");
     }),
   ].join("\n\n");
   const lines = [...imports].map(([specifier, byName]) => `import type { ${[...byName].map(([exported, local]) => (exported === local ? exported : `${exported} as ${local}`)).join(", ")} } from ${JSON.stringify(specifier)};`);
-  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, rootType, definitions: definitions.map(([, , , definition]) => definition) };
+  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, rootType, rootInputName, rootInputType, definitions: definitions.map(([, , , definition]) => definition) };
 }
