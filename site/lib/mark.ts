@@ -3,62 +3,47 @@
  * (components/brand.tsx), the link preview (app/routes/opengraph-image.tsx) and every icon the site
  * serves, `/icon.svg`, `/favicon.ico`, `/apple-icon.png` and the manifest's tiles (app/routes/icon.ts
  * and app/routes/icon-png.tsx), are drawn from `mark` at build time, so a new mark is a change to
- * the one line that picks it.
+ * this file.
  *
- * dotschema had no mark; these are three candidates, drawn on 2026-10-27 for the maintainer to pick
- * from (`marks.html` beside the docs thread, each at favicon size, in the brand spot, light and
- * dark). The site is built with the first.
- *
- * Each is drawn on a 32-unit square in one colour, the accent (`--dk-accent`), with strokes and
- * dots on whole units so that it stays sharp at 16 pixels, where a unit is half a pixel.
+ * Zod's shield upside down, solid in Zod's gradient, with a dot cut through it: the maintainer's pick
+ * of 2026-10-27. Of the variants of the shield and the dot drawn for them (`shield.html`, beside the
+ * docs thread) they took the solid shield with the dot cut through ("I really just want it to be a
+ * dot. Basically, number 14 is good. The Z does not need to be there. Number 14 is good, and I like
+ * that it's centered. Let's lock it in."), then asked for it "flipped upside down", and of the four
+ * ways up (`flip.html`) picked D, the point up and the dot lowered into the wide part. The shield
+ * keeps the proportions of Zod's (`logo.svg` in Zod's repository: a flat edge 60% of the width, the
+ * widest point 44% of the way from it), turned over on a 32-unit square, its corners rounded by a
+ * 2-unit stroke, and the gradient is Zod's, #3a6aff at the foot to #45a9ff at the top. The same
+ * drawing serves the light and the dark page.
  */
 export type Mark = {
   name: string;
-  /** The drawing's elements, in SVG, filled or stroked with `currentColor`. */
-  svg: string;
+  /**
+   * The drawing's elements, in SVG, on a 32-unit square. `id` names its gradient and must be unique
+   * in the document: the brand is drawn twice on a page, one copy hidden at each width, and a
+   * browser paints no gradient from inside a hidden SVG.
+   */
+  svg: (id: string) => string;
 };
-
-/** A schema's object braces around a dot. */
-const bracedDot: Mark = {
-  name: 'Braced dot',
-  svg:
-    '<g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M11.5 4.5C8.5 4.5 7.5 6 7.5 8.5V12.5C7.5 14.3 6.6 15.5 4.5 16C6.6 16.5 7.5 17.7 7.5 19.5V23.5C7.5 26 8.5 27.5 11.5 27.5"/>' +
-    '<path d="M20.5 4.5C23.5 4.5 24.5 6 24.5 8.5V12.5C24.5 14.3 25.4 15.5 27.5 16C25.4 16.5 24.5 17.7 24.5 19.5V23.5C24.5 26 23.5 27.5 20.5 27.5"/>' +
-    '</g><circle cx="16" cy="16" r="3.5" fill="currentColor"/>',
-};
-
-/** A dot, as in the suffix, and a check, the validator. */
-const dotCheck: Mark = {
-  name: 'Dot and check',
-  svg:
-    '<circle cx="6.5" cy="23.5" r="3.5" fill="currentColor"/>' +
-    '<path d="M12.5 17.5L17.5 22.5L27.5 9.5" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>',
-};
-
-/** A schema's tree: a root and the two properties under it. */
-const tree: Mark = {
-  name: 'Schema tree',
-  svg:
-    '<g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 11V23.5H16"/><path d="M8.5 15.5H16"/></g>' +
-    '<circle cx="8.5" cy="8" r="4" fill="currentColor"/><circle cx="21" cy="15.5" r="3.5" fill="currentColor"/><circle cx="21" cy="23.5" r="3.5" fill="currentColor"/>',
-};
-
-export const marks: readonly Mark[] = [bracedDot, dotCheck, tree];
-
-/** The mark the site shows: candidate 1 until the maintainer picks. */
-export const mark: Mark = marks[0]!;
 
 /**
- * The light and dark accents of app/global.css, which the mark is drawn in, and the dark page's
- * background, the tile of the icons a home screen shows.
+ * The dot is a hole in the shape, a circle of radius 5.5 under the even-odd rule, which the 2-unit
+ * stroke narrows to 4.5, rather than a mask, so the drawing needs one id and no more.
  */
-export const markColor = { light: '#3d5afe', dark: '#8c9eff', background: '#0e0e0e' };
+const shieldDot: Mark = {
+  name: 'Shield dot',
+  svg: (id) =>
+    `<defs><linearGradient id="${id}" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#3a6aff"/><stop offset="1" stop-color="#45a9ff"/></linearGradient></defs>` +
+    `<path d="M8.6 26.5H23.4L28.8 17.4L16 6L3.2 17.4ZM16 13.1A5.5 5.5 0 1 0 16 24.1A5.5 5.5 0 1 0 16 13.1Z" fill="url(#${id})" fill-rule="evenodd" stroke="url(#${id})" stroke-width="2" stroke-linejoin="round"/>`,
+};
 
-/**
- * The mark as an SVG document, in the light accent, or the dark one where the browser's theme is
- * dark and it reads the media query inside an icon.
- */
+/** The mark the site shows. */
+export const mark: Mark = shieldDot;
+
+/** The dark page's background, the tile of the icons a home screen shows. */
+export const markColor = { background: '#0e0e0e' };
+
+/** The mark as an SVG document, the same on a light page and a dark one. */
 export function markSvg(drawing: Mark = mark): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><style>svg{color:${markColor.light}}@media (prefers-color-scheme:dark){svg{color:${markColor.dark}}}</style>${drawing.svg}</svg>\n`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${drawing.svg('mark')}</svg>\n`;
 }

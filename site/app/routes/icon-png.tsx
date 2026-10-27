@@ -1,12 +1,12 @@
 // The icons as PNG, drawn from the mark of lib/mark.ts at build time, so a new mark redraws them:
-// /favicon.ico (a PNG in an ICO, 48px, the mark in the light accent on nothing, for a browser that
-// takes no SVG icon), and the tiles, the mark in the dark accent on the dark page's background,
+// /favicon.ico (a PNG in an ICO, 48px, the mark on nothing, for a browser that takes no SVG icon),
+// and the tiles, the mark on the dark page's background,
 // /apple-icon.png (180px) and the manifest's /icon-192.png and /icon-512.png. One module for the four
 // routes (app/routes.ts), each telling it apart by its path. Drawn by @vercel/og's ImageResponse
 // (Satori), as the link preview is.
-import { mark, markColor } from '@/lib/mark';
+import { markColor, markSvg } from '@/lib/mark';
 
-const svgImage = (color: string) => `data:image/svg+xml;base64,${Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" color="${color}">${mark.svg}</svg>`).toString('base64')}`;
+const svgImage = `data:image/svg+xml;base64,${Buffer.from(markSvg()).toString('base64')}`;
 
 async function png(size: number, tile: boolean): Promise<Uint8Array<ArrayBuffer>> {
   const { ImageResponse } = await import('@vercel/og');
@@ -15,7 +15,7 @@ async function png(size: number, tile: boolean): Promise<Uint8Array<ArrayBuffer>
   const image = new ImageResponse(
     (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: tile ? markColor.background : 'transparent' }}>
-        <img src={svgImage(tile ? markColor.dark : markColor.light)} width={inner} height={inner} />
+        <img src={svgImage} width={inner} height={inner} />
       </div>
     ),
     { width: size, height: size },
