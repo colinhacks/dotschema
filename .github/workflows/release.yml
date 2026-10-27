@@ -189,7 +189,7 @@ jobs:
           fi
           prev="$(git describe --tags --abbrev=0 "$GITHUB_SHA^" 2>/dev/null || true)"
           {
-            echo "Docs: https://dotschema.vercel.app"
+            echo "Docs: https://dotschema.dev"
             echo
             echo "## Package"
             echo

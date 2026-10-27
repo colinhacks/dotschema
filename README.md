@@ -8,7 +8,7 @@
   <a href="https://www.npmjs.com/package/dotschema"><img src="https://img.shields.io/npm/v/dotschema" alt="npm version" /></a>
 </p>
 
-<p align="center"><b><a href="https://dotschema.vercel.app">Documentation</a></b></p>
+<p align="center"><b><a href="https://dotschema.dev">Documentation</a></b></p>
 
 <br/>
 
@@ -88,27 +88,27 @@ Load dotschema wherever your code runs, so that a schema import works at run tim
 
 | Runtime or bundler | Setup |
 | --- | --- |
-| Node | `node --import dotschema/register main.ts` ([setup](https://dotschema.vercel.app/#setup-node)) |
-| Bun | `preload = ["dotschema/register"]` in `bunfig.toml` ([setup](https://dotschema.vercel.app/#setup-bun)) |
-| nub | `"preload": ["dotschema/register"]` in `nub.jsonc` ([setup](https://dotschema.vercel.app/#setup-nub)) |
-| Vite, Vitest, Rollup, Rolldown | `import dotschema from "dotschema/vite"`, then `dotschema()` in `plugins` ([setup](https://dotschema.vercel.app/#setup-vite)) |
-| Next.js | `import { withDotschema } from "dotschema/next"`, then `export default withDotschema(nextConfig)` ([setup](https://dotschema.vercel.app/#setup-nextjs)) |
-| esbuild, `Bun.build` | `import dotschema from "dotschema/esbuild"`, then `dotschema()` in `plugins` ([setup](https://dotschema.vercel.app/#setup-esbuild)) |
-| webpack, Rspack | `use: "dotschema/webpack"` in a rule for the schema files, in `module.rules` ([setup](https://dotschema.vercel.app/#setup-webpack)) |
-| Cloudflare Workers | dotschema's Vite plugin beside Cloudflare's ([setup](https://dotschema.vercel.app/#setup-cloudflare-workers)) |
-| Jest | `"dotschema/jest"` in `transform`, for the schema files ([setup](https://dotschema.vercel.app/#setup-jest)) |
+| Node | `node --import dotschema/register main.ts` ([setup](https://dotschema.dev/#setup-node)) |
+| Bun | `preload = ["dotschema/register"]` in `bunfig.toml` ([setup](https://dotschema.dev/#setup-bun)) |
+| nub | `"preload": ["dotschema/register"]` in `nub.jsonc` ([setup](https://dotschema.dev/#setup-nub)) |
+| Vite, Vitest, Rollup, Rolldown | `import dotschema from "dotschema/vite"`, then `dotschema()` in `plugins` ([setup](https://dotschema.dev/#setup-vite)) |
+| Next.js | `import { withDotschema } from "dotschema/next"`, then `export default withDotschema(nextConfig)` ([setup](https://dotschema.dev/#setup-nextjs)) |
+| esbuild, `Bun.build` | `import dotschema from "dotschema/esbuild"`, then `dotschema()` in `plugins` ([setup](https://dotschema.dev/#setup-esbuild)) |
+| webpack, Rspack | `use: "dotschema/webpack"` in a rule for the schema files, in `module.rules` ([setup](https://dotschema.dev/#setup-webpack)) |
+| Cloudflare Workers | dotschema's Vite plugin beside Cloudflare's ([setup](https://dotschema.dev/#setup-cloudflare-workers)) |
+| Jest | `"dotschema/jest"` in `transform`, for the schema files ([setup](https://dotschema.dev/#setup-jest)) |
 
-Your editor types schema imports through the TypeScript 7.1 language server, with content mappers on: in VS Code and Cursor, the **TypeScript 7** extension pointed at your project's TypeScript, and in Zed, the **TypeScript Language Server** extension. The settings for each are in [Editors](https://dotschema.vercel.app/#editors).
+Your editor types schema imports through the TypeScript 7.1 language server, with content mappers on: in VS Code and Cursor, the **TypeScript 7** extension pointed at your project's TypeScript, and in Zed, the **TypeScript Language Server** extension. The settings for each are in [Editors](https://dotschema.dev/#editors).
 
 ## Documentation
 
-The rest is on [dotschema.vercel.app](https://dotschema.vercel.app):
+The rest is on [dotschema.dev](https://dotschema.dev):
 
-- [Schema files](https://dotschema.vercel.app/#schema-files): JSONC, the drafts, and a `$ref` to another file
-- [The type](https://dotschema.vercel.app/#the-type): what each keyword types as, and doc comments
-- [Validating](https://dotschema.vercel.app/#validating): `.validate()`, `.is()`, definitions, `.pick()` and `.omit()`, and every format
-- [Standard Schema](https://dotschema.vercel.app/#standard-schema), for the libraries that take one
-- [Errors](https://dotschema.vercel.app/#errors) and [limits](https://dotschema.vercel.app/#limits)
+- [Schema files](https://dotschema.dev/#schema-files): JSONC, the drafts, and a `$ref` to another file
+- [The type](https://dotschema.dev/#the-type): what each keyword types as, and doc comments
+- [Validating](https://dotschema.dev/#validating): `.validate()`, `.is()`, definitions, `.pick()` and `.omit()`, and every format
+- [Standard Schema](https://dotschema.dev/#standard-schema), for the libraries that take one
+- [Errors](https://dotschema.dev/#errors) and [limits](https://dotschema.dev/#limits)
 
 ## License
 
