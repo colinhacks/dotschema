@@ -509,7 +509,9 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
       declarations,
       // The schema as written, under a name of its own, so an error or a hover prints `Json` in its place.
       `/** The JSON Schema as written in ${basename(path).replace(/\*\//g, "*\\/")}. */`,
-      `type ${LITERAL_NAME} = ${literal(schema)};`,
+      // Its arrays mutable, so `.schema` passes where a JSON Schema type's are (`required?: string[]` in
+      // @types/json-schema and the Anthropic SDK; the maintainer's choice of 2026-10-27).
+      `type ${LITERAL_NAME} = ${literal(schema, false)};`,
       // The root's type written out rather than named, so a hover over a value `.validate()` or `.is()`
       // gives prints the schema's properties, and a `$ref` within them by its name (the maintainer, on
       // 2026-10-26: "People want to see the actual properties for visibility").

@@ -41,6 +41,7 @@ Taken in Motherload, and carried here as they were:
 - **Every module is an ES module,** whatever the nearest `package.json` says (2026-10-20): "I definitely have a strong preference for going ESM first here." The mapper reports `.mts` ([DESIGN.md](./DESIGN.md#the-mapper-process)).
 - **A failed result has no `value`, as in Standard Schema** (2026-10-27): asked whether dotschema's failed result should drop `value?: undefined`, so that an unguarded `.value` is a type error as in Standard Schema, the maintainer picked "Match Standard Schema" ([DESIGN.md](./DESIGN.md#the-validator)).
 - **An optional property is `a?: T` unless the project turns on `exactOptionalPropertyTypes`** (2026-10-27): "when exactoptionalpropertytypes is off the question mark adds the `| undefined` anyway". Under the option, `| undefined` is still written, as ajv passes a property holding `undefined` as absent ([DESIGN.md](./DESIGN.md#the-types)).
+- **`.schema` is typed with mutable arrays** (2026-10-27): asked whether a schema module's `.schema` should be typed with mutable arrays, so it passes straight into the Anthropic SDK's `input_schema` and `@types/json-schema`'s `JSONSchema7`, the maintainer picked "Type it with mutable arrays" ([DESIGN.md](./DESIGN.md#the-types)).
 
 ## Names
 

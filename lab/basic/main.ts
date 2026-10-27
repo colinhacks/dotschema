@@ -38,6 +38,10 @@ user.validate(someone).value;
 // A schema written in JSON5 is the same module.
 expect<Equal<Point, { x: number; y: number; label?: string }>>();
 expect<Equal<typeof point.schema.properties.label.maxLength, 16>>();
+// The schema as written has mutable arrays, so it passes where a JSON Schema type's are, as
+// @types/json-schema's JSONSchema7 and the Anthropic SDK's tool input schema have them.
+expect<Equal<typeof user.schema.required, ["name", "role"]>>();
+user.schema satisfies { type?: string; required?: string[]; properties?: object };
 // A $ref to another schema file is that file's type: its root, or the definition it points to.
 // Nothing here imports shared/place.schema.jsonc; TypeScript reaches it through team's module.
 expect<Equal<Team, { lead: User; members: User[]; office?: { city: string; manager?: User } }>>();

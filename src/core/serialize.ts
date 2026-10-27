@@ -33,8 +33,12 @@ export function toJs(value: Value): string {
   return `{${entries.join(", ")}}`;
 }
 
-/** The type `as const` would give: every primitive its literal type, arrays readonly tuples, objects readonly. */
-export function literal(value: Value): string {
+/**
+ * The type `as const` would give: every primitive its literal type, arrays readonly tuples, objects
+ * readonly. With `readonlyArrays` false, arrays are mutable tuples, so the type passes where a type's
+ * arrays are mutable (`string[]`).
+ */
+export function literal(value: Value, readonlyArrays = true): string {
   if (value === null) return "null";
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "boolean") return String(value);
@@ -45,8 +49,8 @@ export function literal(value: Value): string {
     return value < 0 ? `-${-value}` : String(value === 0 ? 0 : value);
   }
   if (value instanceof Date) return "Date";
-  if (Array.isArray(value)) return `readonly [${value.map(literal).join(", ")}]`;
+  if (Array.isArray(value)) return `${readonlyArrays ? "readonly " : ""}[${value.map((item: Value) => literal(item, readonlyArrays)).join(", ")}]`;
   const object = value as { readonly [key: string]: Value };
   const names = Object.keys(object);
-  return names.length === 0 ? "{}" : `{ ${names.map((name) => `readonly ${propertyName(name)}: ${literal(object[name]!)}`).join("; ")} }`;
+  return names.length === 0 ? "{}" : `{ ${names.map((name) => `readonly ${propertyName(name)}: ${literal(object[name]!, readonlyArrays)}`).join("; ")} }`;
 }

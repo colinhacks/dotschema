@@ -246,6 +246,8 @@ test("the types name the root for its file, export it as Type too, and write its
   // The default import names the type too, as `user.Type`.
   assert.match(types, /\ndeclare namespace schema \{ export type \{ User as Type \}; \}\nexport default schema;\n/);
   assert.match(types, /\ntype Json = \{ readonly \$schema: "https:\/\/json-schema.org\/draft\/2020-12\/schema";/);
+  // Its arrays are mutable, so it passes where a JSON Schema type's are (`required?: string[]`).
+  assert.match(types, /\ntype Json = \{[^\n]*; readonly required: \["name"\];/);
   // The schema as written is a type of its own, so an error or a hover prints `Json` in its place;
   // the root's type is written out, so a hover over a value prints its properties. A plain object is
   // an ObjectSchema, with .pick() and .omit() over the keys its properties and required name.
