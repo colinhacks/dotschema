@@ -12,6 +12,10 @@
 // - `formats`: the page's format tables, each row a format and a value it is said to accept; the
 //   answer is every format dotschema has, and each row's verdict from the module dotschema builds
 //   for `{ "format": … }`.
+// - `keywords`: asked for when the page has a keyword table; the answer is every keyword of the drafts
+//   dotschema reads: the ones ajv's class for each draft knows, without ajv's own `$async`, `nullable`
+//   and `id`, which no draft dotschema reads defines and src/schema.ts takes out of every schema, and
+//   with `$anchor`, which ajv reads where it resolves a `$ref` (compile/resolve.js) and not as a rule.
 // - `bundles`: a file written into its directory beside the schema files it sees, and esbuild's
 //   analysis of it bundled and minified with dotschema's esbuild plugin (esbuild, the repository's
 //   development dependency, as its own resolution from here finds it).
@@ -31,6 +35,7 @@ type Request = {
   projects?: { dir: string; files: File[]; entries: string[] }[];
   diagnostics?: { dir: string; files: File[]; file: File }[];
   formats?: { format: string; example: string }[];
+  keywords?: boolean;
   bundles?: { dir: string; files: File[]; entry: File }[];
 };
 
@@ -107,6 +112,22 @@ for (const { format, example } of request.formats ?? []) {
   verdicts.push({ format, ok: module.default.is(value), why: `${JSON.stringify(value)} is refused` });
 }
 
+// ajv's class for each draft dotschema reads: 2020-12, 2019-09, and draft-07, which reads draft-06 too.
+type AjvClass = new (options: object) => { RULES: { keywords: Record<string, unknown> } };
+const AJV_ONLY = new Set(["$async", "nullable", "id"]);
+const keywords = request.keywords
+  ? [
+      ...new Set([
+        ...["ajv/dist/2020", "ajv/dist/2019", "ajv"].flatMap((entry) => {
+          const mod = require(entry) as AjvClass & { default?: AjvClass };
+          const Ajv = mod.default ?? mod;
+          return Object.keys(new Ajv({ strict: false, logger: false }).RULES.keywords).filter((name) => !AJV_ONLY.has(name));
+        }),
+        "$anchor",
+      ]),
+    ]
+  : undefined;
+
 const bundles = [];
 for (const item of request.bundles ?? []) {
   write(item.dir, [...item.files, item.entry]);
@@ -126,4 +147,4 @@ for (const item of request.bundles ?? []) {
   bundles.push(await esbuild.analyzeMetafile(result.metafile));
 }
 
-process.stdout.write(JSON.stringify({ projects, diagnostics, formats: request.formats ? { all: Object.keys(FORMATS), verdicts } : undefined, bundles }));
+process.stdout.write(JSON.stringify({ projects, diagnostics, formats: request.formats ? { all: Object.keys(FORMATS), verdicts } : undefined, keywords, bundles }));

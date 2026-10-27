@@ -1,0 +1,392 @@
+---
+title: "Inference"
+---
+
+## Inference
+
+Each schema file's type is written from its schema at the type check, and admits every value the validator accepts.
+
+### Objects
+
+An object's `properties` are its keys, optional unless `required` lists them:
+
+<Inferred>
+
+```jsonc title="profile.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "age": { "type": "integer" }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}
+```
+
+</Inferred>
+
+The type is `.Type` on the import:
+
+```ts twoslash title="main.ts"
+// @errors: 2322
+import profile from "./profile.schema.jsonc";
+
+const ada: profile.Type = { name: "Ada", age: 36 };
+const bob: profile.Type = { name: "Bob", age: "old" };
+```
+
+### Null
+
+A list of types is a union, `null` among them:
+
+<Inferred>
+
+```jsonc title="contact.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "phone": { "type": ["string", "null"] }
+  },
+  "required": ["phone"],
+  "additionalProperties": false
+}
+```
+
+</Inferred>
+
+### Literals
+
+An `enum` or a `const` is a literal type:
+
+<Inferred>
+
+```jsonc title="post.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "status": { "enum": ["draft", "published"] },
+    "version": { "const": 1 }
+  },
+  "required": ["status", "version"],
+  "additionalProperties": false
+}
+```
+
+</Inferred>
+
+### Records
+
+A schema in `additionalProperties` types every other key:
+
+<Inferred>
+
+```jsonc title="scores.schema.jsonc"
+{
+  "type": "object",
+  "additionalProperties": { "type": "number" }
+}
+```
+
+</Inferred>
+
+A schema in `patternProperties` types the keys it matches:
+
+<Inferred>
+
+```jsonc title="headers.schema.jsonc"
+{
+  "type": "object",
+  "patternProperties": {
+    "^x-": { "type": "string" }
+  },
+  "additionalProperties": false
+}
+```
+
+</Inferred>
+
+### Arrays
+
+A schema in `items` types every item:
+
+<Inferred>
+
+```jsonc title="tags.schema.jsonc"
+{
+  "type": "array",
+  "items": { "type": "string" },
+  "uniqueItems": true
+}
+```
+
+</Inferred>
+
+### Tuples
+
+A `prefixItems` list is a tuple, each item required up to `minItems`:
+
+<Inferred>
+
+```jsonc title="point.schema.jsonc"
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "prefixItems": [
+    { "type": "number" },
+    { "type": "number" }
+  ],
+  "minItems": 2,
+  "items": false
+}
+```
+
+</Inferred>
+
+A schema in `items` beside it types the rest:
+
+<Inferred>
+
+```jsonc title="row.schema.jsonc"
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "prefixItems": [{ "type": "string" }],
+  "minItems": 1,
+  "items": { "type": "boolean" }
+}
+```
+
+</Inferred>
+
+### Unions
+
+An `anyOf` or a `oneOf` is a union:
+
+<Inferred>
+
+```jsonc title="id.schema.jsonc"
+{
+  "anyOf": [
+    { "type": "string" },
+    { "type": "integer" }
+  ]
+}
+```
+
+</Inferred>
+
+A `oneOf` whose variants a `const` tells apart is a union that narrows on it:
+
+<Inferred>
+
+```jsonc title="event.schema.jsonc"
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "click" },
+        "x": { "type": "number" }
+      },
+      "required": ["kind", "x"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "visit" },
+        "url": { "type": "string" }
+      },
+      "required": ["kind", "url"],
+      "additionalProperties": false
+    }
+  ]
+}
+```
+
+</Inferred>
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import event from "./event.schema.jsonc";
+
+if (event.is(input) && input.kind === "click") {
+  input;
+//^?
+}
+```
+
+### Intersections
+
+An `allOf` is an intersection:
+
+<Inferred>
+
+```jsonc title="staff.schema.jsonc"
+{
+  "allOf": [
+    {
+      "type": "object",
+      "properties": { "name": { "type": "string" } },
+      "required": ["name"]
+    },
+    {
+      "type": "object",
+      "properties": { "team": { "type": "string" } },
+      "required": ["team"]
+    }
+  ]
+}
+```
+
+</Inferred>
+
+### Conditionals
+
+An `if` that tests a `const` makes `then` and `else` a union:
+
+<Inferred>
+
+```jsonc title="payment.schema.jsonc"
+{
+  "type": "object",
+  "properties": { "method": { "enum": ["card", "bank"] } },
+  "required": ["method"],
+  "if": {
+    "properties": { "method": { "const": "card" } }
+  },
+  "then": {
+    "properties": { "card": { "type": "string" } },
+    "required": ["card"]
+  },
+  "else": {
+    "properties": { "iban": { "type": "string" } },
+    "required": ["iban"]
+  }
+}
+```
+
+</Inferred>
+
+### Recursion
+
+A `$ref` back into its own file is a type that refers to itself:
+
+<Inferred>
+
+```jsonc title="tree.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "children": {
+      "type": "array",
+      "items": { "$ref": "#" }
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}
+```
+
+</Inferred>
+
+### Never
+
+A `false` schema allows no value, so its type is `never`:
+
+<Inferred>
+
+```jsonc title="signup.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "email": { "type": "string" },
+    "password": false
+  },
+  "required": ["email"]
+}
+```
+
+</Inferred>
+
+### Doc comments
+
+A `/** */` comment above a property is its doc comment, which an editor shows on hover:
+
+<Inferred>
+
+```jsonc title="user.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    /** The name the user signs in with. */
+    "name": { "type": "string", "minLength": 1 },
+    "role": { "enum": ["admin", "member"] }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}
+```
+
+</Inferred>
+
+A `description` is one too:
+
+<Inferred>
+
+```jsonc title="price.schema.jsonc"
+{
+  "description": "An amount in cents.",
+  "type": "integer",
+  "minimum": 0
+}
+```
+
+</Inferred>
+
+### Checks
+
+A keyword no TypeScript type can express leaves the type as it is, and the validator checks it:
+
+<Inferred>
+
+```jsonc title="email.schema.jsonc"
+{
+  "type": "string",
+  "format": "email",
+  "maxLength": 254
+}
+```
+
+</Inferred>
+
+### Every keyword
+
+dotschema reads every keyword of draft-06, draft-07, 2019-09 and 2020-12, and the validator checks each one that says something about a value. What each one does to the type:
+
+| Keyword | The type |
+| --- | --- |
+| `type` | Its type, and a list of types a union |
+| `enum`, `const` | A literal type |
+| `properties` | The object's keys |
+| `required` | The keys that are not optional |
+| `additionalProperties` | The type of every other key, and `false` no other key |
+| `patternProperties` | The type of the keys it matches |
+| `unevaluatedProperties` | No other key, when it is `false` beside `properties` alone |
+| `items` | The type of every item, or of the items after `prefixItems`, and a list of schemas a tuple |
+| `prefixItems` | A tuple |
+| `additionalItems` | The items after a tuple's |
+| `minItems` | The tuple's items that are not optional |
+| `allOf` | An intersection |
+| `anyOf`, `oneOf` | A union |
+| `if`, `then`, `else` | A union of `then` and `else`, when `if` tests a `const` |
+| `$ref` | The type it refers to |
+| `$defs`, `definitions` | A type of its own, exported by its key |
+| `$anchor`, `$dynamicAnchor` | A name for a `$ref` to refer to |
+| `$dynamicRef`, `$recursiveRef` | `unknown` |
+| `description` | A doc comment |
+| `not`, `multipleOf`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `unevaluatedItems`, `minProperties`, `maxProperties`, `propertyNames`, `dependentRequired`, `dependentSchemas`, `dependencies` | Nothing: the validator checks it |
+| `$schema`, `$id`, `$vocabulary`, `$recursiveAnchor`, `$comment`, `title`, `default`, `examples`, `deprecated`, `readOnly`, `writeOnly`, `contentEncoding`, `contentMediaType`, `contentSchema` | Nothing |

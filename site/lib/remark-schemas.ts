@@ -17,9 +17,10 @@ import { pageFiles } from './page-files.ts';
 //   import in turn, a `$ref` to another file being an import: `user.schema.d.jsonc.ts`, which
 //   `./user.schema.jsonc` resolves to under allowArbitraryExtensions. The files are written to a
 //   directory of their own first, since a `$ref` is followed on disk. A file a block sees is the
-//   nearest block above it with that name, across all the page's files, so a section can show a file
-//   another section shows, or a file again with a change; failing that, the first one below it, as
-//   in a group of tabs whose first tab is main.ts. A schema file with a problem fails the build.
+//   block itself or the nearest block above it with that name, across all the page's files, so a
+//   section can show a file another section shows, or a file again with a change; failing that, the
+//   first one below it, as in a group of tabs whose first tab is main.ts. A schema file with a
+//   problem fails the build.
 // - The errors. A schema block marked `errors` (```` ```jsonc title="team.schema.jsonc" errors ````)
 //   is an error example: the content mapper's own `transform` reads it, beside the page's other files,
 //   and each diagnostic it returns is written into the block as docs-kit's `// @diagnostic:` line,
@@ -30,11 +31,19 @@ import { pageFiles } from './page-files.ts';
 //   row, each as inline code; a row of one format gives, as inline code, a value it accepts. The
 //   tables of a page file together must name every format dotschema has, each once, and each value
 //   must pass the module dotschema builds for that format, or the build fails.
+// - The keywords. A table headed Keyword lists keywords, one or more to a row, each as inline code.
+//   The tables of a page file together must name every keyword of the drafts dotschema reads, each
+//   once, or the build fails, so the page says what each keyword does however ajv grows.
 // - The bundle. A block marked `bundle="main.ts"` holds esbuild's analysis of the page's first block
 //   of that name, the opening example's, bundled and minified with dotschema's esbuild plugin beside
 //   the schema files it sees. The build measures it again and fails, printing the new analysis,
 //   when the block's text differs, so the page, and /llms.txt, which is read from the page's files,
 //   say what dotschema's src/ gives now.
+// - The Inference cards. An `<Inferred>` element around a schema block is a card of the Inference
+//   section (components/inferred.tsx): its children become two labelled rows, the block as the
+//   Schema, and as the Type the declarations of the module dotschema gives that file, without the
+//   module's imports, its re-export as `Type`, the schema's own text and the values. A schema with
+//   a problem, or a type wider than a code line may be, fails the build.
 
 type Node = {
   type: string;
@@ -42,6 +51,8 @@ type Node = {
   meta?: string | null;
   value?: string;
   data?: { tab?: string };
+  name?: string | null;
+  attributes?: { type: string; name: string; value: string | null }[];
   children?: Node[];
 };
 type Code = Node & { value: string };
@@ -51,6 +62,38 @@ function codeBlocks(node: Node, out: Code[] = []): Code[] {
   if (node.type === 'code') out.push(node as Code);
   for (const child of node.children ?? []) codeBlocks(child, out);
   return out;
+}
+
+/** The `<Inferred>` cards of a tree (components/inferred.tsx). */
+function inferredCards(node: Node, out: Node[] = []): Node[] {
+  for (const child of node.children ?? []) {
+    if (child.type === 'mdxJsxFlowElement' && child.name === 'Inferred') out.push(child);
+    else inferredCards(child, out);
+  }
+  return out;
+}
+
+const jsx = (name: string, attributes: [string, string][], children: Node[]): Node => ({
+  type: 'mdxJsxFlowElement',
+  name,
+  attributes: attributes.map(([key, value]) => ({ type: 'mdxJsxAttribute', name: key, value })),
+  children,
+});
+
+/**
+ * The declarations a schema's module gives its root and its definitions, as a card's Type row shows
+ * them: the text before the schema's own (`type Json`), without the imports, the re-export as
+ * `Type`, or `export` before a definition's declaration.
+ */
+function declarations(types: string): string {
+  const end = types.search(/^\/\*\* The JSON Schema as written|^type Json = /m);
+  return (end < 0 ? types : types.slice(0, end))
+    .split('\n')
+    .filter((line) => !/^import type /.test(line) && !/^export type \{ \w+ as Type \};$/.test(line))
+    .join('\n')
+    .replace(/^export (?=interface |type )/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /** The file TypeScript looks up for `./name.ext` under allowArbitraryExtensions. */
@@ -163,6 +206,7 @@ type Answer = {
   projects: Record<string, { types: string; problems: string[] }>[];
   diagnostics: { messageText: string; code: number; start: number; length: number }[][];
   formats?: { all: string[]; verdicts: { format: string; ok: boolean; why: string }[] };
+  keywords?: string[];
   bundles: string[];
 };
 
@@ -201,7 +245,7 @@ export function remarkSchemas() {
       const names = [...new Set(blocks.filter((b) => isSchema(b.node)).map((b) => titleOf(b.node)!))];
       return names.map((name) => {
         const isFile = (block: (typeof blocks)[number]) => isSchema(block.node) && titleOf(block.node) === name;
-        const shown = blocks.slice(0, index).findLast(isFile) ?? blocks.slice(index + 1).find(isFile)!;
+        const shown = blocks.slice(0, index + 1).findLast(isFile) ?? blocks.slice(index + 1).find(isFile)!;
         // A file another section shows is a dependency, so an edit to it types this section again.
         if (shown.file) compiler?.addDependency(shown.file);
         return { name, text: `${shown.node.value}\n` };
@@ -209,9 +253,10 @@ export function remarkSchemas() {
     };
 
     const typed: { node: Code; project: number }[] = [];
+    const cards: { card: Node; node: Code; name: string; project: number }[] = [];
     const errors: { node: Code; item: number; text: string }[] = [];
     const bundles: { node: Code; item: number }[] = [];
-    const request: { projects: object[]; diagnostics: object[]; bundles: object[]; formats?: { format: string; example: string }[] } = { projects: [], diagnostics: [], bundles: [] };
+    const request: { projects: object[]; diagnostics: object[]; bundles: object[]; formats?: { format: string; example: string }[]; keywords?: boolean } = { projects: [], diagnostics: [], bundles: [] };
     own.forEach((node, i) => {
       const index = before.length + i;
       if (node.lang === 'ts' && node.meta?.includes('twoslash')) {
@@ -237,6 +282,14 @@ export function remarkSchemas() {
       }
     });
 
+    for (const card of inferredCards(tree)) {
+      const node = (card.children ?? []).find((child) => child.type === 'code' && isSchema(child as Code)) as Code | undefined;
+      if (!node) throw new Error(`dotschema: an <Inferred> card needs a schema block, a \`jsonc\` block titled \`<name>.schema.jsonc\` (${file.path})`);
+      const name = titleOf(node)!;
+      const files = filesAt(before.length + own.indexOf(node));
+      cards.push({ card, node, name, project: request.projects.push({ dir: path.join(cache, 'projects', hash(files)), files, entries: [name] }) - 1 });
+    }
+
     // The format tables (above): each row's formats, and the value a row of one format gives.
     const header = (table: Node) => (table.children?.[0]?.children ?? []).map((cell) => textOf(cell).trim());
     const formatRows = tables(tree)
@@ -247,7 +300,14 @@ export function remarkSchemas() {
       request.formats = formatRows.flatMap((row) => (row.formats.length === 1 && row.examples.length === 1 ? [{ format: row.formats[0]!, example: row.examples[0]! }] : []));
     }
 
-    if (!typed.length && !errors.length && !bundles.length && !formatRows.length) return;
+    // The keyword tables (above): each row's keywords.
+    const keywordRows = tables(tree)
+      .filter((table) => /^Keywords?$/.test(header(table)[0] ?? ''))
+      .flatMap((table) => (table.children ?? []).slice(1))
+      .map((row) => inlineCode(row.children?.[0] ?? { type: 'text' }));
+    if (keywordRows.length) request.keywords = true;
+
+    if (!typed.length && !cards.length && !errors.length && !bundles.length && !formatRows.length && !keywordRows.length) return;
     const answer = ask(site, request);
 
     for (const { node, project } of typed) {
@@ -262,6 +322,18 @@ export function remarkSchemas() {
       // unless the block places the cut itself.
       const code = node.value.includes('---cut---') ? node.value : `// ---cut---\n${node.value}`;
       node.value = `${hidden}// @filename: ${titleOf(node) ?? 'main.ts'}\n${code}`;
+    }
+
+    for (const { card, node, name, project } of cards) {
+      const module = answer.projects[project]![name]!;
+      if (module.problems.length) throw new Error(`dotschema: ${name}: ${module.problems.join('; ')} (${file.path})`);
+      const type = declarations(module.types);
+      const wider = type.split('\n').filter((line) => line.length > WIDEST);
+      if (wider.length) throw new Error(`dotschema: the type of ${name}'s card has lines wider than ${WIDEST} characters (${file.path}):\n${wider.join('\n')}`);
+      card.children = [
+        jsx('InferredRow', [['label', 'Schema']], [node]),
+        jsx('InferredTypes', [], [jsx('InferredRow', [['label', 'Type']], [{ type: 'code', lang: 'ts', meta: null, value: type }])]),
+      ];
     }
 
     for (const { node, item, text } of errors) {
@@ -293,6 +365,19 @@ export function remarkSchemas() {
         ...refused,
       ];
       if (faults.length) throw new Error(`dotschema: the format tables of ${file.path}: ${faults.join('; ')}`);
+    }
+
+    if (answer.keywords) {
+      const listed = keywordRows.flat();
+      const twice = listed.filter((name, i) => listed.indexOf(name) !== i);
+      const missing = answer.keywords.filter((name) => !listed.includes(name));
+      const unknown = listed.filter((name) => !answer.keywords!.includes(name));
+      const faults = [
+        ...(missing.length ? [`not listed: ${missing.join(', ')}`] : []),
+        ...(unknown.length ? [`not keywords of a draft dotschema reads: ${unknown.join(', ')}`] : []),
+        ...(twice.length ? [`listed twice: ${twice.join(', ')}`] : []),
+      ];
+      if (faults.length) throw new Error(`dotschema: the keyword tables of ${file.path}: ${faults.join('; ')}`);
     }
   };
 }

@@ -79,3 +79,58 @@
   --color-fd-success: hsl(150, 40%, 60%);
   --color-fd-error: hsl(2, 70%, 68%);
 }
+
+/* ── The Inference section's cards (components/inferred.tsx) ──────────────────
+   Reylo's, without its dialect switch: a schema and the type dotschema gives it,
+   in one card of labelled rows, the Schema on top and the Type in a band under
+   it. The rows' code blocks lose their own frames, so the card is the one frame;
+   only the schema keeps its copy button. */
+#nd-page .dotschema-inferred {
+  margin-block: 1rem;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.75rem;
+  background: var(--color-fd-secondary);
+  overflow: hidden;
+}
+
+#nd-page .dotschema-inferred-label {
+  padding: 0.75rem 1rem 0;
+  font-family: var(--font-text);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-fd-muted-foreground);
+}
+
+#nd-page .dotschema-inferred-body figure.shiki {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* Fumadocs pads a block's scrolling region; in a card the rows set the spacing. */
+#nd-page .dotschema-inferred-body figure.shiki > [role='region'] {
+  padding-block: 0;
+}
+
+#nd-page .dotschema-inferred-body figure.shiki pre {
+  padding-block: 0.375rem 0.875rem;
+}
+
+#nd-page .dotschema-inferred-row:not([data-row='schema']) .dk-code-copy {
+  display: none;
+}
+
+#nd-page .dotschema-inferred [data-row='schema'] figure.shiki > div:has(> .dk-code-copy) {
+  top: auto;
+  bottom: 0.5rem;
+}
+
+#nd-page .dotschema-inferred-types {
+  border-top: 1px solid var(--color-fd-border);
+  background: var(--color-fd-muted);
+}

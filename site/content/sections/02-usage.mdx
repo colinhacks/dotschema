@@ -1,0 +1,149 @@
+---
+title: "Usage"
+---
+
+## Usage
+
+A schema file's default import is its validator, compiled by [ajv](https://ajv.js.org) when the module is built. Nothing on it throws.
+
+### `.validate()`
+
+The `.validate()` method returns the value, or every issue, each with its message, its path and the keyword that failed:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import user from "./user.schema.jsonc";
+
+const result = user.validate(input);
+if (result.issues) {
+  console.log(result.issues);
+  // for { name: "" }:
+  // [{
+  //   message: "must NOT have fewer than 1 characters",
+  //   path: ["name"],
+  //   keyword: "minLength",
+  // }]
+} else {
+  result.value;
+  //     ^?
+}
+```
+
+### `.is()`
+
+The `.is()` method is a type guard, which stops at the first failure:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import user from "./user.schema.jsonc";
+
+if (user.is(input)) {
+  input;
+//^?
+}
+```
+
+### `.pick()`
+
+The `.pick()` method gives the schema with only the properties named:
+
+```ts twoslash title="main.ts"
+import user from "./user.schema.jsonc";
+
+const named = user.pick("name");
+named.validate({ name: "Ada", role: "admin" });
+// { issues: [{
+//   message: "must NOT have additional properties",
+//   path: ["role"],
+//   keyword: "additionalProperties",
+// }] }
+```
+
+### `.omit()`
+
+The `.omit()` method gives the schema without the properties named:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import user from "./user.schema.jsonc";
+
+const anonymous = user.omit("name");
+if (anonymous.is(input)) {
+  input;
+//^?
+}
+```
+
+A schema that is more than an object of properties, such as a `oneOf`, has neither method.
+
+### `$defs`
+
+Each entry of `$defs` is a validator of its own, imported by its key:
+
+```jsonc title="place.schema.jsonc"
+{
+  "type": "object",
+  "properties": { "home": { "$ref": "#/$defs/address" } },
+  "$defs": {
+    "address": {
+      "type": "object",
+      "properties": { "city": { "type": "string" } },
+      "required": ["city"],
+      "additionalProperties": false
+    }
+  }
+}
+```
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import { address } from "./place.schema.jsonc";
+
+if (address.is(input)) {
+  input;
+//^?
+}
+```
+
+### `~standard`
+
+The module is a [Standard Schema](https://standardschema.dev), so a library that accepts one accepts it:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import user from "./user.schema.jsonc";
+
+// the same function as user.validate
+user["~standard"].validate(input);
+```
+
+It's a Standard JSON Schema too, which gives the schema as one document in draft-07 or 2020-12, with every file it refers to folded in:
+
+```ts twoslash title="main.ts"
+import team from "./team.schema.jsonc";
+
+team["~standard"].jsonSchema.input({
+  target: "draft-2020-12",
+});
+// {
+//   $schema:
+//     "https://json-schema.org/draft/2020-12/schema",
+//   type: "object",
+//   properties: {
+//     members: {
+//       type: "array",
+//       items: { $ref: "#/$defs/user" },
+//     },
+//   },
+//   required: ["members"],
+//   additionalProperties: false,
+//   $defs: {
+//     user: { type: "object", properties: { ... }, ... },
+//   },
+// }
+```

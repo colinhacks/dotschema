@@ -1,110 +1,8 @@
 ---
-title: "Validating"
+title: "Formats"
 ---
 
-## Validating
-
-The validator is compiled by [ajv](https://ajv.js.org) when the module is built. Nothing on the module throws.
-
-### `.validate()`
-
-The `.validate()` method returns the value, or every issue, each with its message, its path and the keyword that failed:
-
-```ts twoslash title="main.ts"
-declare const input: unknown;
-// ---cut---
-import user from "./user.schema.jsonc";
-
-const result = user.validate(input);
-if (result.issues) {
-  console.log(result.issues);
-  // for { name: "" }:
-  // [{
-  //   message: "must NOT have fewer than 1 characters",
-  //   path: ["name"],
-  //   keyword: "minLength",
-  // }]
-} else {
-  result.value;
-  //     ^?
-}
-```
-
-### `.is()`
-
-The `.is()` method is a type guard, which stops at the first failure:
-
-```ts twoslash title="main.ts"
-declare const input: unknown;
-// ---cut---
-import user from "./user.schema.jsonc";
-
-if (user.is(input)) {
-  input;
-//^?
-}
-```
-
-### Definitions
-
-Each entry of `$defs` is a validator of its own, imported by its key:
-
-```jsonc title="place.schema.jsonc"
-{
-  "type": "object",
-  "properties": { "home": { "$ref": "#/$defs/address" } },
-  "$defs": {
-    "address": {
-      "type": "object",
-      "properties": { "city": { "type": "string" } },
-      "required": ["city"],
-      "additionalProperties": false
-    }
-  }
-}
-```
-
-```ts twoslash title="main.ts"
-declare const input: unknown;
-// ---cut---
-import { address } from "./place.schema.jsonc";
-
-if (address.is(input)) {
-  input;
-//^?
-}
-```
-
-### `.pick()` and `.omit()`
-
-The `.pick()` method gives the schema with only the properties named, and `.omit()` the schema without them:
-
-```ts twoslash title="main.ts"
-import user from "./user.schema.jsonc";
-
-const named = user.pick("name");
-named.validate({ name: "Ada", role: "admin" });
-// { issues: [{
-//   message: "must NOT have additional properties",
-//   path: ["role"],
-//   keyword: "additionalProperties",
-// }] }
-```
-
-Its type is the output of a Standard Schema:
-
-```ts twoslash title="main.ts"
-import type { StandardSchemaV1 } from "dotschema";
-import user from "./user.schema.jsonc";
-
-const named = user.pick("name");
-type Named = StandardSchemaV1.InferOutput<typeof named>;
-//   ^?
-```
-
-A schema that is more than an object of properties, such as a `oneOf`, has neither method.
-
-### Formats
+## Formats
 
 Zod's string formats are checked as Zod checks them, `jwt` among them:
 
@@ -128,7 +26,7 @@ session.validate({ token: "not a token" });
 // }] }
 ```
 
-JSON Schema's own formats, each passing every test of the [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite):
+JSON Schema's own formats, each passing every 2020-12 format test of the [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite):
 
 | Format | A value it accepts |
 | --- | --- |
