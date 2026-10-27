@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { schemaCode, schemaTypes } from "../src/schema.ts";
-import { evaluate, ROOT } from "./helpers.ts";
+import { evaluate, ROOT, withFormats } from "./helpers.ts";
 
 const require = createRequire(import.meta.url);
 const PATH = join(ROOT, "tests/fixtures/definitions.schema.jsonc");
@@ -25,9 +25,7 @@ function ajvFor(schema: { $schema: string }) {
   const mod = require(schema.$schema.includes("2020-12") ? "ajv/dist/2020" : "ajv");
   const Ajv = mod.default ?? mod;
   const ajv = new Ajv({ allErrors: true, strict: false, logger: false, ownProperties: true, multipleOfPrecision: 7 });
-  const formats = require("ajv-formats");
-  (formats.default ?? formats)(ajv);
-  return ajv.compile(schema);
+  return withFormats(ajv).compile(schema);
 }
 
 test("each definition is a named export, its name the key in camelCase, never a reserved word or a name taken", async () => {

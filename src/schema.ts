@@ -23,6 +23,7 @@ import { parseSchemaFile } from "./parse.ts";
 import { collect, dynamicRefProblems, eachSchema, embeddedIdProblems, fileOf, forAjv, fragmentOf, fragmentPath, mapSchemas, pointTo, withoutKeywords, type Files } from "./refs.ts";
 import { definitionsOf, LITERAL_NAME, schemaModuleTypes, type Draft } from "./schema-types.ts";
 import { jsonSchemas, type Entry, type JsonSchemaResult, type JsonSchemaTarget } from "./json-schema.ts";
+import { formatDefinitions, formatFile } from "./formats/index.ts";
 
 const FAILED_TYPES = ["declare const schema: any;", "declare namespace schema { export type Type = any; }", "export default schema;", "export type Type = any;", ""].join("\n");
 
@@ -94,8 +95,10 @@ const codegenProblem = (path: string) =>
 
 /**
  * ajv-formats' formatMaximum, formatMinimum, formatExclusiveMaximum and formatExclusiveMinimum
- * (its dist/limit.js, MIT), written with this module's ajv: ajv-formats' own requires its `ajv`,
- * which can be another copy (`loadAjv`). Without `$data`, which dotschema does not enable.
+ * (its dist/limit.js, MIT), written with this module's ajv, which a plugin's own `require("ajv")`
+ * can find another copy of (`loadAjv`). Without `$data`, which dotschema does not enable. Each
+ * compares with its format's `compare` (src/formats/), which the standalone code reaches as the
+ * format does, through `code.formats`.
  */
 function formatLimits({ _, str, operators, getProperty }: Codegen): object {
   const KEYWORDS: Record<string, [string, unknown]> = { formatMaximum: ["<=", operators.GT], formatMinimum: [">=", operators.LT], formatExclusiveMaximum: ["<", operators.GTE], formatExclusiveMinimum: [">", operators.LTE] };
@@ -123,12 +126,14 @@ function formatLimits({ _, str, operators, getProperty }: Codegen): object {
 }
 
 /**
- * ajv and ajv-formats, dotschema's own dependencies, looked up from this module: under pnpm a
- * package's dependencies resolve from the package only, not from the project's directory. One copy
- * of ajv compiles and writes every format's code: ajv-formats' plugin writes it with the copy its
- * own `require("ajv")` finds, which under npm beside ajv 6 (eslint's) is a second copy of ajv 8,
- * whose code this copy wrote out as JSON, so every format checked by a function threw (measured
- * 2026-10-20). So its format table is registered here, and its limit keywords are `formatLimits`.
+ * ajv, dotschema's own dependency, looked up from this module: under pnpm a package's dependencies
+ * resolve from the package only, not from the project's directory. The formats are dotschema's own
+ * (src/formats/), registered with this ajv; a format checked by a function is written into the
+ * standalone code as `__formats["date-time"]`, a name the module defines with the files of the
+ * formats it uses (`schemaCode`). A plugin's code is written with the copy of ajv its own
+ * `require("ajv")` finds, which under npm beside ajv 6 (eslint's) was a second copy of ajv 8, whose
+ * code this copy wrote out as JSON, so every format ajv-formats checked by a function threw (measured
+ * 2026-10-20); so the limit keywords are `formatLimits`, written with this copy's codegen.
  */
 function loadAjv(path: string, schema: Value, standalone: boolean, allErrors = true, discriminator = false): { ajv: Ajv; require: NodeJS.Require } | { error: string } {
   const require = createRequire(import.meta.url);
@@ -161,19 +166,11 @@ function loadAjv(path: string, schema: Value, standalone: boolean, allErrors = t
     if (disallowedCodegen(error)) return { error: codegenProblem(path) };
     throw error;
   }
-  let formats: { fullFormats: Record<string, unknown>; formatNames: string[] } | undefined;
-  try {
-    formats = require("ajv-formats/dist/formats");
-  } catch {
-    // Without ajv-formats, `format` is an annotation, which is what the spec makes it by default.
-  }
-  if (formats) {
-    const codegen: Codegen = require("ajv/dist/compile/codegen");
-    // What ajv-formats' plugin does, with this copy's codegen: the standalone code requires the table.
-    ajv.opts.code.formats = codegen._`require("ajv-formats/dist/formats").fullFormats`;
-    for (const name of formats.formatNames) ajv.addFormat(name, formats.fullFormats[name]);
-    ajv.addKeyword(formatLimits(codegen));
-  }
+  const codegen: Codegen = require("ajv/dist/compile/codegen");
+  // A free name in the standalone code, `__formats["date-time"]`, which the module defines (`usedFormats`).
+  ajv.opts.code.formats = codegen._`__formats`;
+  for (const [name, definition] of formatDefinitions()) ajv.addFormat(name, definition);
+  ajv.addKeyword(formatLimits(codegen));
   return { ajv, require };
 }
 
@@ -562,10 +559,11 @@ const STANDALONE_REQUIRE = /(?<![\w.$\\])require\((")([^"\\]+)"\)/g;
  * Inlines CommonJS modules: each standalone validator and every module they require, transitively,
  * as functions in one ES module, so the generated module imports nothing at run time. The
  * validators share one table of modules, so a helper several require (ucs2length, fast-deep-equal,
- * ajv-formats' formats) is there once; `wrap` gives a validator as an expression, a function that
- * runs ajv's code in a scope of its own, and `table` the modules, which go before every validator.
+ * a format's file) is there once; `wrap` gives a validator as an expression, a function that runs
+ * ajv's code in a scope of its own, `module` the id of a file added to the table, with what it
+ * requires, and `table` the modules, which go before every validator.
  */
-function inliner(entryFile: string): { wrap(source: string, returns: string): string; table(): string } {
+function inliner(entryFile: string): { wrap(source: string, returns: string): string; module(file: string): number; table(): string } {
   const ids = new Map<string, number>();
   const bodies: string[] = [];
   // In a helper's own source (fast-uri writes `require('./lib/utils')`), a require that does not
@@ -594,6 +592,7 @@ function inliner(entryFile: string): { wrap(source: string, returns: string): st
   };
   return {
     wrap: (source, returns) => ["(() => {", "  const module = { exports: {} }, exports = module.exports;", rewrite(source, entryFile, true), `  return ${returns};`, "})()"].join("\n"),
+    module: add,
     table: () =>
       [
         "const __modules = [",
@@ -606,6 +605,31 @@ function inliner(entryFile: string): { wrap(source: string, returns: string): st
         "}",
       ].join("\n"),
   };
+}
+
+/**
+ * A format the standalone code uses through `code.formats` (`loadAjv`): ajv declares each in the scope
+ * code before the function that uses it, as `const formats0 = __formats["date-time"];` or
+ * `const formats2 = __formats.jwt;`. Matched at that declaration and never rewritten, so a string in
+ * the schema that holds the same text can only add a file the module does not need.
+ */
+const FORMAT_USE = /\bconst formats\d+ = __formats(?:\["((?:[^"\\]|\\.)*)"\]|\.([A-Za-z_$][\w$]*));/g;
+
+/**
+ * The definition of `__formats`, the formats the standalone codes use, each the `module.exports` of
+ * its file in src/formats/, inlined with what it requires; undefined when they use none, so a module
+ * that checks no format with a function carries none.
+ */
+function usedFormats(inline: ReturnType<typeof inliner>, sources: string[]): string | undefined {
+  const names = new Set<string>();
+  for (const source of sources) for (const [, quoted, bare] of source.matchAll(FORMAT_USE)) names.add(bare ?? (JSON.parse(`"${quoted}"`) as string));
+  if (!names.size) return undefined;
+  const entries = [...names].sort().map((name) => {
+    const file = formatFile(name);
+    if (!file) throw new Error(`ajv's standalone code checks the format "${name}" with a function, and dotschema has no file for it, so it cannot be inlined.`);
+    return `${JSON.stringify(name)}: __require(${inline.module(file)})`;
+  });
+  return `const __formats = { ${entries.join(", ")} };`;
 }
 
 /** The join, for a plain object's checks (`objectShape`), and the filter `.pick()` and `.omit()` apply to its schema. */
@@ -808,16 +832,17 @@ export function schemaCode(source: string, path: string, { discriminators = true
     }
     standalones.push(codes);
   }
-  // The standalone code requires ajv's run-time helpers and ajv-formats' format functions
-  // (`date-time`, `uri`), both dependencies of this package, so they resolve from this module:
-  // from ajv's own directory ajv-formats does not resolve, and was left a bare `require`.
+  // The standalone code requires ajv's run-time helpers, which resolve from this module, a dependent
+  // of ajv's, and reaches each format checked by a function through `__formats` (`usedFormats`).
   const inline = inliner(fileURLToPath(import.meta.url));
   const [all, first] = standalones as [{ source: string; returns: string }[], { source: string; returns: string }[]];
   let body: string[];
   try {
     const shapeOf = (entry: ModuleEntry) => (entry.shape ? shapeCode(entry.shape) : "undefined");
     const [root, ...definitions] = entries!;
+    const formats = usedFormats(inline, [...all, ...first].map((code) => code.source));
     body = [
+      ...(formats ? [formats] : []),
       `const __validateAll = /* @__PURE__ */ ${inline.wrap(all[0]!.source, all[0]!.returns)};`,
       `const __validateFirst = /* @__PURE__ */ ${inline.wrap(first[0]!.source, first[0]!.returns)};`,
       `const __schema = ${toJs(parsed.value)};`,

@@ -33,7 +33,8 @@ test("the package is private in the repository, points at its sources, and depen
   assert.ok(existsSync(`${ROOT}src/mapper.ts`));
   // A mapper package does not resolve through self-reference, so the repository links itself.
   assert.equal(pkg.devDependencies.dotschema, "link:.");
-  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["ajv", "ajv-formats", "json5", "jsonc-parser"]);
+  // The formats are dotschema's own (src/formats/), so ajv-formats is a development dependency, for the test that compares them.
+  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["ajv", "json5", "jsonc-parser"]);
   // Each a caret range on the oldest version that passes the checks (DESIGN.md, "Packaging").
   for (const [dep, range] of Object.entries(pkg.dependencies)) assert.match(range as string, /^\^[1-9]\d*\.\d+\.\d+$/, dep);
 });

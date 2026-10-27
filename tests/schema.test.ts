@@ -129,7 +129,7 @@ test(".is() stops at the first failure: it is a second validator, compiled witho
 test("a helper both validators require is inlined once", async () => {
   const source = JSON.stringify({ type: "object", properties: { at: { type: "string", format: "date-time" }, name: { type: "string", minLength: 1 }, tags: { type: "array", uniqueItems: true } } });
   const { code } = schemaCode(source, PATH);
-  // ajv-formats' formats, ucs2length and fast-deep-equal, each once, though both validators use them:
+  // date-time's files, ucs2length and fast-deep-equal, each once, though both validators use them:
   // as many modules as distinct ids required, ucs2length and fast-deep-equal among them.
   const modules = code.match(/^function \(module, exports\) \{$/gm)!.length;
   assert.equal(modules, new Set(code.match(/__require\(\d+\)/g)).size);
@@ -740,7 +740,7 @@ test("an $id below a file's root is a problem at that $id, in the type check and
   }
 });
 
-test("a format ajv-formats checks with a function, such as date-time or uri, is inlined: the module requires nothing", async () => {
+test("a format checked by a function, such as date-time or uri, is inlined: the module requires nothing", async () => {
   const { code, problems } = schemaCode(JSON.stringify({ type: "object", properties: { at: { type: "string", format: "date-time" }, url: { type: "string", format: "uri" } } }), PATH);
   assert.deepEqual(problems, []);
   assert.doesNotMatch(code, /[^_\w]require\(/);
@@ -751,8 +751,10 @@ test("a format ajv-formats checks with a function, such as date-time or uri, is 
 });
 
 test("every format ajv-formats defines, and its formatMinimum, formatMaximum and exclusive keywords, give ajv-formats' own verdicts and errors", async () => {
-  // dotschema registers ajv-formats' table and writes its limit keywords with its own ajv (loadAjv);
-  // the reference is ajv-formats' plugin, run by the same ajv, which compiles with new Function.
+  // dotschema registers its copies of ajv-formats' formats (src/formats/) and writes the limit
+  // keywords with its own ajv (loadAjv); the reference is ajv-formats' plugin, a development
+  // dependency, run by the same ajv, which compiles with new Function, on values where the four
+  // formats dotschema changed (tests/formats.test.ts) agree with ajv-formats'.
   const { createRequire } = await import("node:module");
   const require = createRequire(join(ROOT, "src/schema.ts"));
   const Ajv = require("ajv").default;
@@ -787,9 +789,9 @@ test("every format ajv-formats defines, and its formatMinimum, formatMaximum and
   }
 });
 
-// The floor of ajv-formats' range: 2.x, which also targets ajv 8, passed a time without its offset
-// and an IPv4 address with a leading zero, and had no iso-time or iso-date-time.
-test("ajv-formats 3's rules: a time has its offset, an IPv4 address no leading zero, and iso-time is a format", async () => {
+// ajv-formats 2.x, which also targets ajv 8, passed a time without its offset and an IPv4 address
+// with a leading zero, and had no iso-time or iso-date-time; dotschema's copies are of 3.0.1.
+test("a time has its offset, an IPv4 address no leading zero, and iso-time is a format", async () => {
   const { code, problems } = schemaCode(JSON.stringify({ type: "object", properties: { time: { format: "time" }, ipv4: { format: "ipv4" }, iso: { format: "iso-time" } } }), PATH);
   assert.deepEqual(problems, []);
   const { default: s } = await evaluate(code);

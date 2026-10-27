@@ -9,6 +9,6 @@ test("lab/basic's schemas, imported by an ES module test", () => {
   expect([address.is({ city: "Paris" }), user.omit("role").is({ name: "Ada" })]).toEqual([true, true]);
   expect(user["~standard"].validate({ name: "Ada" }).issues[0].path).toEqual(["role"]);
   expect(point.schema.properties.label.maxLength).toBe(16);
-  // ajv-formats' date-time, inlined into the module.
+  // date-time, its file inlined into the module.
   expect([event.is({ at: "2026-10-20T09:00:00Z", kind: "click", x: 1, y: 2 }), event.is({ at: "yesterday", kind: "click", x: 1, y: 2 })]).toEqual([true, false]);
 });

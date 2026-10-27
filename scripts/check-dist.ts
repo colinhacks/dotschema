@@ -119,17 +119,18 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
 }
 
 // lab/basic in a hoisted (npm-style) layout beside ajv 6, as npm lays out a project with eslint
-// (which depends on ajv ^6): ajv 6 at the top, ajv 8 under dotschema and again under ajv-formats.
-// Until 2026-10-20 ajv-formats wrote the formats' code with its own copy of ajv, which the compiling
-// copy wrote out as JSON, and every format it checks with a function (event.schema.jsonc's date-time
-// and uri) threw when it ran (DESIGN.md, "The validator").
+// (which depends on ajv ^6): ajv 6 at the top and ajv 8 under dotschema, which must compile with its
+// own. Until 2026-10-20 ajv-formats, a dependency until 2026-10-26, sat at the top with ajv 8 below
+// it too and wrote the formats' code with that copy, which the compiling copy wrote out as JSON, and
+// every format it checked with a function (event.schema.jsonc's date-time and uri) threw when it ran
+// (DESIGN.md, "The validator").
 {
   const dir = project("basic-hoisted-ajv6", join(root, "lab", "basic"), { dotschema: tarball, ajv: "6.12.6" }, { installArgs: ["--node-linker", "hoisted"] });
   const version = (at: string) => run(process.execPath, ["-p", `require(${JSON.stringify(`./${at}/package.json`)}).version`], dir).trim();
-  const versions = ["node_modules/ajv", "node_modules/dotschema/node_modules/ajv", "node_modules/ajv-formats/node_modules/ajv"].map(version);
-  if (!versions[0]!.startsWith("6.") || !versions[1]!.startsWith("8.") || !versions[2]!.startsWith("8.")) throw new Error(`basic-hoisted-ajv6: expected ajv 6 at the top and ajv 8 twice below it, found ${versions.join(", ")}`);
+  const versions = ["node_modules/ajv", "node_modules/dotschema/node_modules/ajv"].map(version);
+  if (!versions[0]!.startsWith("6.") || !versions[1]!.startsWith("8.")) throw new Error(`basic-hoisted-ajv6: expected ajv 6 at the top and ajv 8 below it, found ${versions.join(", ")}`);
   check("basic-hoisted-ajv6", dir, [preload(EVENTS), preload(VALIDATE), [process.execPath, ["build-esbuild.ts"], "node_modules=0"], bundled(EVENTS), bundled(VALIDATE)]);
-  console.log(`basic-hoisted-ajv6: type-checked, ran under the preload and bundled, hoisted beside ajv ${versions[0]}, with ajv ${versions[1]} and ${versions[2]} below it`);
+  console.log(`basic-hoisted-ajv6: type-checked, ran under the preload and bundled, hoisted beside ajv ${versions[0]}, with ajv ${versions[1]} below it`);
 }
 
 // lab/bundlers reads lab/basic's schemas from the copy beside it, work/basic, above; the bundlers come from the registry.

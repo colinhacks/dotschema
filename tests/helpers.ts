@@ -1,9 +1,16 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
+import { formatDefinitions } from "../src/formats/index.ts";
 
 export const ROOT = fileURLToPath(new URL("..", import.meta.url));
 export const TSC = `${ROOT}node_modules/.bin/tsc`;
+
+/** An ajv instance with dotschema's formats (src/formats/), as dotschema's own ajv has them, for a test that compiles a schema with ajv itself. */
+export function withFormats<T extends { addFormat(name: string, format: unknown): unknown }>(ajv: T): T {
+  for (const [name, format] of formatDefinitions()) ajv.addFormat(name, format);
+  return ajv;
+}
 
 /** Evaluates generated module code as an ES module. */
 export async function evaluate(code: string): Promise<Record<string, any>> {

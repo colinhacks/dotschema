@@ -1,5 +1,5 @@
 // A discriminated union: shared properties beside a oneOf whose variants a `const` tells apart, with
-// two formats ajv-formats checks with a function (date-time, uri).
+// two formats checked by a function (date-time, uri).
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

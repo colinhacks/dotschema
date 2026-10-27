@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { schemaCode, schemaTypes } from "../src/schema.ts";
-import { evaluate, ROOT, run, TSC } from "./helpers.ts";
+import { evaluate, ROOT, run, TSC, withFormats } from "./helpers.ts";
 
 const require = createRequire(import.meta.url);
 const PATH = join(ROOT, "tests/fixtures/pick.schema.jsonc");
@@ -25,9 +25,7 @@ function ajvFor(schema: { $schema: string }, allErrors: boolean) {
   const mod = require(schema.$schema.includes("2020-12") ? "ajv/dist/2020" : "ajv");
   const Ajv = mod.default ?? mod;
   const ajv = new Ajv({ allErrors, strict: false, logger: false, ownProperties: true, multipleOfPrecision: 7 });
-  const formats = require("ajv-formats");
-  (formats.default ?? formats)(ajv);
-  return ajv.compile(schema);
+  return withFormats(ajv).compile(schema);
 }
 
 /** An ajv error as a dotschema issue: the path read against the value, a missing or unexpected key at its end. */

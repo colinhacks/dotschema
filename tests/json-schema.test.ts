@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { parseSchemaFile } from "../src/parse.ts";
 import { draftOf, filesOf, schemaCode } from "../src/schema.ts";
 import { jsonSchemas, TARGET_URIS, type JsonSchemaResult, type JsonSchemaTarget } from "../src/json-schema.ts";
-import { evaluate, ROOT } from "./helpers.ts";
+import { evaluate, ROOT, withFormats } from "./helpers.ts";
 
 const require = createRequire(import.meta.url);
 const TARGETS: JsonSchemaTarget[] = ["draft-07", "draft-2020-12"];
@@ -50,13 +50,12 @@ function project(files: Record<string, unknown>): string {
   return dir;
 }
 
-/** ajv's entry point for a target, as a consumer of the produced schema would compile it: every error, ajv-formats, and strict about keywords, so a keyword left behind that the target ignores fails the compile. */
+/** ajv's entry point for a target, as a consumer of the produced schema would compile it: every error, the formats dotschema checks, and strict about keywords, so a keyword left behind that the target ignores fails the compile. */
 function compileFor(target: JsonSchemaTarget, schema: unknown, strictSchema = true): (value: unknown) => boolean {
   const mod = require(target === "draft-07" ? "ajv" : "ajv/dist/2020");
   const Ajv = mod.default ?? mod;
   const ajv = new Ajv({ allErrors: true, strictSchema, strictTypes: false, strictTuples: false, strictRequired: false, logger: false });
-  const formats = require("ajv-formats");
-  (formats.default ?? formats)(ajv);
+  withFormats(ajv);
   // ajv resolves `$anchor` in every draft without declaring it a keyword, which strict mode then refuses.
   if (!ajv.getKeyword("$anchor")) ajv.addKeyword("$anchor");
   return ajv.compile(schema);

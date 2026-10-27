@@ -90,7 +90,7 @@ console.log(
       const json = teamAsJsonSchema["~standard"].jsonSchema.input({ target }) as { $schema: string; properties: { lead: { $ref: string } }; $defs?: object; definitions?: object };
       return [json.$schema, json.properties.lead.$ref, Object.keys(json.$defs ?? json.definitions ?? {}).join()];
     }),
-    // A click and a visit; then a date-time, a uri and a variant that fail (ajv-formats' function formats, inlined).
+    // A click and a visit; then a date-time, a uri and a variant that fail (formats checked by a function, their files inlined).
     events: [
       event.is({ at: "2026-10-20T09:00:00Z", kind: "click", x: 1, y: 2 }),
       event.is({ at: "2026-10-20T09:00:00Z", kind: "visit", url: "https://example.com/a" }),

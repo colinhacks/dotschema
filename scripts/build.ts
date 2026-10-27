@@ -9,6 +9,7 @@
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const root = join(import.meta.dirname, "..");
 const dist = join(root, "dist");
@@ -57,6 +58,8 @@ for (const field of ["homepage", "bugs", "author", "license"]) if (!built[field]
 
 mkdirSync(to, { recursive: true });
 cpSync(tsc, join(to, "src"), { recursive: true });
+// The format files (src/formats/index.ts), plain JavaScript a module inlines, which tsc does not copy.
+for (const file of readdirSync(join(root, "src", "formats"))) if (file.endsWith(".cjs")) cpSync(join(root, "src", "formats", file), join(to, "src", "formats", file));
 writeFileSync(join(to, "package.json"), JSON.stringify(built, null, 2) + "\n");
 cpSync(join(root, "README.md"), join(to, "README.md"));
 cpSync(join(root, "LICENSE"), join(to, "LICENSE"));
@@ -67,6 +70,9 @@ const sources = files.filter((f) => /\.(c|m)?ts$/.test(f) && !/\.d\.(c|m)?ts$/.t
 if (sources.length) throw new Error(`dist/dotschema holds TypeScript sources: ${sources.join(", ")}`);
 const named = [...Object.values(built.exports as Record<string, Record<string, string>>).flatMap((e) => Object.values(e)), ...(built.typescript.contentMapper.exec as string[]).slice(1)];
 for (const file of named) if (!existsSync(join(to, file))) throw new Error(`dist/dotschema: ${file} is named in package.json and missing`);
+// And every format's file loads from it, with each file it requires.
+const { formatDefinitions } = await import(pathToFileURL(join(to, "src", "formats", "index.js")).href);
+formatDefinitions();
 // The README goes to npm, where a relative link leads nowhere.
 const relative = [...readFileSync(join(root, "README.md"), "utf8").matchAll(/\]\((?!https:\/\/|#)([^)]+)\)/g)].map((m) => m[1]);
 if (relative.length) throw new Error(`README.md links to ${relative.join(", ")}: npm shows the README, so every link is absolute`);
