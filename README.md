@@ -1,6 +1,6 @@
 <h1 align="center">dotschema</h1>
 
-<p align="center">Import <code>.schema.jsonc</code> files into TypeScript, fully typed</p>
+<p align="center">Import JSON Schemas into TypeScript. Fully typed, scary fast.</p>
 
 <p align="center">
   <a href="https://github.com/colinhacks/dotschema/actions/workflows/test.yml"><img src="https://github.com/colinhacks/dotschema/actions/workflows/test.yml/badge.svg?branch=main" alt="test status" /></a>

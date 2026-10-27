@@ -7,7 +7,7 @@ export function loader() {
   const manifest = {
     name: 'dotschema',
     short_name: 'dotschema',
-    description: 'Import .schema.jsonc files into TypeScript, fully typed.',
+    description: 'Import JSON Schemas into TypeScript. Fully typed, scary fast.',
     start_url: '/',
     display: 'browser',
     background_color: markColor.background,

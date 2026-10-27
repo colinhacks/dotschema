@@ -14,4 +14,4 @@ export const siteUrl = 'https://dotschema.vercel.app';
  * characters so that Google does not cut it, as Motherload's and Reylo's read. The page's h1 stays
  * the name alone.
  */
-export const siteTitle = 'dotschema — Import .schema.jsonc files into TypeScript';
+export const siteTitle = 'dotschema — Import JSON Schemas into TypeScript';

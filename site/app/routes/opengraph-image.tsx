@@ -23,7 +23,6 @@ const color = {
   ground: '#3d5afe',
   white: '#ffffff',
   soft: 'rgba(255, 255, 255, 0.78)',
-  chip: 'rgba(255, 255, 255, 0.17)',
   card: '#161616',
   bar: '#a1a1a1',
   popup: '#222222',
@@ -96,13 +95,11 @@ function Card(): ReactNode {
       </div>
       <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexDirection: 'column', fontSize: 56, fontWeight: 600, letterSpacing: -1.2, lineHeight: 1.16 }}>
-          <div style={{ display: 'flex' }}>Import</div>
-          <div style={{ display: 'flex' }}>
-            <span style={{ fontFamily: MONO, fontWeight: 500, fontSize: 46, background: color.chip, borderRadius: 10, padding: '0 10px', marginLeft: -4, letterSpacing: -1 }}>.schema.jsonc</span>
-          </div>
-          <div style={{ display: 'flex' }}>files into</div>
-          <div style={{ display: 'flex' }}>TypeScript,</div>
-          <div style={{ display: 'flex' }}>fully typed</div>
+          <div style={{ display: 'flex' }}>Import JSON</div>
+          <div style={{ display: 'flex' }}>Schemas into</div>
+          <div style={{ display: 'flex' }}>TypeScript.</div>
+          <div style={{ display: 'flex', marginTop: 22, color: color.soft }}>Fully typed,</div>
+          <div style={{ display: 'flex', color: color.soft }}>scary fast.</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', width: 620, background: color.card, borderRadius: 14, boxShadow: '0 18px 44px rgba(10,20,80,.38)', marginTop: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 40, fontSize: 16, color: color.bar, position: 'relative' }}>
