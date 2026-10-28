@@ -691,15 +691,22 @@ test("a 2020-12 $dynamicRef ajv resolves to the root in place of its anchor is a
       assert.deepEqual(problems.map((p) => [p.message, source.slice(p.start, p.start + p.length)]), [[message(ref, fix), ref]]);
     }
   }
-  // An anchor at the root of the file is resolved as the spec says. ajv resolves one at the root of a
-  // schema with an $id too, but an $id below a file's root is refused (embeddedIdProblems), anchor or not.
+  // An anchor at the root of the file is resolved as the spec says, and so is one at the root of a
+  // schema with an $id, for a $dynamicRef inside that schema.
   const tree = (extra: object) => ({ $dynamicAnchor: "node", type: "object", properties: { kids: { type: "array", items: { $dynamicRef: "#node" } } }, ...extra });
   const { code, problems } = schemaCode(JSON.stringify({ $schema: S, ...tree({}) }), PATH);
   assert.deepEqual(problems, []);
   const { default: s } = await evaluate(code);
   assert.deepEqual([s.is({ kids: [{ kids: [] }] }), s.is({ kids: [1] })], [true, false]);
   const embedded = JSON.stringify({ $schema: S, $ref: "https://example.com/tree", $defs: { tree: tree({ $id: "https://example.com/tree" }) } });
-  assert.deepEqual(schemaCode(embedded, PATH).problems.map((p) => embedded.slice(p.start, p.start + p.length)), ["https://example.com/tree"]);
+  const { default: e } = await evaluate(schemaCode(embedded, PATH).code);
+  assert.deepEqual([e.is({ kids: [{ kids: [] }] }), e.is({ kids: [1] })], [true, false]);
+  // Inside an $id whose root declares no such anchor, the problem is placed at the $id: ajv resolves the reference by where it compiles the schema.
+  const elsewhere = JSON.stringify({ $schema: S, $dynamicAnchor: "node", $defs: { tree: { $id: "https://example.com/tree", items: { $dynamicRef: "#node" } } }, $ref: "https://example.com/tree" });
+  assert.deepEqual(schemaCode(elsewhere, PATH).problems.map((p) => [p.message, elsewhere.slice(p.start, p.start + p.length)]), [[`ajv resolves the $dynamicRef "#node" inside the schema whose $id is "https://example.com/tree" by where it compiles that schema, not against the $id: declare "$dynamicAnchor": "node" at the schema whose $id is "https://example.com/tree", or write it as a $ref.`, "https://example.com/tree"]]);
+  // 2019-09's $recursiveRef "#" inside an $id whose root has no "$recursiveAnchor": true, which ajv sent to the root's anchor (the Test Suite's recursiveRef.json [5]).
+  const recursive = JSON.stringify({ $schema: "https://json-schema.org/draft/2019-09/schema", $recursiveAnchor: true, additionalProperties: { $id: "https://example.com/inner", additionalProperties: { $recursiveRef: "#" } } });
+  assert.deepEqual(schemaTypes(recursive, PATH).problems.map((p) => [p.message, recursive.slice(p.start, p.start + p.length)]), [[`ajv resolves the $recursiveRef "#" inside the schema whose $id is "https://example.com/inner" by where it compiles that schema, not against the $id: declare "$recursiveAnchor": true beside that $id, or write a $ref to it.`, "https://example.com/inner"]]);
   // In another file, placed at the root's reference to it; in draft-07, which ignores $dynamicRef, no problem.
   const { path, source } = project({
     "user.schema.jsonc": { $schema: S, type: "object", properties: { list: { $ref: "./list.schema.jsonc" } } },
@@ -709,42 +716,109 @@ test("a 2020-12 $dynamicRef ajv resolves to the root in place of its anchor is a
   assert.deepEqual(schemaCode(JSON.stringify({ type: "array", items: { $dynamicRef: "#item" } }), PATH).problems, []);
 });
 
-test("an $id below a file's root is a problem at that $id, in the type check and the build: ajv resolves the $refs inside it against the $id", async () => {
+test("an $id below a file's root begins a schema resource: a $ref inside it resolves against the $id, in the types and the validator, as ajv resolves it", async () => {
   const S = "https://json-schema.org/draft/2020-12/schema";
-  const message = (id: string) => `The $id "${id}" gives a schema inside the file a base URI of its own, against which ajv resolves the $refs inside it and dotschema's types do not: move that schema to a .schema.jsonc file of its own and $ref the file, or remove the $id.`;
   const inner = "https://example.com/inner";
   for (const schema of [
-    // ajv validated 1 and refused "s" here, where the type was the root's `x`, a string.
+    // The inner `x`, a number, and not the root's, a string: until 2026-10-27 this was refused.
     { $schema: S, $defs: { x: { type: "string" }, inner: { $id: inner, $defs: { x: { type: "number" } }, allOf: [{ $ref: "#/$defs/x" }] } }, allOf: [{ $ref: "#/$defs/inner" }] },
     { definitions: { x: { type: "string" }, inner: { $id: inner, definitions: { x: { type: "number" } }, allOf: [{ $ref: "#/definitions/x" }] } }, allOf: [{ $ref: "#/definitions/inner" }] },
-    // With the $ref beside the $id, ajv recursed until the stack ran out while compiling.
+    // With the $ref beside the $id, ajv given the schema as written recursed until the stack ran out.
     { $schema: S, $defs: { x: { type: "string" }, inner: { $id: inner, $defs: { x: { type: "number" } }, $ref: "#/$defs/x" } }, $ref: "#/$defs/inner" },
-    // Placed at the $id, not at a $ref that names the same URI first.
+    // By the $id itself.
     { $schema: S, $ref: inner, $defs: { inner: { $id: inner, type: "number" } } },
   ]) {
     const source = JSON.stringify(schema, null, 2);
-    for (const problems of [schemaTypes(source, PATH).problems, schemaCode(source, PATH).problems]) {
-      assert.deepEqual(problems.map((p) => [p.message, source.slice(p.start - 8, p.start + p.length + 1)]), [[message(inner), `"$id": "${inner}"`]]);
-    }
+    const typed = schemaTypes(source, PATH);
+    assert.deepEqual(typed.problems, []);
+    assert.match(typed.types, /\ntype User = Inner;\n[^]*\nexport type Inner = number;\n/);
+    const { code, problems } = schemaCode(source, PATH);
+    assert.deepEqual(problems, []);
+    const { default: s, inner: definition } = await evaluate(code);
+    assert.deepEqual([s.is(1), s.is("s"), definition.is(1), definition.is("s")], [true, false, true, false]);
   }
-  // The root's own $id, a plain-name $id (draft-07's anchor), and "$id" as data or as a property's name stay.
-  for (const schema of [
-    { $id: "https://example.com/root", type: "object", properties: { $id: { type: "string" } }, required: ["$id"] },
-    { definitions: { p: { $id: "#pos", type: "integer" } }, items: { $ref: "#pos" } },
-    { const: { nested: { $id: "https://example.com/data" } }, examples: [{ $id: "https://example.com/data" }] },
-  ]) {
-    const source = JSON.stringify(schema);
-    assert.deepEqual(schemaTypes(source, PATH).problems, [], source);
-    assert.deepEqual(schemaCode(source, PATH).problems, [], source);
-  }
-  // In another file, placed at the root's reference to it.
-  const { path, source } = project({
-    "user.schema.jsonc": { type: "object", properties: { tag: { $ref: "./tag.schema.jsonc" } } },
-    "tag.schema.jsonc": { definitions: { t: { $id: inner, type: "string" } }, $ref: "#/definitions/t" },
+});
+
+test("a $ref names a schema resource by its $id, absolute or relative to the $id above it, with a pointer or an anchor inside it", async () => {
+  const S = "https://json-schema.org/draft/2020-12/schema";
+  const source = JSON.stringify({
+    $schema: S,
+    $id: "https://example.com/root.json",
+    type: "object",
+    properties: {
+      a: { $ref: "item.json" },
+      b: { $ref: "https://example.com/item.json#/$defs/n" },
+      c: { $ref: "item.json#n" },
+      // The file's own $id, with a pointer: typed `unknown` until 2026-10-27.
+      d: { $ref: "https://example.com/root.json#/$defs/item/properties/n" },
+    },
+    $defs: { item: { $id: "item.json", type: "object", properties: { n: { $ref: "#n" } }, required: ["n"], $defs: { n: { $anchor: "n", type: "number" } } } },
   });
-  for (const problems of [schemaTypes(source, path).problems, schemaCode(source, path).problems]) {
-    assert.deepEqual(problems.map((p) => [p.message, source.slice(p.start, p.start + p.length)]), [[`./tag.schema.jsonc: ${message(inner)}`, "./tag.schema.jsonc"]]);
+  const { types, problems } = schemaTypes(source, PATH);
+  assert.deepEqual(problems, []);
+  assert.match(types, /\ninterface User \{\n  a\?: Item \| undefined;\n  b\?: number \| undefined;\n  c\?: number \| undefined;\n  d\?: number \| undefined;\n/);
+  assert.match(types, /\nexport interface Item \{\n  n: number;\n/);
+  const { code, problems: built } = schemaCode(source, PATH);
+  assert.deepEqual(built, []);
+  const { default: s } = await evaluate(code);
+  assert.equal(s.is({ a: { n: 1 }, b: 2, c: 3, d: 4 }), true);
+  for (const value of [{ a: { n: "x" } }, { b: "x" }, { c: "x" }, { d: "x" }]) assert.equal(s.is(value), false, JSON.stringify(value));
+
+  // Two resources that refer to each other by relative $ids, the Test Suite's "Recursive references between schemas".
+  const tree = JSON.stringify({
+    $id: "http://localhost:1234/tree",
+    type: "object",
+    properties: { meta: { type: "string" }, nodes: { type: "array", items: { $ref: "node" } } },
+    required: ["meta", "nodes"],
+    definitions: { node: { $id: "http://localhost:1234/node", type: "object", properties: { value: { type: "number" }, subtree: { $ref: "tree" } }, required: ["value"] } },
+  });
+  assert.match(schemaTypes(tree, PATH).types, /\ninterface User \{\n  meta: string;\n  nodes: Node\[\];\n[^]*\nexport interface Node \{\n  value: number;\n  subtree\?: User \| undefined;\n/);
+  const { default: t } = await evaluate(schemaCode(tree, PATH).code);
+  assert.equal(t.is({ meta: "a", nodes: [{ value: 1, subtree: { meta: "b", nodes: [{ value: 2 }] } }] }), true);
+  assert.equal(t.is({ meta: "a", nodes: [{ value: 1, subtree: { meta: "b", nodes: [{ value: "x" }] } }] }), false);
+
+  // In draft-07 a $ref hides every keyword beside it, an $id among them, as the Test Suite's ref.json [6] holds; ajv applied it.
+  const sibling = JSON.stringify({
+    $id: "http://localhost:1234/sibling_id/base/",
+    definitions: { foo: { $id: "http://localhost:1234/sibling_id/foo.json", type: "string" }, base_foo: { $id: "foo.json", type: "number" } },
+    allOf: [{ $id: "http://localhost:1234/sibling_id/", $ref: "foo.json" }],
+  });
+  const { default: b } = await evaluate(schemaCode(sibling, PATH).code);
+  assert.deepEqual([b.is(5), b.is("a")], [true, false]);
+  assert.match(schemaTypes(sibling, PATH).types, /\ntype User = Base_foo;\n/);
+});
+
+test("a $ref inside an $id that resolves to no schema of the files is a URL, which ajv reports: nothing is fetched", async () => {
+  const source = JSON.stringify({ $id: "https://example.com/", items: { $id: "folder/", items: { $ref: "integer.json" } } });
+  for (const { problems } of [schemaTypes(source, PATH), schemaCode(source, PATH)]) {
+    assert.deepEqual(problems.map((p) => p.message), ["The schema is not valid: can't resolve reference https://example.com/folder/integer.json from id https://example.com/folder/"]);
   }
+  // Under an $id with no scheme, below a root without one, a relative $ref names a file near the schema's own.
+  const { dir, path, source: user } = project({
+    "user.schema.jsonc": { type: "object", properties: { tag: { $ref: "#/$defs/shared/properties/tag" } }, $defs: { shared: { $id: "shared/", type: "object", properties: { tag: { $ref: "tag.schema.jsonc" } } } } },
+    "shared/tag.schema.jsonc": { type: "string", minLength: 2 },
+  });
+  const typed = schemaTypes(user, path);
+  assert.deepEqual(typed.problems, []);
+  assert.match(typed.types, /^import type \{ Type as Tag \} from "\.\/shared\/tag\.schema\.jsonc";$/m);
+  assert.match(typed.types, /\n  tag\?: Tag \| undefined;\n/);
+  const { code, problems } = schemaCode(user, path);
+  assert.deepEqual(problems, []);
+  assert.ok(!code.includes(dir), "the module names no path");
+  const { default: s } = await evaluate(code);
+  assert.deepEqual([s.is({ tag: "ab" }), s.is({ tag: "a" })], [true, false]);
+});
+
+test("a $ref to a schema resource in another file, by its $id, is that file's type and validator", async () => {
+  const { path, source } = project({
+    "user.schema.jsonc": { type: "object", properties: { place: { $ref: "https://example.com/place" }, shared: { $ref: "./shared.schema.jsonc" } } },
+    "shared.schema.jsonc": { definitions: { place: { $id: "https://example.com/place", type: "object", properties: { city: { type: "string" } }, required: ["city"] } } },
+  });
+  const typed = schemaTypes(source, path);
+  assert.deepEqual(typed.problems, []);
+  assert.match(typed.types, /^import type \{ Place, Type as Shared \} from "\.\/shared\.schema\.jsonc";$/m);
+  const { default: user } = await evaluate(schemaCode(source, path).code);
+  assert.deepEqual([user.is({ place: { city: "Oslo" } }), user.is({ place: {} })], [true, false]);
 });
 
 test("a format checked by a function, such as date-time or uri, is inlined: the module requires nothing", async () => {

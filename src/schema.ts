@@ -21,7 +21,7 @@ import { CODES, type Problem } from "./core/problems.ts";
 import type { TypeOptions } from "./core/universal.ts";
 import { literal, toJs, type Value } from "./core/serialize.ts";
 import { parseSchemaFile } from "./parse.ts";
-import { collect, dynamicRefProblems, eachSchema, embeddedIdProblems, fileOf, forAjv, fragmentOf, fragmentPath, mapSchemas, pointTo, withoutKeywords, type Files } from "./refs.ts";
+import { collect, dynamicRefProblems, eachSchema, forAjv, fragmentOf, mapSchemas, pointTo, resolvedSchemas, resolveRef, withoutKeywords, type Files } from "./refs.ts";
 import { definitionsOf, LITERAL_NAME, schemaModuleTypes, type Draft } from "./schema-types.ts";
 import { jsonSchemas, type Entry, type JsonSchemaResult, type JsonSchemaTarget } from "./json-schema.ts";
 import { formatDefinitions, formatFile } from "./formats/index.ts";
@@ -196,10 +196,9 @@ function loadAjv(path: string, schema: Value, standalone: boolean, allErrors = t
 export function filesOf(source: string, path: string, schema: Value): Files {
   const clean = (value: Value) => withoutKeywords(value, IGNORED[draftOf(schema) ?? "draft-07"]);
   const files = collect(path, clean(schema), source, { of: declaredDraft, none: "ajv" }, clean);
-  // An `$id` below a file's root moves the base its `$ref`s resolve against, which the types do not follow (refs.ts).
-  files.problems.push(...embeddedIdProblems(files, path, source));
-  // ajv resolves some of 2020-12's `$dynamicRef`s otherwise than the spec (refs.ts).
-  if (draftOf(schema) === "2020-12") files.problems.push(...dynamicRefProblems(files, path, source));
+  // ajv resolves some of 2020-12's `$dynamicRef`s and 2019-09's `$recursiveRef`s otherwise than the spec (refs.ts).
+  if (draftOf(schema) === "2020-12") files.problems.push(...dynamicRefProblems(files, path, source, "$dynamicRef"));
+  if (draftOf(schema) === "2019-09") files.problems.push(...dynamicRefProblems(files, path, source, "$recursiveRef"));
   return files;
 }
 
@@ -240,13 +239,10 @@ export function needsConfirmation(files: Files): boolean {
   return found;
 }
 
-/** The value a `$ref` in the file `from` points to, among the files the validator is compiled from, by a JSON Pointer or an anchor (`fragmentPath`); undefined for a URL or nothing. */
-function refTarget(files: Files, ref: string, from: string): Value | undefined {
-  const other = fileOf(ref, from);
-  const [file, fragment] = other ? [other.path, other.fragment] : ref.startsWith("#") ? [from, ref.slice(1)] : [undefined, ""];
-  const schema = file === undefined ? undefined : files.schemas.get(file);
-  const segments = schema === undefined ? undefined : fragmentPath(schema, fragment);
-  return schema === undefined || !segments ? undefined : pointTo(schema, segments);
+/** The value the `$ref` of the schema at `segments` in the file `from` points to, among the files the validator is compiled from (`resolveRef`); undefined for a URL or nothing. */
+function refTarget(files: Files, from: string, segments: readonly string[]): Value | undefined {
+  const target = resolveRef(files, from, segments);
+  return target && "segments" in target ? pointTo(files.schemas.get(target.path)!, target.segments) : undefined;
 }
 
 /**
@@ -259,10 +255,10 @@ function refTarget(files: Files, ref: string, from: string): Value | undefined {
  * property is required beside the `oneOf` or in every variant. Then a value whose tag is one
  * variant's fails every other variant, so the `oneOf` holds exactly when that variant does.
  */
-function discriminatorOf(files: Files, schema: Record<string, Value>, from: string): string | undefined {
+function discriminatorOf(files: Files, schema: Record<string, Value>, from: string, segments: readonly string[]): string | undefined {
   const oneOf = schema["oneOf"];
   if (schema["type"] !== "object" || !Array.isArray(oneOf) || oneOf.length < 2) return undefined;
-  const variants = oneOf.map((variant) => (isObj(variant) && Object.keys(variant).length === 1 && typeof variant["$ref"] === "string" ? refTarget(files, variant["$ref"], from) : variant));
+  const variants = oneOf.map((variant, i) => (isObj(variant) && Object.keys(variant).length === 1 && typeof variant["$ref"] === "string" ? refTarget(files, from, [...segments, "oneOf", String(i)]) : variant));
   if (!variants.every(isObj)) return undefined;
   const tagOf = (variant: Record<string, Value>, name: string): string | undefined => {
     const properties = variant["properties"];
@@ -303,8 +299,8 @@ export function withDiscriminators(files: Files): { files: Files; count: number 
   const schemas = new Map(
     [...files.schemas].map(([path, schema]) => [
       path,
-      mapSchemas(withoutKeywords(schema, ["discriminator"]), (copy) => {
-        const propertyName = discriminatorOf(files, copy, path);
+      mapSchemas(withoutKeywords(schema, ["discriminator"]), (copy, segments) => {
+        const propertyName = discriminatorOf(files, copy, path, segments);
         if (propertyName !== undefined) {
           copy["discriminator"] = { propertyName };
           count++;
@@ -505,7 +501,9 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
       if (failed) problems.push(failed);
     }
   }
-  const { declarations, rootName, rootType, definitions } = schemaModuleTypes(files.schemas.get(path)!, { path, read: (other) => files.schemas.get(other) }, draft, options);
+  // The types read each `$ref` as a pointer from its file's root, resolved against the `$id`s above it (refs.ts).
+  const resolved = resolvedSchemas(files);
+  const { declarations, rootName, rootType, definitions } = schemaModuleTypes(resolved.get(path)!, { path, read: (other) => resolved.get(other) }, draft, options);
   const typeOf = (entry: ModuleEntry, type: string, literalType: string) =>
     entry.shape ? `__DotschemaObjectSchema<${type}, ${literalType}, ${keyUnion(entry.shape.keys)}>` : `__DotschemaSchema<${type}, ${literalType}>`;
   const [rootEntry, ...definitionEntries] = entries;

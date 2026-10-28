@@ -306,14 +306,42 @@ test("2019-09's unevaluatedItems is refused for 2020-12 when the schema uses con
   schemaOf(convert({ $schema: D2019, properties: { contains: { type: "string" } }, unevaluatedItems: false })["draft-2020-12"]);
 });
 
-test("an $id inside a schema, a $dynamicRef across files, and a pointer to no schema are refused in both targets", () => {
-  // The module refuses such an `$id` itself (refs.ts), so both targets report its problem; the conversion's own refusal stays, behind it.
-  const embeddedSchema = { definitions: { a: { $id: "https://example.com/a", type: "string" } } };
-  const embedded = convert(embeddedSchema);
-  for (const target of TARGETS) assert.match(errorOf(embedded[target]), /^The \$id "https:\/\/example\.com\/a" gives a schema inside the file a base URI of its own/);
-  const files = filesOf(JSON.stringify(embeddedSchema), VIRTUAL, embeddedSchema);
-  const unchecked = jsonSchemas({ ...files, problems: [] }, VIRTUAL, "draft-07");
-  for (const target of TARGETS) assert.match(errorOf(unchecked[target]), /^"\$id" at \.\/virtual\.schema\.jsonc#\/definitions\/a\/\$id gives a schema inside the file a base URI of its own/);
+test("an $id below a file's root is left out, and each $ref into the resource it begins is a pointer from the document's root, with the module's verdicts", async () => {
+  const inner = "https://example.com/inner";
+  // The inner `x`, by a pointer that the $id makes relative to its own schema.
+  const nested = { $schema: D2020, $defs: { x: { type: "string" }, inner: { $id: inner, $defs: { x: { type: "number" } }, allOf: [{ $ref: "#/$defs/x" }] } }, allOf: [{ $ref: "#/$defs/inner" }] };
+  assert.deepEqual(schemaOf(convert(nested)["draft-2020-12"]), { $schema: D2020, $defs: { x: { type: "string" }, inner: { $defs: { x: { type: "number" } }, allOf: [{ $ref: "#/$defs/inner/$defs/x" }] } }, allOf: [{ $ref: "#/$defs/inner" }] });
+  await equivalentSchema(nested, [1], ["s"]);
+  await equivalentSchema({ definitions: { x: { type: "string" }, inner: { $id: inner, definitions: { x: { type: "number" } }, allOf: [{ $ref: "#/definitions/x" }] } }, allOf: [{ $ref: "#/definitions/inner" }] }, [1], ["s"]);
+  // By the resource's $id, absolute or relative to the root's, with a pointer or an anchor, whose name the document no longer declares.
+  const byId = {
+    $schema: D2020,
+    $id: "https://example.com/root.json",
+    type: "object",
+    properties: { a: { $ref: "item.json" }, b: { $ref: "https://example.com/item.json#/$defs/n" }, c: { $ref: "item.json#n" } },
+    $defs: { item: { $id: "item.json", type: "object", properties: { n: { $ref: "#n" } }, required: ["n"], $defs: { n: { $anchor: "n", type: "number" } } } },
+  };
+  assert.deepEqual(schemaOf(convert(byId)["draft-07"]).properties, { a: { $ref: "#/definitions/item" }, b: { $ref: "#/definitions/item/definitions/n" }, c: { $ref: "#/definitions/item/definitions/n" } });
+  await equivalentSchema(byId, [{ a: { n: 1 }, b: 2, c: 3 }], [{ a: { n: "x" } }, { a: {} }, { b: "x" }, { c: "x" }]);
+  // Resources that refer to each other, and draft-07's $id beside a $ref, which the $ref hides.
+  await equivalentSchema({ $id: "http://localhost:1234/tree", type: "object", properties: { nodes: { type: "array", items: { $ref: "node" } } }, required: ["nodes"], definitions: { node: { $id: "http://localhost:1234/node", type: "object", properties: { value: { type: "number" }, subtree: { $ref: "tree" } }, required: ["value"] } } }, [{ nodes: [{ value: 1, subtree: { nodes: [] } }] }], [{ nodes: [{ value: "x" }] }, { nodes: [{ value: 1, subtree: {} }] }]);
+  await equivalentSchema({ $id: "http://localhost:1234/base/", definitions: { foo: { $id: "http://localhost:1234/foo.json", type: "string" }, base_foo: { $id: "foo.json", type: "number" } }, allOf: [{ $id: "http://localhost:1234/", $ref: "foo.json" }] }, [5], ["a"]);
+  // A resource of another file, named by its $id.
+  const dir = project({
+    "a.schema.jsonc": { type: "object", properties: { place: { $ref: "https://example.com/place" }, rest: { $ref: "./b.schema.jsonc" } } },
+    "b.schema.jsonc": { definitions: { place: { $id: "https://example.com/place", type: "object", required: ["city"] } } },
+  });
+  await equivalentFile(join(dir, "a.schema.jsonc"), [{ place: { city: "Oslo" } }], [{ place: {} }]);
+});
+
+test("2020-12 refuses an $id below a file's root in a schema that uses $dynamicRef, whose dynamic scope follows the resource it begins", () => {
+  const tree = { $schema: D2020, $ref: "https://example.com/tree", $defs: { tree: { $id: "https://example.com/tree", $dynamicAnchor: "node", type: "object", properties: { kids: { type: "array", items: { $dynamicRef: "#node" } } } } } };
+  const results = convert(tree);
+  assert.equal(errorOf(results["draft-2020-12"]), `"$id" at ./virtual.schema.jsonc#/$defs/tree/$id begins a schema resource of its own, which the dynamic scope of this schema's $dynamicRef follows, and one document without that $id does not keep.`);
+  assert.match(errorOf(results["draft-07"]), /"\$dynamicAnchor" at \.\/virtual\.schema\.jsonc#\/\$defs\/tree\/\$dynamicAnchor has no equivalent in draft-07\./);
+});
+
+test("a $dynamicRef across files, a pointer to no schema, and one name in both containers are refused", () => {
   const dir = project({ "a.schema.jsonc": { $schema: D2020, $dynamicAnchor: "x", items: { $ref: "./b.schema.jsonc" } }, "b.schema.jsonc": { $dynamicAnchor: "x", items: { $dynamicRef: "#x" } } });
   const dynamic = fromFile(join(dir, "a.schema.jsonc"));
   assert.match(errorOf(dynamic["draft-2020-12"]), /"\$dynamicAnchor" at \.\/a\.schema\.jsonc#\/\$dynamicAnchor resolves through the schema files it was written across.*"\$dynamicRef" at \.\/b\.schema\.jsonc#\/items\/\$dynamicRef/);

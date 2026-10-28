@@ -385,8 +385,9 @@ dotschema reads every keyword of draft-06, draft-07, 2019-09 and 2020-12, and th
 | `if`, `then`, `else` | A union of `then` and `else`, when `if` tests a `const` |
 | `$ref` | The type it refers to |
 | `$defs`, `definitions` | A type of its own, exported by its key |
+| `$id` | A URI for a `$ref` to refer to, and the base of each `$ref` inside it |
 | `$anchor`, `$dynamicAnchor` | A name for a `$ref` to refer to |
 | `$dynamicRef`, `$recursiveRef` | `unknown` |
 | `description` | A doc comment |
 | `not`, `multipleOf`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `unevaluatedItems`, `minProperties`, `maxProperties`, `propertyNames`, `dependentRequired`, `dependentSchemas`, `dependencies` | Nothing: the validator checks it |
-| `$schema`, `$id`, `$vocabulary`, `$recursiveAnchor`, `$comment`, `title`, `default`, `examples`, `deprecated`, `readOnly`, `writeOnly`, `contentEncoding`, `contentMediaType`, `contentSchema` | Nothing |
+| `$schema`, `$vocabulary`, `$recursiveAnchor`, `$comment`, `title`, `default`, `examples`, `deprecated`, `readOnly`, `writeOnly`, `contentEncoding`, `contentMediaType`, `contentSchema` | Nothing |

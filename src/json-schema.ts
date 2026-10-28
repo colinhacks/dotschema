@@ -13,7 +13,7 @@
 // is, never a schema that validates otherwise than dotschema's validator does.
 import { basename } from "node:path";
 import type { Value } from "./core/serialize.ts";
-import { fileOf, fragmentOf, pointer, SCHEMA_SUFFIXES, specifierOf, type Files } from "./refs.ts";
+import { fragmentOf, pointer, resolveRef, SCHEMA_SUFFIXES, specifierOf, type Files } from "./refs.ts";
 import type { Draft } from "./schema-types.ts";
 
 export type JsonSchemaTarget = "draft-07" | "draft-2020-12";
@@ -109,7 +109,6 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
   const errors: { unit: string; message: string }[] = [];
   /** Where each schema of each file landed: `[file, ...source segments]` to output segments. */
   const positions = new Map<string, string[]>();
-  const anchors = new Map<string, Map<string, string[]>>();
   const sites: { object: Out; key: "$ref" | "$dynamicRef"; ref: string; file: string; at: string[] }[] = [];
   const place = (file: string, segments: readonly string[]) => JSON.stringify([file, ...segments]);
   // The unit of the document a place in it belongs to: a schema in the container, by its name, or the entry.
@@ -155,13 +154,16 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     for (const name of folded.values()) unitNames.add(name);
   }
 
+  // An `$id` below a file's root begins a schema resource of its own (refs.ts), which the dynamic
+  // scope of a `$dynamicRef` follows (2020-12 core 7.1): one document without those `$id`s would
+  // resolve it otherwise, so 2020-12 refuses such an `$id` in a schema that uses one.
+  let dynamic = false;
+  for (const schema of files.schemas.values()) dynamic ||= uses(schema, "$dynamicRef") || uses(schema, "$dynamicAnchor");
+
   let file = rootPath;
   let rootContainer: Out | undefined;
-  const anchorAt = (name: string, src: string[]) => {
-    const known = anchors.get(file) ?? new Map<string, string[]>();
-    anchors.set(file, known);
-    known.set(name, src);
-  };
+  // Whether the schema being converted is inside a schema resource that an `$id` below its file's root begins.
+  let inResource = false;
 
   const convert = (node: Value, src: string[], out: string[]): Value => {
     positions.set(place(file, src), out);
@@ -171,6 +173,8 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     // The document's root: the root file's, or the entry's.
     const rootOfAll = file === rootPath && (entry ? src.length === 2 && src[0] === entry[0] && src[1] === entry[1] : fileRoot);
     const names: string[] = [];
+    const outerResource = inResource;
+    inResource ||= !fileRoot && typeof node["$id"] === "string" && !node["$id"].startsWith("#");
     let itemsDone = false;
     let dependenciesDone = false;
     const refuse = (keyword: string, why: string) => errors.push({ unit: unitOf(out), message: `"${keyword}" at ${where(file, [...src, keyword])} ${why}` });
@@ -188,7 +192,9 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
             // Draft-07's plain-name fragment (core 8.2.3), 2020-12's `$anchor`.
             if (value.length > 1) names.push(value.slice(1));
           } else if (!fileRoot) {
-            refuse(keyword, "gives a schema inside the file a base URI of its own, which dotschema does not carry into one document.");
+            // Every `$ref` becomes a pointer from the document's root (below), which the `$id` would
+            // move to its own schema, so it is left out.
+            if (!to07 && dynamic) refuse(keyword, "begins a schema resource of its own, which the dynamic scope of this schema's $dynamicRef follows, and one document without that $id does not keep.");
           } else if (rootOfAll && fileRoot) {
             const hash = value.indexOf("#");
             if (hash !== -1 && hash < value.length - 1) refuse(keyword, "has a fragment.");
@@ -211,7 +217,6 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
           else {
             // Kept as written, and a `$ref` to it becomes a pointer like any other.
             result[keyword] = value;
-            anchorAt(value, src);
           }
           break;
         case "$dynamicRef":
@@ -274,11 +279,11 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     }
 
     if (names.length) {
-      for (const name of names) anchorAt(name, src);
       // The root file keeps its first anchor in the target's spelling; every reference to an anchor
-      // becomes a pointer, so another file's anchors, which could clash in one document, are left out.
+      // becomes a pointer, so another file's anchors, and those of a resource an `$id` below the root
+      // begins, which could clash in one document, are left out.
       const name = names.find((n) => ANCHOR_NAMES[target].test(n));
-      if (file === rootPath && name !== undefined) {
+      if (file === rootPath && !inResource && name !== undefined) {
         if (!to07) result["$anchor"] = name;
         else if (!has(result, "$id")) result["$id"] = `#${name}`;
       }
@@ -298,6 +303,7 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
         sites.push({ object: alone, key: "$ref", ref, file, at: [...src, "$ref"] });
       } else sites.push({ object: result, key: "$ref", ref, file, at: [...src, "$ref"] });
     }
+    inResource = outerResource;
     return result;
   };
 
@@ -394,44 +400,40 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     else if (rootContainer) rootContainer[name] = schema;
   }
 
-  // Every reference becomes a pointer into the one document. A file's own absolute `$id` names it
-  // too, as forAjv registers it with ajv; any other URL is left as written.
-  const ids = new Map<string, string>();
-  for (const [path, schema] of files.schemas) {
-    const id = isObj(schema) ? schema["$id"] : undefined;
-    if (typeof id === "string" && SCHEME.test(id)) ids.set(id.replace(/#$/, ""), path);
-  }
+  // Every reference becomes a pointer into the one document, resolved as the module resolves it
+  // (refs.ts): against the `$id`s above it, to a file, a resource an `$id` names, or an anchor; a
+  // URL no schema of the files declares is left as written, or written as the absolute URL an `$id`
+  // above it resolves it to.
   for (const site of sites) {
     const { ref } = site;
-    const hash = ref.indexOf("#");
-    const uri = hash === -1 ? ref : ref.slice(0, hash);
-    const fragment = hash === -1 ? "" : ref.slice(hash + 1);
     const from = unitOf(positions.get(place(site.file, site.at.slice(0, -1))) ?? []);
     const fail = (why: string) => errors.push({ unit: from, message: `"${site.key}" at ${where(site.file, site.at)}: "${ref}" ${why}` });
-    let target: string | undefined;
-    if (uri === "") target = site.file;
-    else if (SCHEME.test(uri)) {
-      target = ids.get(uri);
-      if (target === undefined) continue;
-    } else target = fileOf(ref, site.file)?.path;
-    if (target === undefined || !files.schemas.has(target)) {
-      fail("names a file that was not read.");
-      continue;
+    let target: { path: string; segments: string[] } | undefined;
+    if (site.key === "$dynamicRef") {
+      // Kept only within one file (above). An anchor stays one, resolved again as the schema is
+      // applied, and a URL is left as written, which ajv refuses itself.
+      const segments = ref.startsWith("#") ? pointer(ref.slice(1)) : undefined;
+      if (segments === undefined) {
+        if (!ref.startsWith("#") && !SCHEME.test(ref)) fail("names a file that was not read.");
+        continue;
+      }
+      target = { path: site.file, segments };
+    } else {
+      const resolved = resolveRef(files, site.file, site.at.slice(0, -1));
+      if (resolved === undefined) {
+        fail("points to nothing the files hold.");
+        continue;
+      }
+      if ("url" in resolved) {
+        if (!SCHEME.test(ref)) site.object[site.key] = resolved.url;
+        continue;
+      }
+      target = resolved;
     }
-    const segments = pointer(fragment);
-    // A `$dynamicRef` to an anchor stays one: it is resolved again as the schema is applied.
-    if (segments === undefined && site.key === "$dynamicRef") continue;
-    let at = segments;
-    if (at === undefined) {
-      let name = fragment;
-      try {
-        name = decodeURIComponent(fragment);
-      } catch {}
-      at = anchors.get(target)?.get(name);
-    }
-    const out = at && positions.get(place(target, at));
+    const at = target.segments;
+    const out = positions.get(place(target.path, at));
     if (!out) {
-      fail(at ? "points to something that is not a schema, or to a schema the conversion leaves out." : "names no anchor there.");
+      fail("points to something that is not a schema, or to a schema the conversion leaves out.");
       continue;
     }
     site.object[site.key] = `#${fragmentOf(out)}`;
