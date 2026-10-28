@@ -21,7 +21,7 @@ import { CODES, type Problem } from "./core/problems.ts";
 import type { TypeOptions } from "./core/universal.ts";
 import { literal, toJs, type Value } from "./core/serialize.ts";
 import { parseSchemaFile } from "./parse.ts";
-import { collect, dynamicRefProblems, eachSchema, forAjv, fragmentOf, mapSchemas, pointTo, resolvedSchemas, resolveRef, withoutKeywords, type Files } from "./refs.ts";
+import { collect, dynamicRefProblems, eachSchema, fileOf, forAjv, fragmentOf, mapSchemas, pointer, pointTo, resolvedSchemas, resolveRef, specifierOf, staticReferences, withoutKeywords, type Files } from "./refs.ts";
 import { definitionsOf, LITERAL_NAME, schemaModuleTypes, type Draft } from "./schema-types.ts";
 import { jsonSchemas, type Entry, type JsonSchemaResult, type JsonSchemaTarget } from "./json-schema.ts";
 import { formatDefinitions, formatFile } from "./formats/index.ts";
@@ -78,7 +78,8 @@ type Ajv = {
   /** The schemas ajv has resolved, by id; one set here is what `getSchema` gives for that id. */
   refs: Record<string, unknown>;
   /** Every keyword this instance knows, by name: what makes a schema more than always valid (ajv's `alwaysValidSchema`). */
-  RULES: { all: Record<string, unknown> };
+  RULES: { all: Record<string, unknown>; rules: { rules: { keyword: string }[] }[] };
+  removeKeyword(keyword: string): unknown;
   addSchema(schema: unknown, key?: string): unknown;
   addMetaSchema(schema: unknown): unknown;
   addFormat(name: string, format: unknown): unknown;
@@ -140,6 +141,149 @@ function formatLimits({ _, str, operators, getProperty }: Codegen): object {
   };
 }
 
+/** A keyword as ajv's `addKeyword` takes it, and the context its `code` is given (ajv/dist/compile/validate's `KeywordCxt`). */
+type KeywordDefinition = { keyword: string; code(cxt: any): void; [key: string]: unknown };
+
+/**
+ * A keyword of ajv's replaced by `definition`, in the place among its rules the old one had, so
+ * that every keyword runs, and reports, in the order it did.
+ */
+function replaceKeyword(ajv: Ajv, definition: KeywordDefinition): void {
+  // A keyword this class of ajv does not have (draft-07's has no `unevaluatedItems`) stays absent.
+  if (!ajv.RULES.all[definition.keyword]) return;
+  let before: string | undefined;
+  for (const group of ajv.RULES.rules) {
+    const at = group.rules.findIndex((rule) => rule.keyword === definition.keyword);
+    if (at !== -1) {
+      before = group.rules[at + 1]?.keyword;
+      break;
+    }
+  }
+  ajv.removeKeyword(definition.keyword);
+  ajv.addKeyword(before ? { ...definition, before } : definition);
+}
+
+/**
+ * ajv 8.20.0's keywords that give a verdict the spec does not, each replaced by ajv's own with the
+ * fault taken out (DESIGN.md, "The validator"), and only where a file the validator is compiled
+ * from uses the keyword, so that every other module's code is ajv's as it was. Measured against the
+ * JSON Schema Test Suite at 89e83a7 on 2026-10-27:
+ *
+ * - `enum`: ajv refuses `"enum": []` ("enum must have non-empty array"), which 2019-09's and
+ *   2020-12's meta-schemas allow and which accepts no value (enum.json [14]); draft-07's
+ *   meta-schema refuses it before this code runs, so it stays an invalid schema there.
+ * - `multipleOf`: with `multipleOfPrecision`, ajv tests `Math.abs(Math.round(q) - q) > 1e-7` on the
+ *   quotient `q`, which is `NaN` when the quotient overflows to `Infinity`, so `1e308` passed
+ *   `multipleOf: 0.123456789` (multipleOf.json [3]); with an infinite quotient the remainder, which
+ *   `%` computes exactly, decides, so `1e308` is still a multiple of `0.5` (optional/float-overflow.json).
+ * - `if`: ajv merges what the `if` evaluated whether or not it passed, so beside `else` alone it
+ *   counted `{ "foo": "else" }`'s `foo` as evaluated where the `if` failed, and ignores an `if`
+ *   without `then` and `else`, whose keys the spec counts where it passes (unevaluatedProperties.json
+ *   [15], [39]; unevaluatedItems.json [24], [27]); here they count only where it passes.
+ * - `unevaluatedItems`: ajv reads the count of items evaluated before it, which a branch sets at run
+ *   time, without its two other values, `true` (every item) and `undefined` (none): with
+ *   `"anyOf": [{ "items": ... }, true]` it checked index `true` of `["yes", "no"]` and skipped
+ *   `["yes", false]` (unevaluatedItems.json [8], 2019-09's [9]).
+ * - `contains`: ajv takes every item as evaluated once `contains` is beside `unevaluatedItems`,
+ *   since the count it keeps cannot name the items `contains` matched, which 2020-12 counts (core
+ *   11.2) and 2019-09 does not; here `contains` marks none, and in 2020-12 the copy ajv compiles
+ *   lets an item `contains` matches through `unevaluatedItems` itself (`withContainsEvaluated`).
+ */
+function patchKeywords(ajv: Ajv, require: NodeJS.Require, files: Files): void {
+  const uses = { emptyEnum: false, multipleOf: false, unevaluated: false, unevaluatedItems: false };
+  for (const schema of files.schemas.values())
+    eachSchema(schema, (s) => {
+      if (Array.isArray(s["enum"]) && s["enum"].length === 0) uses.emptyEnum = true;
+      if (s["multipleOf"] !== undefined) uses.multipleOf = true;
+      if (s["unevaluatedProperties"] !== undefined || s["unevaluatedItems"] !== undefined) uses.unevaluated = true;
+      if (s["unevaluatedItems"] !== undefined) uses.unevaluatedItems = true;
+    });
+  const { _, not, Name } = require("ajv/dist/compile/codegen");
+  const { alwaysValidSchema } = require("ajv/dist/compile/util");
+  const original = (file: string): KeywordDefinition => {
+    const mod = require(`ajv/dist/vocabularies/${file}`);
+    return mod.default ?? mod;
+  };
+  if (uses.emptyEnum) {
+    const base = original("validation/enum");
+    replaceKeyword(ajv, {
+      ...base,
+      code(cxt) {
+        if (!cxt.$data && Array.isArray(cxt.schema) && cxt.schema.length === 0) cxt.fail();
+        else base.code(cxt);
+      },
+    });
+  }
+  if (uses.multipleOf) {
+    const base = original("validation/multipleOf");
+    replaceKeyword(ajv, {
+      ...base,
+      code(cxt) {
+        const { gen, data, schemaCode, it } = cxt;
+        const precision = it.opts.multipleOfPrecision;
+        const quotient = gen.let("res");
+        // An infinite quotient says nothing about a remainder, which `%` computes exactly.
+        const invalid = precision ? _`(isFinite(${quotient}) ? Math.abs(Math.round(${quotient}) - ${quotient}) > 1e-${precision} : ${data} % ${schemaCode} !== 0)` : _`${quotient} !== parseInt(${quotient})`;
+        cxt.fail$data(_`(${schemaCode} === 0 || (${quotient} = ${data}/${schemaCode}, ${invalid}))`);
+      },
+    });
+  }
+  if (uses.unevaluated) {
+    const base = original("applicator/if");
+    const has = (it: any, keyword: string) => it.schema[keyword] !== undefined && !alwaysValidSchema(it, it.schema[keyword]);
+    replaceKeyword(ajv, {
+      ...base,
+      code(cxt) {
+        const { gen, it } = cxt;
+        const hasThen = has(it, "then");
+        const hasElse = has(it, "else");
+        if (!hasThen && !hasElse && !it.opts.unevaluated) return;
+        const valid = gen.let("valid", true);
+        const schValid = gen.name("_valid");
+        // ajv's `cxt.mergeEvaluated` here counted the `if`'s keys whether or not it passed.
+        const ifCxt = cxt.subschema({ keyword: "if", compositeRule: true, createErrors: false, allErrors: false }, schValid);
+        cxt.mergeValidEvaluated(ifCxt, schValid);
+        cxt.reset();
+        if (!hasThen && !hasElse) return;
+        const clause = (keyword: string, ifClause?: unknown) => () => {
+          const clauseCxt = cxt.subschema({ keyword }, schValid);
+          gen.assign(valid, schValid);
+          cxt.mergeValidEvaluated(clauseCxt, valid);
+          if (ifClause) gen.assign(ifClause, _`${keyword}`);
+          else cxt.setParams({ ifClause: keyword });
+        };
+        if (hasThen && hasElse) {
+          const ifClause = gen.let("ifClause");
+          cxt.setParams({ ifClause });
+          gen.if(schValid, clause("then", ifClause), clause("else", ifClause));
+        } else if (hasThen) gen.if(schValid, clause("then"));
+        else gen.if(not(schValid), clause("else"));
+        cxt.pass(valid, () => cxt.error(true));
+      },
+    });
+  }
+  if (uses.unevaluatedItems) {
+    const contains = original("applicator/contains");
+    replaceKeyword(ajv, {
+      ...contains,
+      code(cxt) {
+        const items = cxt.it.items;
+        contains.code(cxt);
+        cxt.it.items = items;
+      },
+    });
+    const unevaluatedItems = original("unevaluated/unevaluatedItems");
+    replaceKeyword(ajv, {
+      ...unevaluatedItems,
+      code(cxt) {
+        const { gen, data, it } = cxt;
+        if (it.items instanceof Name) it.items = gen.const("items", _`${it.items} === true ? ${data}.length : ${it.items} || 0`);
+        unevaluatedItems.code(cxt);
+      },
+    });
+  }
+}
+
 /**
  * ajv, dotschema's own dependency, looked up from this module: under pnpm a package's dependencies
  * resolve from the package only, not from the project's directory. The formats are dotschema's own
@@ -150,7 +294,7 @@ function formatLimits({ _, str, operators, getProperty }: Codegen): object {
  * code this copy wrote out as JSON, so every format ajv-formats checked by a function threw (measured
  * 2026-10-20); so the limit keywords are `formatLimits`, written with this copy's codegen.
  */
-function loadAjv(path: string, schema: Value, standalone: boolean, allErrors = true, discriminator = false): { ajv: Ajv; require: NodeJS.Require } | { error: string } {
+function loadAjv(path: string, schema: Value, files: Files, standalone: boolean, allErrors = true, discriminator = false): { ajv: Ajv; require: NodeJS.Require } | { error: string } {
   const require = createRequire(import.meta.url);
   const entry = ajvEntry(schema);
   if ("error" in entry) return entry;
@@ -186,6 +330,7 @@ function loadAjv(path: string, schema: Value, standalone: boolean, allErrors = t
   ajv.opts.code.formats = codegen._`__formats`;
   for (const [name, definition] of formatDefinitions()) ajv.addFormat(name, definition);
   ajv.addKeyword(formatLimits(codegen));
+  patchKeywords(ajv, require, files);
   return { ajv, require };
 }
 
@@ -195,16 +340,25 @@ function loadAjv(path: string, schema: Value, standalone: boolean, allErrors = t
  */
 export function filesOf(source: string, path: string, schema: Value): Files {
   const clean = (value: Value) => withoutKeywords(value, IGNORED[draftOf(schema) ?? "draft-07"]);
-  const files = collect(path, clean(schema), source, { of: declaredDraft, none: "ajv" }, clean);
-  // ajv resolves some of 2020-12's `$dynamicRef`s and 2019-09's `$recursiveRef`s otherwise than the spec (refs.ts).
-  if (draftOf(schema) === "2020-12") files.problems.push(...dynamicRefProblems(files, path, source, "$dynamicRef"));
-  if (draftOf(schema) === "2019-09") files.problems.push(...dynamicRefProblems(files, path, source, "$recursiveRef"));
+  let files = collect(path, clean(schema), source, { of: declaredDraft, none: "ajv" }, clean);
+  // A `$dynamicRef` or `$recursiveRef` that resolves as a `$ref` would is written as one (refs.ts);
+  // ajv resolves some of the rest otherwise than the spec, which are refused.
+  if (draftOf(schema) === "2020-12") {
+    files = staticReferences(files, path, "$dynamicRef");
+    files.problems.push(...dynamicRefProblems(files, path, source, "$dynamicRef"), ...containsProblems(files, path, source));
+  }
+  if (draftOf(schema) === "2019-09") {
+    files = staticReferences(files, path, "$recursiveRef");
+    files.problems.push(...dynamicRefProblems(files, path, source, "$recursiveRef"));
+  }
   return files;
 }
 
 /** The validator, compiled from the root with every other file added to ajv under its id, and the root's id; a problem when a file is not a valid schema. */
 function compile(ajv: Ajv, files: Files, path: string): { validate: unknown; id: string } | { problem: Problem } {
-  const { root, others } = forAjv(files, path);
+  const prepared = forAjv(withContainsEvaluated(files), path);
+  const root = withProtoChecked(prepared.root);
+  const others = prepared.others.map((other) => ({ ...other, schema: withProtoChecked(other.schema) }));
   const id = String((root as Record<string, Value>)["$id"] ?? "").replace(/#$/, "");
   for (const other of others) {
     try {
@@ -309,6 +463,193 @@ export function withDiscriminators(files: Files): { files: Files; count: number 
     ]),
   );
   return { files: { ...files, schemas }, count };
+}
+
+// ---- a `__proto__` key --------------------------------------------------------------------------
+
+/**
+ * A schema as ajv compiles it, with each schema of `properties` under a `__proto__` key also in
+ * `patternProperties` under `^__proto__$`, and a pattern `__proto__` also under `(?:__proto__)`,
+ * the same expression. ajv 8.20.0 leaves the key out of both, and out of the keys
+ * `additionalProperties` compares with (`allSchemaProperties` in dist/vocabularies/code.js), so it
+ * accepted `{ "__proto__": "foo" }`, read by `JSON.parse` as the value's own key, against
+ * `{ "properties": { "__proto__": { "type": "number" } } }` (the Test Suite's properties.json [5]);
+ * it reads every other pattern, against the value's own keys (`ownProperties`). Applied to what
+ * `forAjv` gives ajv, where every `$ref` is a pointer or a file's id already, so the copy goes
+ * without the identifiers it would declare twice; the schema stays where it is too, for a pointer to it.
+ */
+function withProtoChecked(schema: Value): Value {
+  return mapSchemas(schema, (copy) => {
+    const properties = copy["properties"];
+    const patterns = copy["patternProperties"];
+    const add: [string, Value][] = [];
+    if (isObj(properties) && Object.hasOwn(properties, "__proto__")) add.push(["^__proto__$", properties["__proto__"]!]);
+    if (isObj(patterns) && Object.hasOwn(patterns, "__proto__")) add.push(["(?:__proto__)", patterns["__proto__"]!]);
+    if (!add.length) return;
+    const merged: Record<string, Value> = isObj(patterns) ? { ...patterns } : {};
+    for (const [pattern, value] of add) {
+      const plain = withoutKeywords(value, ["$id", "$anchor", "$dynamicAnchor"]);
+      merged[pattern] = Object.hasOwn(merged, pattern) ? { allOf: [merged[pattern]!, plain] } : plain;
+    }
+    copy["patternProperties"] = merged;
+  });
+}
+
+// ---- `contains` beside 2020-12's `unevaluatedItems` --------------------------------------------
+
+/** Whether a schema declares an identifier, which a copy of it would declare twice, or holds an `unevaluatedItems` of its own, which a copy would leave unrewritten. */
+const declaresOwn = (schema: Value): boolean => {
+  let found = false;
+  eachSchema(schema, (s) => {
+    if ((typeof s["$id"] === "string" && s["$id"] !== "") || typeof s["$anchor"] === "string" || typeof s["$dynamicAnchor"] === "string" || s["unevaluatedItems"] !== undefined) found = true;
+  });
+  return found;
+};
+
+/**
+ * Whether some `contains` evaluates items of the value the schema at `segments` in the file `path`
+ * applies to: its own, or that of a schema it applies in place, through `$ref`s among the files;
+ * not `not`'s, whose annotations the spec drops. A `$dynamicRef` could reach any schema of the files.
+ */
+function seesContains(files: Files, path: string, segments: readonly string[], seen = new Set<string>()): boolean {
+  const schema = pointTo(files.schemas.get(path)!, [...segments]);
+  const key = JSON.stringify([path, ...segments]);
+  if (!isObj(schema) || seen.has(key)) return false;
+  seen.add(key);
+  if (schema["contains"] !== undefined) return true;
+  for (const keyword of ["allOf", "anyOf", "oneOf"]) {
+    const members = schema[keyword];
+    if (Array.isArray(members) && members.some((_, i) => seesContains(files, path, [...segments, keyword, String(i)], seen))) return true;
+  }
+  for (const keyword of ["if", "then", "else"]) if (seesContains(files, path, [...segments, keyword], seen)) return true;
+  const dependent = schema["dependentSchemas"];
+  if (isObj(dependent) && Object.keys(dependent).some((name) => seesContains(files, path, [...segments, "dependentSchemas", name], seen))) return true;
+  if (typeof schema["$ref"] === "string") {
+    const target = resolveRef(files, path, segments);
+    if (target && "segments" in target && seesContains(files, target.path, target.segments, seen)) return true;
+  }
+  if (schema["$dynamicRef"] !== undefined) {
+    let any = false;
+    for (const other of files.schemas.values()) eachSchema(other, (s) => void (any ||= s["contains"] !== undefined));
+    return any;
+  }
+  return false;
+}
+
+/**
+ * The `contains` schemas whose matches a 2020-12 `unevaluatedItems` at `segments` in `path` sees as
+ * evaluated, where each is sure to have run when the schema passes: the schema's own `contains`, and
+ * those of its `allOf` members, in turn, within the schema resource. `unhandled` is the place of one
+ * that is not: in `anyOf`, `oneOf`, `if`, `then`, `else`, `dependentSchemas`, behind a `$ref` or a
+ * `$dynamicRef`, below an `$id`, or one that declares an identifier; or a `$ref` among the files
+ * that points into the `unevaluatedItems`, which the rewrite moves.
+ */
+function containsOf(files: Files, path: string, segments: readonly string[]): { contains: Value[]; unhandled?: string[] } {
+  const contains: Value[] = [];
+  let unhandled: string[] | undefined;
+  const visit = (at: readonly string[]) => {
+    const schema = pointTo(files.schemas.get(path)!, [...at]);
+    if (!isObj(schema) || unhandled) return;
+    if (schema["contains"] !== undefined) {
+      if (declaresOwn(schema["contains"])) unhandled = [...at, "contains"];
+      else contains.push(schema["contains"]);
+    }
+    const allOf = schema["allOf"];
+    if (Array.isArray(allOf))
+      allOf.forEach((member, i) => {
+        const place = [...at, "allOf", String(i)];
+        if (isObj(member) && typeof member["$id"] === "string" && !member["$id"].startsWith("#")) {
+          if (!unhandled && seesContains(files, path, place)) unhandled = place;
+        } else visit(place);
+      });
+    for (const keyword of ["anyOf", "oneOf"]) {
+      const members = schema[keyword];
+      if (Array.isArray(members)) members.forEach((_, i) => void (!unhandled && seesContains(files, path, [...at, keyword, String(i)]) && (unhandled = [...at, keyword, String(i)])));
+    }
+    for (const keyword of ["if", "then", "else"]) if (!unhandled && seesContains(files, path, [...at, keyword])) unhandled = [...at, keyword];
+    const dependent = schema["dependentSchemas"];
+    if (isObj(dependent)) for (const name of Object.keys(dependent)) if (!unhandled && seesContains(files, path, [...at, "dependentSchemas", name])) unhandled = [...at, "dependentSchemas", name];
+    for (const keyword of ["$ref", "$dynamicRef"]) {
+      if (unhandled || typeof schema[keyword] !== "string") continue;
+      const sees = keyword === "$ref" ? ((target) => !!target && "segments" in target && seesContains(files, target.path, target.segments))(resolveRef(files, path, at)) : seesContains(files, path, at);
+      if (sees) unhandled = [...at, keyword];
+    }
+  };
+  visit(segments);
+  if (!unhandled && contains.length) {
+    // The rewrite moves the `unevaluatedItems` into an `else`, so a pointer into it would point to nothing.
+    const inside = [...segments, "unevaluatedItems"];
+    for (const [from, schema] of resolvedSchemas(files))
+      eachSchema(schema, (s) => {
+        const ref = s["$ref"];
+        if (typeof ref !== "string" || unhandled) return;
+        const target = ref.startsWith("#") ? { path: from, fragment: ref.slice(1) } : fileOf(ref, from);
+        const at = target && target.path === path ? pointer(target.fragment) : undefined;
+        if (at && at.length >= inside.length && inside.every((segment, i) => at[i] === segment)) unhandled = at;
+      });
+  }
+  return { contains, ...(unhandled ? { unhandled } : {}) };
+}
+
+const isDraft2020 = (files: Files): boolean => draftOf(files.schemas.values().next().value as Value) === "2020-12";
+const evaluatesSome = (schema: Value | undefined): boolean => schema === false || isObj(schema);
+
+/**
+ * The files as ajv compiles them, with each 2020-12 `unevaluatedItems` beside the `contains` it sees
+ * (`containsOf`) letting through an item one of them matches: `"unevaluatedItems": U` becomes
+ * `"unevaluatedItems": { "if": C, "else": U }`, with `{ "anyOf": [C, ...] }` for several, and
+ * `"unevaluatedItems": false` becomes `"unevaluatedItems": C`. ajv's `contains` marks no item
+ * evaluated (`patchKeywords`), while 2020-12 counts the items it matched (core 11.2), and each of
+ * these `contains` is sure to have run where the schema passes, so an item is evaluated by one
+ * exactly when it matches it. The module's `schema`, its Standard JSON Schema and the types stay as
+ * written.
+ */
+export function withContainsEvaluated(files: Files): Files {
+  if (!isDraft2020(files)) return files;
+  let changed = false;
+  const schemas = new Map(
+    [...files.schemas].map(([path, schema]) => [
+      path,
+      mapSchemas(schema, (copy, segments) => {
+        const rest = copy["unevaluatedItems"];
+        if (!evaluatesSome(rest) || !isObj(pointTo(schema, [...segments]))) return;
+        const { contains, unhandled } = containsOf(files, path, segments);
+        if (unhandled || !contains.length) return;
+        // `false` lets through exactly the items a `contains` matches, so an issue says what an item must be.
+        const matched = contains.length === 1 ? contains[0]! : { anyOf: contains };
+        copy["unevaluatedItems"] = rest === false ? matched : { if: matched, else: rest! };
+        changed = true;
+      }),
+    ]),
+  );
+  return changed ? { ...files, schemas } : files;
+}
+
+/**
+ * Each 2020-12 `unevaluatedItems` that sees a `contains` ajv cannot be made to count as the spec
+ * does (`containsOf`), as a problem placed as `collect`'s are: ajv takes every item as evaluated
+ * once `contains` is present, and the rewrite holds only for a `contains` sure to have run. Measured
+ * with the Test Suite's unevaluatedItems.json [23], whose `contains` sit in nested `if`s: ajv
+ * accepted `["b", "b"]`, which the spec refuses.
+ */
+export function containsProblems(files: Files, rootPath: string, rootSource: string): Problem[] {
+  const problems: Problem[] = [];
+  for (const [path, schema] of files.schemas) {
+    mapSchemas(schema, (s, segments) => {
+      if (!evaluatesSome(s["unevaluatedItems"])) return;
+      const { unhandled } = containsOf(files, path, segments);
+      if (!unhandled) return;
+      const where = path === rootPath ? "" : `${specifierOf(rootPath, path)}: `;
+      // The key, quoted or bare (JSON5), where it is first written; the file's start if it cannot be found.
+      const key = /(["']?)unevaluatedItems\1\s*:/.exec(rootSource);
+      const place = path !== rootPath ? files.places.get(path)! : key ? { start: key.index + key[1]!.length, length: "unevaluatedItems".length } : { start: 0, length: 1 };
+      const intoIt = unhandled.length > segments.length && unhandled[segments.length] === "unevaluatedItems" && segments.every((segment, i) => unhandled[i] === segment);
+      const why = intoIt ? `a $ref points into it (#${fragmentOf(unhandled)}), which that rewrite moves. Point the $ref at a definition in "$defs" instead.` : `the "contains" at #${fragmentOf(unhandled)} is not. Move that "contains" beside the "unevaluatedItems", or into its "allOf".`;
+      const message = `${where}ajv takes every item as evaluated for the "unevaluatedItems" at #${fragmentOf(segments)} once a "contains" is beside it, where 2020-12 counts only the items "contains" matched; dotschema counts those for a "contains" beside the "unevaluatedItems" or in its "allOf", and ${why}`;
+      if (!problems.some((p) => p.message === message)) problems.push({ message, ...place, code: CODES.schema });
+    });
+  }
+  return problems;
 }
 
 // ---- entries: the root and each definition ------------------------------------------------------
@@ -487,7 +828,7 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
   const draft = draftOf(schema);
   const files = filesOf(source, path, schema);
   const problems: Problem[] = [...files.problems];
-  const loaded = loadAjv(path, schema, false);
+  const loaded = loadAjv(path, schema, files, false);
   const entries = moduleEntries(files, path, "error" in loaded ? undefined : loaded.ajv.RULES.all);
   // A reference that cannot be followed is the problem; ajv would only add that it cannot resolve it.
   // A draft ajv does not validate is reported here too, where it was found only when the module was built.
@@ -841,11 +1182,11 @@ export function schemaCode(source: string, path: string, { discriminators = true
   // variant's; were ajv to refuse one, the validator is compiled as the schema is written.
   const tagged = discriminators ? withDiscriminators(files) : { files, count: 0 };
   for (const allErrors of [true, false]) {
-    let loaded = loadAjv(path, parsed.value, true, allErrors, tagged.count > 0);
+    let loaded = loadAjv(path, parsed.value, files, true, allErrors, tagged.count > 0);
     if ("error" in loaded) return failed([problem(loaded.error)], files.watched);
     let compiled = tagged.count > 0 ? compile(loaded.ajv, tagged.files, path) : compile(loaded.ajv, files, path);
     if ("problem" in compiled && tagged.count > 0) {
-      loaded = loadAjv(path, parsed.value, true, allErrors);
+      loaded = loadAjv(path, parsed.value, files, true, allErrors);
       if ("error" in loaded) return failed([problem(loaded.error)], files.watched);
       compiled = compile(loaded.ajv, files, path);
     }

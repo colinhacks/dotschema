@@ -662,6 +662,80 @@ export function dynamicRefProblems(files: Files, rootPath: string, rootSource: s
 }
 
 /**
+ * The files with each 2020-12 `$dynamicRef` and 2019-09 `$recursiveRef` that resolves as a `$ref`
+ * would written as that `$ref`, for the types, ajv and Standard JSON Schema alike. A `$dynamicRef`
+ * is a `$ref` (2020-12 core 8.2.3.2) when its fragment is a JSON Pointer, when the schema it first
+ * resolves to declares no `$dynamicAnchor` of its name (the "bookending" the Test Suite's
+ * dynamicRef.json holds), and, where that schema does, when no other schema of the files declares
+ * one of that name, so that no dynamic scope can hold another. A `$recursiveRef` (`"#"` alone,
+ * 2019-09 core 8.2.4.2) is a `$ref` to the root of its schema resource unless that root says
+ * `"$recursiveAnchor": true`, and, where it does, when no other schema of the files says so. Each is
+ * written as a pointer from the resource it names (an anchor ajv does not see, at a file's root, by
+ * where it is), and beside a `$ref` already there, in `allOf`. A reference that resolves to nothing
+ * the files hold is left as written, for ajv or `dynamicRefProblems` to report.
+ */
+export function staticReferences(files: Files, rootPath: string, keyword: "$dynamicRef" | "$recursiveRef"): Files {
+  const hide = refHidesId(files.schemas.get(rootPath)!);
+  const { others } = resolverOf(files.schemas);
+  // How many schemas of the files declare each dynamic anchor, or `"$recursiveAnchor": true`.
+  const declared = new Map<string, number>();
+  for (const schema of files.schemas.values())
+    eachSchema(schema, (s) => {
+      const name = keyword === "$dynamicRef" ? (typeof s["$dynamicAnchor"] === "string" ? s["$dynamicAnchor"] : undefined) : s["$recursiveAnchor"] === true ? "" : undefined;
+      if (name !== undefined) declared.set(name, (declared.get(name) ?? 0) + 1);
+    });
+  const rewritten = (path: string, schema: Value, segments: readonly string[], ref: string): string | undefined => {
+    const index = fileIndex(path, schema, hide);
+    const resource = resourceAt(index, segments);
+    if (keyword === "$recursiveRef") {
+      if (ref !== "#") return undefined;
+      const root = pointTo(schema, resource.segments) as Obj;
+      return root["$recursiveAnchor"] !== true || declared.get("") === 1 ? "#" : undefined;
+    }
+    const at = index.resources.get(resource.uri);
+    const site: Site = { ref, base: resource.uri, moved: resource.segments.length > 0, local: at?.local ?? false, ajvMoved: resource.segments.length > 0 };
+    let resolution = resolveSite(path, index, site, others(path));
+    if (resolution.kind === "file") {
+      const there = files.schemas.get(resolution.path);
+      if (there === undefined) return undefined;
+      const thereIndex = fileIndex(resolution.path, there, hide);
+      resolution = within(resolution.path, thereIndex, thereIndex.base, resolution.fragment);
+    }
+    const target = resolution.kind === "schema" ? resolution : resolution.kind === "anchor" && resolution.unseen ? { ...resolution, segments: resolution.unseen } : undefined;
+    if (!target) return undefined;
+    const fragment = ref.includes("#") ? ref.slice(ref.indexOf("#") + 1) : "";
+    if (fragment !== "" && !fragment.startsWith("/")) {
+      let name = fragment;
+      try {
+        name = decodeURIComponent(fragment);
+      } catch {}
+      const schemaThere = pointTo(files.schemas.get(target.path)!, target.segments);
+      if (isObj(schemaThere) && schemaThere["$dynamicAnchor"] === name && declared.get(name) !== 1) return undefined;
+    }
+    const uri = ref.includes("#") ? ref.slice(0, ref.indexOf("#")) : ref;
+    const rest = target.segments.slice(target.resource.length);
+    return `${uri}${rest.length || !uri ? `#${fragmentOf(rest)}` : ""}`;
+  };
+  let changed = false;
+  const schemas = new Map(
+    [...files.schemas].map(([path, schema]) => [
+      path,
+      mapSchemas(schema, (copy, segments) => {
+        const ref = copy[keyword];
+        if (typeof ref !== "string") return;
+        const to = rewritten(path, schema, segments, ref);
+        if (to === undefined) return;
+        changed = true;
+        delete copy[keyword];
+        if (typeof copy["$ref"] !== "string") copy["$ref"] = to;
+        else copy["allOf"] = [...(Array.isArray(copy["allOf"]) ? copy["allOf"] : []), { $ref: to }];
+      }),
+    ]),
+  );
+  return changed ? { ...files, schemas } : files;
+}
+
+/**
  * Every file of `files` for ajv, each under an id that holds no path, because ajv's standalone code
  * embeds ids: a file's own absolute `$id` (one with a scheme), or `dotschema:<n>`. Each reference
  * to another of the files is rewritten to that file's id, so ajv never resolves a file path.

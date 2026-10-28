@@ -270,10 +270,17 @@ test("a keyword the schema's draft does not define is left out, as ajv ignored i
   assert.deepEqual(schemaOf(convert({ $schema: D2020, minContains: 2, maxContains: 3 })["draft-07"]), { $schema: D07 });
 });
 
-test("2020-12's $dynamicRef stays in a schema of one file", async () => {
+test("a $dynamicRef or $recursiveRef that resolves as a $ref would is that $ref in both targets, and its anchor a plain one", async () => {
+  // The one $dynamicAnchor of its name: no dynamic scope can hold another (the Test Suite's dynamicRef.json [0]).
   const tree = { $schema: D2020, $dynamicAnchor: "node", type: "object", properties: { value: { type: "number" }, children: { type: "array", items: { $dynamicRef: "#node" } } } };
-  assert.deepEqual(schemaOf(convert(tree)["draft-2020-12"]), tree);
-  await equivalentSchema(tree, [{ value: 1, children: [{ value: 2, children: [] }] }], [{ children: [{ value: "x" }] }, { children: [1] }], ["draft-2020-12"]);
+  const body = { type: "object", properties: { value: { type: "number" }, children: { type: "array", items: { $ref: "#" } } } };
+  assert.deepEqual(schemaOf(convert(tree)["draft-2020-12"]), { $schema: D2020, ...body, $anchor: "node" });
+  assert.deepEqual(schemaOf(convert(tree)["draft-07"]), { $schema: D07, ...body, $id: "#node" });
+  await equivalentSchema(tree, [{ value: 1, children: [{ value: 2, children: [] }] }], [{ children: [{ value: "x" }] }, { children: [1] }]);
+  // 2019-09's $recursiveRef "#" beside the one "$recursiveAnchor": true; the anchor then does nothing.
+  const list = { $schema: D2019, $recursiveAnchor: true, type: "array", items: { anyOf: [{ type: "number" }, { $recursiveRef: "#" }] } };
+  for (const target of TARGETS) assert.deepEqual(schemaOf(convert(list)[target]), { $schema: TARGET_URIS[target], type: "array", items: { anyOf: [{ type: "number" }, { $ref: "#" }] } });
+  await equivalentSchema(list, [[1, [2, [3]]], []], [["x"], [[null]]]);
 });
 
 // ---- refusals -----------------------------------------------------------------------------------
@@ -284,7 +291,6 @@ test("draft-07 refuses the keywords it has no equivalent of, naming each and whe
     [{ $schema: D2020, items: { unevaluatedItems: false } }, `"unevaluatedItems" at ./virtual.schema.jsonc#/items/unevaluatedItems has no equivalent in draft-07.`],
     [{ $schema: D2020, contains: { type: "string" }, minContains: 2 }, `"minContains" at ./virtual.schema.jsonc#/minContains has no equivalent in draft-07.`],
     [{ $schema: D2019, contains: { type: "string" }, maxContains: 2 }, `"maxContains" at ./virtual.schema.jsonc#/maxContains has no equivalent in draft-07.`],
-    [{ $schema: D2020, $dynamicAnchor: "node", items: { $dynamicRef: "#node" } }, `"$dynamicAnchor" at ./virtual.schema.jsonc#/$dynamicAnchor has no equivalent in draft-07. "$dynamicRef" at ./virtual.schema.jsonc#/items/$dynamicRef has no equivalent in draft-07.`],
   ];
   for (const [schema, error] of cases) {
     const results = convert(schema);
@@ -293,10 +299,28 @@ test("draft-07 refuses the keywords it has no equivalent of, naming each and whe
   }
 });
 
-test("2019-09's $recursiveRef and $recursiveAnchor have no exact equivalent in either target", () => {
-  const results = convert({ $schema: D2019, $recursiveAnchor: true, items: { $recursiveRef: "#" } });
-  assert.match(errorOf(results["draft-07"]), /"\$recursiveAnchor" at \.\/virtual\.schema\.jsonc#\/\$recursiveAnchor has no equivalent in draft-07\. "\$recursiveRef" at \.\/virtual\.schema\.jsonc#\/items\/\$recursiveRef/);
-  assert.match(errorOf(results["draft-2020-12"]), /"\$recursiveAnchor" at \.\/virtual\.schema\.jsonc#\/\$recursiveAnchor is 2019-09's, and 2020-12's "\$dynamicRef" and "\$dynamicAnchor", which replaced it, do not resolve the same way\./);
+test("a dynamic $dynamicRef, and 2019-09's dynamic $recursiveRef, have no exact equivalent in draft-07, nor the $recursiveRef in 2020-12", () => {
+  // Two "$recursiveAnchor": true, so the $recursiveRef "#" can resolve to either.
+  const recursive = convert({ $schema: D2019, $id: "https://example.com/root", $recursiveAnchor: true, $defs: { inner: { $id: "inner", $recursiveAnchor: true, items: { $recursiveRef: "#" } } }, $ref: "inner" });
+  assert.match(errorOf(recursive["draft-07"]), /"\$recursiveAnchor" at \.\/virtual\.schema\.jsonc#\/\$recursiveAnchor has no equivalent in draft-07\. "\$recursiveAnchor" at \.\/virtual\.schema\.jsonc#\/\$defs\/inner\/\$recursiveAnchor has no equivalent in draft-07\. "\$recursiveRef" at \.\/virtual\.schema\.jsonc#\/\$defs\/inner\/items\/\$recursiveRef/);
+  assert.match(errorOf(recursive["draft-2020-12"]), /"\$recursiveAnchor" at \.\/virtual\.schema\.jsonc#\/\$recursiveAnchor is 2019-09's, and 2020-12's "\$dynamicRef" and "\$dynamicAnchor", which replaced it, do not resolve the same way\./);
+  // Two "$dynamicAnchor": "node", in two schema resources.
+  const dynamic = convert({ $schema: D2020, $id: "https://example.com/root", $dynamicAnchor: "node", $defs: { inner: { $id: "inner", $dynamicAnchor: "node", items: { $dynamicRef: "#node" } } }, $ref: "inner" });
+  assert.equal(errorOf(dynamic["draft-07"]), `"$dynamicAnchor" at ./virtual.schema.jsonc#/$dynamicAnchor has no equivalent in draft-07. "$dynamicAnchor" at ./virtual.schema.jsonc#/$defs/inner/$dynamicAnchor has no equivalent in draft-07. "$dynamicRef" at ./virtual.schema.jsonc#/$defs/inner/items/$dynamicRef has no equivalent in draft-07.`);
+  assert.equal(errorOf(dynamic["draft-2020-12"]), `"$id" at ./virtual.schema.jsonc#/$defs/inner/$id begins a schema resource of its own, which the dynamic scope of this schema's $dynamicRef follows, and one document without that $id does not keep.`);
+});
+
+test("an empty enum is kept in 2020-12 and is not: {} in draft-07, whose meta-schema requires a value", async () => {
+  for (const draft of [D2019, D2020]) {
+    assert.deepEqual(schemaOf(convert({ $schema: draft, enum: [] })["draft-2020-12"]), { $schema: D2020, enum: [] });
+    assert.deepEqual(schemaOf(convert({ $schema: draft, enum: [] })["draft-07"]), { $schema: D07, not: {} });
+    // Beside a `not` of its own, in `allOf`.
+    assert.deepEqual(schemaOf(convert({ $schema: draft, enum: [], not: { type: "string" } })["draft-07"]), { $schema: D07, not: { type: "string" }, allOf: [{ not: {} }] });
+    // ajv, which compiles the module, refuses `enum: []` as written ("enum must have non-empty array"); 2020-12's meta-schema allows it.
+    const ajv = new (require("ajv/dist/2020").default)({ logger: false });
+    assert.equal(ajv.validateSchema(schemaOf(convert({ $schema: draft, enum: [] })["draft-2020-12"])), true);
+    await equivalentSchema({ $schema: draft, properties: { a: { enum: [] } } }, [{}, 1], [{ a: null }, { a: 0 }, { a: "" }], ["draft-07"]);
+  }
 });
 
 test("2019-09's unevaluatedItems is refused for 2020-12 when the schema uses contains, which 2020-12 counts and 2019-09 does not", () => {
@@ -335,7 +359,8 @@ test("an $id below a file's root is left out, and each $ref into the resource it
 });
 
 test("2020-12 refuses an $id below a file's root in a schema that uses $dynamicRef, whose dynamic scope follows the resource it begins", () => {
-  const tree = { $schema: D2020, $ref: "https://example.com/tree", $defs: { tree: { $id: "https://example.com/tree", $dynamicAnchor: "node", type: "object", properties: { kids: { type: "array", items: { $dynamicRef: "#node" } } } } } };
+  // Two "$dynamicAnchor": "node", so the $dynamicRef is dynamic; with the tree's alone it would be a $ref.
+  const tree = { $schema: D2020, $dynamicAnchor: "node", $ref: "https://example.com/tree", $defs: { tree: { $id: "https://example.com/tree", $dynamicAnchor: "node", type: "object", properties: { kids: { type: "array", items: { $dynamicRef: "#node" } } } } } };
   const results = convert(tree);
   assert.equal(errorOf(results["draft-2020-12"]), `"$id" at ./virtual.schema.jsonc#/$defs/tree/$id begins a schema resource of its own, which the dynamic scope of this schema's $dynamicRef follows, and one document without that $id does not keep.`);
   assert.match(errorOf(results["draft-07"]), /"\$dynamicAnchor" at \.\/virtual\.schema\.jsonc#\/\$defs\/tree\/\$dynamicAnchor has no equivalent in draft-07\./);

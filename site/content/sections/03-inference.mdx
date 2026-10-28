@@ -400,7 +400,7 @@ A `$ref` with a fragment points into the other file, to a definition or an ancho
 
 ### Never
 
-A `false` schema allows no value, so its type is `never`:
+A `false` schema allows no value, and neither does `{ "not": {} }`, so the type of each is `never`:
 
 <Inferred>
 
@@ -409,15 +409,14 @@ A `false` schema allows no value, so its type is `never`:
   "type": "object",
   "properties": {
     "email": { "type": "string" },
-    "password": false
+    "password": false,
+    "admin": { "not": {} }
   },
   "required": ["email"]
 }
 ```
 
 </Inferred>
-
-{/* TODO: add the `{ "not": {} }` case here, a card whose type is `never`, once the types give it `never` (until then they give `unknown`). */}
 
 ### Checks
 

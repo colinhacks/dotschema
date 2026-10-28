@@ -236,6 +236,11 @@ test("ajv is set to check the schema as written: a property is the value's own, 
   assert.deepEqual(await verdicts({ multipleOf: 0.01 }, [19.99, 0.07, 1.1, 0.1 + 0.2, 999999.99, 0.015, 0.005, 19.995]), [true, true, true, true, true, false, false, false]);
   assert.deepEqual(await verdicts({ multipleOf: 0.1 }, [0.3, 0.7, 0.35]), [true, true, false]);
   assert.deepEqual(await verdicts({ type: "integer", multipleOf: 3 }, [9, 10, 9007199254740990]), [true, false, true]);
+  // With a quotient that overflows to Infinity, which ajv's test with the precision read as a multiple through NaN, the remainder decides
+  // (multipleOf.json [3], optional/float-overflow.json [0]).
+  assert.deepEqual(await verdicts({ type: "integer", multipleOf: 0.123456789 }, [1e308]), [false]);
+  assert.deepEqual(await verdicts({ type: "integer", multipleOf: 0.5 }, [1e308]), [true]);
+  assert.deepEqual(await verdicts({ multipleOf: 0.123456789 }, [0.370370367, 1e308, 1.7976931348623157e308]), [true, false, false]);
 });
 
 test("the types name the root for its file, export it as Type too, and write its properties out in the default export's type", () => {
@@ -324,23 +329,27 @@ test("a __proto__ key is a property in both dialects: the type's, the schema's, 
   ] as const) {
     const typed = schemaTypes(source, path);
     assert.deepEqual(typed.problems, []);
-    assert.match(typed.types, /__proto__: unknown;/, path);
+    assert.match(typed.types, /__proto__: string;/, path);
     const { code, problems } = schemaCode(source, path);
     assert.deepEqual(problems, []);
     const { default: s } = await evaluate(code);
     assert.deepEqual(Object.keys(s.schema.properties), ["__proto__"], path);
     assert.equal(s.is(JSON.parse('{ "__proto__": "x" }')), true, path);
+    assert.equal(s.is(JSON.parse('{ "__proto__": 1 }')), false, path);
     assert.equal(s.is({}), false, path);
   }
 });
 
-test("a __proto__ key in properties, which ajv does not check, is typed as a key outside properties", async () => {
-  // ajv skips the key in `properties` and reads a value's own `__proto__` as an additional property.
-  // Each schema written as text: in an object literal, `__proto__` would set the prototype.
+test("a __proto__ key in properties is checked, which ajv does not do itself, and typed as any other property", async () => {
+  // ajv skips the key in `properties` and `patternProperties` and read a value's own `__proto__` as an additional property, so it
+  // accepted `{ "__proto__": "foo" }` for `{ "type": "number" }` (the Test Suite's properties.json [5]); the copy ajv compiles
+  // checks it under `patternProperties` too. Each schema written as text: in an object literal, `__proto__` would set the prototype.
   const cases = [
-    ['{ "type": "object", "properties": { "__proto__": { "type": "string" }, "a": { "type": "number" } }, "required": ["__proto__"] }', /\n  a\?: number \| undefined;\n  __proto__: unknown;\n  \[key: string\]: unknown;\n/, [['{ "__proto__": 1 }', true], ['{ "__proto__": "x" }', true], ["{}", false]]],
-    ['{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "additionalProperties": false }', /\{\n  \[key: string\]: never;\n\}/, [['{ "__proto__": "x" }', false], ["{}", true]]],
-    ['{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "required": ["__proto__"], "additionalProperties": { "type": "number" } }', /\n  __proto__: number;\n  \[key: string\]: number;\n/, [['{ "__proto__": 1 }', true], ['{ "__proto__": "x" }', false]]],
+    ['{ "type": "object", "properties": { "__proto__": { "type": "string" }, "a": { "type": "number" } }, "required": ["__proto__"] }', /\n  __proto__: string;\n  a\?: number \| undefined;\n  \[key: string\]: unknown;\n/, [['{ "__proto__": 1 }', false], ['{ "__proto__": "x" }', true], ["{}", false]]],
+    ['{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "additionalProperties": false }', /\{\n  __proto__\?: string \| undefined;\n\}/, [['{ "__proto__": "x" }', true], ['{ "__proto__": 1 }', false], ["{}", true], ['{ "b": 1 }', false]]],
+    ['{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "required": ["__proto__"], "additionalProperties": { "type": "number" } }', /\n  __proto__: string;\n  \[key: string\]: number \| string;\n/, [['{ "__proto__": 1 }', false], ['{ "__proto__": "x", "b": 1 }', true]]],
+    // A pattern `__proto__`, which ajv skipped too, matches every key that holds it.
+    ['{ "type": "object", "patternProperties": { "__proto__": { "type": "string" } } }', /\n  \[key: string\]: unknown;\n/, [['{ "__proto__": 1 }', false], ['{ "x__proto__y": 1 }', false], ['{ "__proto__": "s" }', true]]],
   ] as const;
   for (const [source, type, verdicts] of cases) {
     const typed = schemaTypes(source, PATH);
@@ -350,11 +359,11 @@ test("a __proto__ key in properties, which ajv does not check, is typed as a key
     const { default: s } = await evaluate(code);
     for (const [value, verdict] of verdicts) assert.equal(s.is(JSON.parse(value)), verdict, `${source} on ${value}`);
   }
-  // An `if` that tests the key tests nothing in ajv, so the type does not narrow on it.
+  // An `if` that tests the key's value tests it, so the type narrows on it as on any listed property.
   const conditional = '{ "type": "object", "properties": { "__proto__": { "enum": ["a", "b"] } }, "required": ["__proto__"], "if": { "properties": { "__proto__": { "const": "a" } } }, "then": { "required": ["t"] } }';
-  assert.match(schemaTypes(conditional, PATH).types, /\ninterface User \{\n  __proto__: unknown;\n  \[key: string\]: unknown;\n\}/);
+  assert.match(schemaTypes(conditional, PATH).types, /\ntype User = \{\n  __proto__: "a" \| "b";\n  \[key: string\]: unknown;\n\} & \(\(\{ __proto__: "a" \} & \{\n  t: unknown;/);
   const { default: c } = await evaluate(schemaCode(conditional, PATH).code);
-  assert.equal(c.is(JSON.parse('{ "__proto__": "b" }')), false);
+  assert.deepEqual(['{ "__proto__": "b" }', '{ "__proto__": "a" }', '{ "__proto__": "a", "t": 1 }'].map((value) => c.is(JSON.parse(value))), [true, false, true]);
 });
 
 test("a byte order mark at the start of a file is read past in both dialects, under the preload and in an esbuild bundle, and a problem's place counts it", async () => {
@@ -689,11 +698,12 @@ test("a 2020-12 $dynamicRef ajv resolves to the root in place of its anchor is a
   const S = "https://json-schema.org/draft/2020-12/schema";
   const message = (ref: string, fix: string) => `ajv resolves the $dynamicRef "${ref}" to the root of its schema, not where it points: ${fix}.`;
   const anchored = (name: string) => `declare "$dynamicAnchor": "${name}" at the root of the schema, or write it as a $ref`;
-  // The anchor in `$defs`: the validator checked the root's rules, and at the root recursed until the stack ran out.
+  // The anchor in `$defs`, and another of its name in another schema resource, so that the reference is dynamic: the
+  // validator checked the root's rules, and at the root recursed until the stack ran out.
+  const other = { $id: "https://example.com/other", $dynamicAnchor: "content" };
   for (const [schema, ref, fix] of [
-    [{ $schema: S, $defs: { content: { $dynamicAnchor: "content", type: "string" } }, type: "array", items: { $dynamicRef: "#content" } }, "#content", anchored("content")],
-    [{ $schema: S, $defs: { s: { $dynamicAnchor: "s", type: "string" } }, $dynamicRef: "#s" }, "#s", anchored("s")],
-    [{ $schema: S, $defs: { s: { type: "string" } }, type: "array", items: { $dynamicRef: "#/$defs/s" } }, "#/$defs/s", "write it as a $ref"],
+    [{ $schema: S, $defs: { content: { $dynamicAnchor: "content", type: "string" }, other }, type: "array", items: { $dynamicRef: "#content" } }, "#content", anchored("content")],
+    [{ $schema: S, $defs: { content: { $dynamicAnchor: "content", type: "string" }, other }, $dynamicRef: "#content" }, "#content", anchored("content")],
   ] as const) {
     const source = JSON.stringify(schema, null, 2);
     for (const problems of [schemaTypes(source, PATH).problems, schemaCode(source, PATH).problems]) {
@@ -713,16 +723,100 @@ test("a 2020-12 $dynamicRef ajv resolves to the root in place of its anchor is a
   // Inside an $id whose root declares no such anchor, the problem is placed at the $id: ajv resolves the reference by where it compiles the schema.
   const elsewhere = JSON.stringify({ $schema: S, $dynamicAnchor: "node", $defs: { tree: { $id: "https://example.com/tree", items: { $dynamicRef: "#node" } } }, $ref: "https://example.com/tree" });
   assert.deepEqual(schemaCode(elsewhere, PATH).problems.map((p) => [p.message, elsewhere.slice(p.start, p.start + p.length)]), [[`ajv resolves the $dynamicRef "#node" inside the schema whose $id is "https://example.com/tree" by where it compiles that schema, not against the $id: declare "$dynamicAnchor": "node" at the schema whose $id is "https://example.com/tree", or write it as a $ref.`, "https://example.com/tree"]]);
-  // 2019-09's $recursiveRef "#" inside an $id whose root has no "$recursiveAnchor": true, which ajv sent to the root's anchor (the Test Suite's recursiveRef.json [5]).
+  // 2019-09's $recursiveRef "#" inside an $id whose root has no "$recursiveAnchor": true, which ajv sent to the root's anchor
+  // (the Test Suite's recursiveRef.json [5]), was refused until 2026-10-27; it is a $ref to that $id's schema since.
   const recursive = JSON.stringify({ $schema: "https://json-schema.org/draft/2019-09/schema", $recursiveAnchor: true, additionalProperties: { $id: "https://example.com/inner", additionalProperties: { $recursiveRef: "#" } } });
-  assert.deepEqual(schemaTypes(recursive, PATH).problems.map((p) => [p.message, recursive.slice(p.start, p.start + p.length)]), [[`ajv resolves the $recursiveRef "#" inside the schema whose $id is "https://example.com/inner" by where it compiles that schema, not against the $id: declare "$recursiveAnchor": true beside that $id, or write a $ref to it.`, "https://example.com/inner"]]);
+  assert.deepEqual(schemaTypes(recursive, PATH).problems, []);
   // In another file, placed at the root's reference to it; in draft-07, which ignores $dynamicRef, no problem.
   const { path, source } = project({
-    "user.schema.jsonc": { $schema: S, type: "object", properties: { list: { $ref: "./list.schema.jsonc" } } },
+    "user.schema.jsonc": { $schema: S, type: "object", properties: { list: { $ref: "./list.schema.jsonc" } }, $defs: { item: { $dynamicAnchor: "item" } } },
     "list.schema.jsonc": { $defs: { item: { $dynamicAnchor: "item" } }, type: "array", items: { $dynamicRef: "#item" } },
   });
   assert.deepEqual(schemaTypes(source, path).problems.map((p) => [p.message, source.slice(p.start, p.start + p.length)]), [[`./list.schema.jsonc: ${message("#item", anchored("item"))}`, "./list.schema.jsonc"]]);
   assert.deepEqual(schemaCode(JSON.stringify({ type: "array", items: { $dynamicRef: "#item" } }), PATH).problems, []);
+});
+
+test("a $dynamicRef that resolves as a $ref would, and 2019-09's $recursiveRef to a resource without its anchor, are $refs, in the types and the validator", async () => {
+  const S = "https://json-schema.org/draft/2020-12/schema";
+  const S19 = "https://json-schema.org/draft/2019-09/schema";
+  for (const [schema, type, valid, invalid] of [
+    // A JSON Pointer, an $anchor, and the one $dynamicAnchor of its name (the Test Suite's dynamicRef.json [4], [1], [0]), each refused until 2026-10-27.
+    [{ $schema: S, type: "array", items: { $dynamicRef: "#/$defs/s" }, $defs: { s: { type: "string" } } }, /\ntype User = S\[\];\n/, [["a"]], [[1]]],
+    [{ $schema: S, type: "array", items: { $dynamicRef: "#s" }, $defs: { s: { $anchor: "s", type: "string" } } }, /\ntype User = S\[\];\n/, [["a"]], [[1]]],
+    [{ $schema: S, type: "array", items: { $dynamicRef: "#s" }, $defs: { s: { $dynamicAnchor: "s", type: "string" } } }, /\ntype User = S\[\];\n/, [["a"]], [[1]]],
+    // The schema it first resolves to declares no $dynamicAnchor of its name (dynamicRef.json [7]): a $ref, though the root declares one.
+    [{ $schema: S, $id: "https://example.com/root", $ref: "list", $defs: { foo: { $dynamicAnchor: "items", type: "string" }, list: { $id: "list", type: "array", items: { $dynamicRef: "#items" }, $defs: { items: { $anchor: "items", type: "number" } } } } }, /\ntype User = List;\n/, [[1]], [["a"]]],
+    // Beside a $ref already there, in allOf.
+    [{ $schema: S, type: "array", items: { $ref: "#/$defs/n", $dynamicRef: "#/$defs/s" }, $defs: { n: { maxLength: 1 }, s: { type: "string" } } }, /\ntype User = \(N & S\)\[\];\n/, [["a"]], [["ab"], [1]]],
+    // 2019-09: "$recursiveAnchor": false at the inner resource (recursiveRef.json [3]), and none at all (recursiveRef.json [5]).
+    [{ $schema: S19, $id: "https://example.com/base.json", $recursiveAnchor: true, anyOf: [{ type: "boolean" }, { type: "object", additionalProperties: { $id: "https://example.com/inner.json", $recursiveAnchor: false, anyOf: [{ type: "integer" }, { type: "object", additionalProperties: { $recursiveRef: "#" } }] } }] }, /\ntype User = /, [{ foo: { bar: 1 } }], [{ foo: true }, { foo: { bar: true } }]],
+  ] as const) {
+    const source = JSON.stringify(schema, null, 2);
+    const typed = schemaTypes(source, PATH);
+    assert.deepEqual(typed.problems, []);
+    assert.match(typed.types, type);
+    const { code, problems } = schemaCode(source, PATH);
+    assert.deepEqual(problems, []);
+    const { default: s } = await evaluate(code);
+    for (const value of valid) assert.equal(s.is(value), true, JSON.stringify(value));
+    for (const value of invalid) assert.equal(s.is(value), false, JSON.stringify(value));
+  }
+});
+
+test("ajv's keywords that give another verdict than the spec are ajv's own with the fault taken out: an empty enum, an if's evaluated keys, unevaluatedItems after a branch, contains", async () => {
+  const S = "https://json-schema.org/draft/2020-12/schema";
+  const S19 = "https://json-schema.org/draft/2019-09/schema";
+  const build = async (schema: object) => {
+    const { code, problems } = schemaCode(JSON.stringify(schema), PATH);
+    assert.deepEqual(problems, []);
+    assert.deepEqual(schemaTypes(JSON.stringify(schema), PATH).problems, []);
+    return (await evaluate(code)).default;
+  };
+  const verdicts = async (schema: object, values: unknown[]) => {
+    const s = await build(schema);
+    return values.map((value) => {
+      const verdict = s.is(value);
+      assert.equal(s.validate(value).issues === undefined, verdict, JSON.stringify(value));
+      return verdict;
+    });
+  };
+  for (const draft of [S19, S]) {
+    // An empty enum accepts nothing (enum.json [14]): ajv refused the schema, "enum must have non-empty array". The issue is an enum's,
+    // in the place ajv's enum had among the keywords.
+    assert.deepEqual(await verdicts({ $schema: draft, type: "object", properties: { a: { enum: [] } } }, [{}, { a: 1 }, { a: null }]), [true, false, false]);
+    const empty = await build({ $schema: draft, type: "object", properties: { a: { enum: [] }, b: { minLength: 2, enum: ["x"] } } });
+    assert.deepEqual(empty.validate({ a: 1, b: "y" }).issues.map((issue: { path: unknown[]; keyword: string }) => [issue.path, issue.keyword]), [[["a"], "enum"], [["b"], "enum"], [["b"], "minLength"]]);
+    // An if's keys are evaluated where it passes, and only there, then or else beside it or not (unevaluatedProperties.json [15], [39]).
+    const elseOnly = { $schema: draft, if: { properties: { foo: { const: "then" } }, required: ["foo"] }, else: { properties: { baz: { type: "string" } }, required: ["baz"] }, unevaluatedProperties: false };
+    assert.deepEqual(await verdicts(elseOnly, [{ foo: "then" }, { foo: "then", bar: "bar" }, { baz: "baz" }, { foo: "else", baz: "baz" }]), [true, false, true, false]);
+    assert.deepEqual(await verdicts({ $schema: draft, if: { patternProperties: { foo: { type: "string" } } }, unevaluatedProperties: false }, [{ foo: "a" }, { bar: "a" }]), [true, false]);
+    // unevaluatedItems after a branch that evaluated every item, or none (unevaluatedItems.json [8], 2019-09's [9]).
+    assert.deepEqual(await verdicts({ $schema: draft, unevaluatedItems: { type: "boolean" }, anyOf: [{ items: { type: "string" } }, true] }, [[true, false], ["yes", "no"], ["yes", false]]), [true, true, false]);
+  }
+  assert.deepEqual(await verdicts({ $schema: S, if: { prefixItems: [{ const: "a" }] }, unevaluatedItems: false }, [["a"], ["b"]]), [true, false]);
+  assert.deepEqual(await verdicts({ $schema: S19, if: { items: [{ const: "a" }] }, unevaluatedItems: false }, [["a"], ["b"]]), [true, false]);
+  // 2019-09's contains evaluates no item; 2020-12's, those it matched (unevaluatedItems.json [21], [22], [24]), beside unevaluatedItems or in its allOf.
+  assert.deepEqual(await verdicts({ $schema: S19, items: [true], contains: { type: "string" }, unevaluatedItems: false }, [["a"], ["a", "b"], [1, "b"]]), [true, false, false]);
+  assert.deepEqual(await verdicts({ $schema: S, prefixItems: [true], contains: { type: "string" }, unevaluatedItems: false }, [[1, "foo"], [1, 2], [1, 2, "foo"]]), [true, false, false]);
+  assert.deepEqual(await verdicts({ $schema: S, allOf: [{ contains: { multipleOf: 2 } }, { contains: { multipleOf: 3 } }], unevaluatedItems: { multipleOf: 5 } }, [[2, 3, 4, 5, 6], [2, 3, 4, 7, 8]]), [true, false]);
+  assert.deepEqual(await verdicts({ $schema: S, contains: { type: "string" }, minContains: 0, unevaluatedItems: false }, [[], [0], ["foo", 0], ["foo", "bar"]]), [true, false, false, true]);
+  const counted = await build({ $schema: S, prefixItems: [true], contains: { type: "string" }, unevaluatedItems: false });
+  // The issue is the item's: what it must be to be evaluated, where ajv's unevaluatedItems said "must NOT have more than 1 items".
+  assert.deepEqual(counted.validate([1, "a", 2]).issues, [{ message: "must be string", path: [2], keyword: "type" }]);
+  assert.deepEqual(counted.schema, { $schema: S, prefixItems: [true], contains: { type: "string" }, unevaluatedItems: false });
+  // A contains that may not have run, in an if, a then, anyOf or behind a $ref, is refused at the unevaluatedItems (unevaluatedItems.json [23]).
+  const message = (inside: string) => `ajv takes every item as evaluated for the "unevaluatedItems" at # once a "contains" is beside it, where 2020-12 counts only the items "contains" matched; dotschema counts those for a "contains" beside the "unevaluatedItems" or in its "allOf", and the "contains" at #${inside} is not. Move that "contains" beside the "unevaluatedItems", or into its "allOf".`;
+  for (const [schema, inside] of [
+    [{ $schema: S, if: { contains: { const: "a" } }, then: { if: { contains: { const: "b" } } }, unevaluatedItems: false }, "/if"],
+    [{ $schema: S, anyOf: [{ contains: { const: "a" } }, true], unevaluatedItems: false }, "/anyOf/0"],
+    [{ $schema: S, $ref: "#/$defs/c", unevaluatedItems: false, $defs: { c: { contains: { const: "a" } } } }, "/$ref"],
+  ] as const) {
+    const source = JSON.stringify(schema);
+    for (const problems of [schemaTypes(source, PATH).problems, schemaCode(source, PATH).problems]) assert.deepEqual(problems.map((p) => [p.message, source.slice(p.start, p.start + p.length)]), [[message(inside), "unevaluatedItems"]]);
+  }
+  // 2019-09, where contains evaluates nothing, and a contains under not, whose annotations are dropped, are not refused.
+  await verdicts({ $schema: S19, anyOf: [{ contains: { const: "a" } }, true], unevaluatedItems: false }, [[]]);
+  assert.deepEqual(await verdicts({ $schema: S, not: { contains: { const: "a" } }, unevaluatedItems: { type: "string" } }, [[], ["b"], [1]]), [true, true, false]);
 });
 
 test("an $id below a file's root begins a schema resource: a $ref inside it resolves against the $id, in the types and the validator, as ajv resolves it", async () => {

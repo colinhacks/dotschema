@@ -67,6 +67,46 @@ test("const, enum, combinators, and the keywords that only narrow", () => {
   assert.equal(emit({ type: "string", nullable: true }), "export type Type = string;");
 });
 
+test("a `not` whose schema accepts every value, and an empty enum, are never; every other `not` leaves the type as it is", async () => {
+  // The maintainer, 2026-10-27: "never should include { not: {} }".
+  assert.equal(emit({ not: {} }), "export type Type = never;");
+  assert.equal(emit({ not: true }), "export type Type = never;");
+  assert.equal(emit({ not: { title: "Anything", $comment: "c" } }), "export type Type = never;");
+  assert.equal(emit({ type: "object", properties: { a: { not: {} }, b: { type: "string" } } }), "export interface Type {\n  a?: undefined;\n  b?: string | undefined;\n  [key: string]: unknown;\n}");
+  assert.equal(emit({ anyOf: [{ type: "string" }, { not: {} }] }), "export type Type = string;");
+  assert.equal(emit({ not: { type: "string" } }), "export type Type = unknown;");
+  assert.equal(emit({ not: false }), "export type Type = unknown;");
+  assert.equal(emit({ type: "string", not: { "x-vendor": 1 } }), "export type Type = string;");
+  // 2019-09 and 2020-12 allow an empty enum, which ajv refused until 2026-10-27; it accepts no value.
+  assert.equal(schemaDeclarations({ enum: [] } as never, undefined, "2020-12"), "export type Type = never;");
+  const S = "https://json-schema.org/draft/2020-12/schema";
+  const counts = await agrees([
+    { schema: { $schema: S, type: "object", properties: { a: { not: {} }, b: { enum: [] }, c: { not: true } } }, samples: [{}, { a: 1 }, { b: null }, { c: "" }, { d: 1 }] },
+    { schema: { not: {} }, samples: [null, 0, "", [], {}] },
+    { schema: { $schema: "https://json-schema.org/draft/2019-09/schema", enum: [] }, samples: [null, 0, "", [], {}] },
+  ]);
+  assert.deepEqual(counts, [2, 0, 0]);
+});
+
+test("an optional property named for a member of TypeScript's Object admits that member's type, which a value without its own has", async () => {
+  // TypeScript gives `{}` Object's `toString` and `constructor`, so `{}` was not assignable to `toString?: { length?: string }` (TS2322),
+  // though the validator, which reads the value's own properties, accepts it (the Test Suite's properties.json [5]).
+  const schema = { type: "object", properties: { toString: { type: "object", properties: { length: { type: "string" } } }, constructor: { type: "number" }, valueOf: { type: "string" } }, required: ["valueOf"] };
+  assert.equal(
+    emit(schema),
+    'export interface Type {\n  toString?: {\n    length?: string | undefined;\n    [key: string]: unknown;\n  } | globalThis.Object["toString"] | undefined;\n  constructor?: number | globalThis.Object["constructor"] | undefined;\n  valueOf: string;\n  [key: string]: unknown;\n}',
+  );
+  const counts = await agrees([
+    {
+      schema,
+      samples: [{ valueOf: "v" }, { valueOf: "v", toString: { length: "x" }, constructor: 1 }, { valueOf: "v", toString: { length: 1 } }, {}],
+      // A definition named `object` is `Object`, which the global's members are not read from.
+      use: "type Object = { shadow: true };\n// @ts-expect-error: a number is not a toString\nexport const n: Type = { valueOf: \"v\", toString: 1 };",
+    },
+  ]);
+  assert.deepEqual(counts, [2]);
+});
+
 test("with a draft, a keyword is read only in the drafts that have it, as ajv reads it", () => {
   const tuple = { type: "array", prefixItems: [{ type: "string" }], items: [{ type: "number" }], additionalItems: false };
   assert.equal(schemaDeclarations(tuple as never, undefined, "2020-12"), "export type Type = [string?, ...unknown[]];");

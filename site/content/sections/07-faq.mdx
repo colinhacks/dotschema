@@ -50,9 +50,9 @@ Each of these is an error at the type check:
 | Refused | Instead |
 | --- | --- |
 | A `$ref` to a URL (`https:`, `urn:`) | Save the schema as a `.schema.jsonc` file in the project, and `$ref` the file |
-| A `$dynamicRef` to an anchor below the root, or to a pointer | Write it as a `$ref` |
+| A `$dynamicRef` to an anchor that two schema resources declare, when its own resource's root does not | Declare the anchor at the root of its resource, or write a `$ref` |
+| In 2020-12, a `contains` that an `unevaluatedItems` sees through `anyOf`, `oneOf`, a conditional, `dependentSchemas` or a `$ref` | Move the `contains` beside the `unevaluatedItems`, or into its `allOf` |
 | An `$anchor` at a file's root, or inside `prefixItems` | Write `"#"`, or the pointer, in the `$ref` |
-| An empty `enum` | Write `false` |
 | A draft-04 or draft-03 schema | Declare draft-06 or a later draft in `$schema` |
 
 </Accordion>

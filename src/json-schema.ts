@@ -157,8 +157,15 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
   // An `$id` below a file's root begins a schema resource of its own (refs.ts), which the dynamic
   // scope of a `$dynamicRef` follows (2020-12 core 7.1): one document without those `$id`s would
   // resolve it otherwise, so 2020-12 refuses such an `$id` in a schema that uses one.
+  // A `$dynamicRef` or `$recursiveRef` that resolves as a `$ref` would is one already (refs.ts's
+  // `staticReferences`); where none is left, a `$dynamicAnchor` is a plain anchor and a
+  // `$recursiveAnchor` does nothing.
   let dynamic = false;
-  for (const schema of files.schemas.values()) dynamic ||= uses(schema, "$dynamicRef") || uses(schema, "$dynamicAnchor");
+  let recursive = false;
+  for (const schema of files.schemas.values()) {
+    dynamic ||= uses(schema, "$dynamicRef");
+    recursive ||= uses(schema, "$recursiveRef");
+  }
 
   let file = rootPath;
   let rootContainer: Out | undefined;
@@ -209,8 +216,9 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
           break;
         case "$dynamicAnchor":
           if (typeof value !== "string") break;
-          if (draft === "draft-07") {
-            // ajv reads it as a plain anchor in every draft (its resolve.js), and draft-07 has no dynamic scope.
+          if (draft === "draft-07" || !dynamic) {
+            // ajv reads it as a plain anchor in every draft (its resolve.js); draft-07 has no dynamic
+            // scope, and without a `$dynamicRef` none reads it.
             names.push(value);
           } else if (to07) refuse(keyword, "has no equivalent in draft-07.");
           else if (multiFile) refuse(keyword, "resolves through the schema files it was written across, which one document does not keep apart.");
@@ -233,6 +241,7 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
           break;
         case "$recursiveRef":
         case "$recursiveAnchor":
+          if (keyword === "$recursiveAnchor" && !recursive) break;
           refuse(keyword, to07 ? "has no equivalent in draft-07." : `is 2019-09's, and 2020-12's "$dynamicRef" and "$dynamicAnchor", which replaced it, do not resolve the same way.`);
           break;
         case "$defs":
@@ -278,6 +287,13 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
       }
     }
 
+    // An empty `enum` accepts nothing; 2019-09 and 2020-12 allow it, and draft-07's meta-schema
+    // requires at least one value (validation 6.1.2), so draft-07 says it as `not: {}`.
+    if (to07 && Array.isArray(result["enum"]) && result["enum"].length === 0) {
+      delete result["enum"];
+      if (has(result, "not")) result["allOf"] = [...(Array.isArray(result["allOf"]) ? result["allOf"] : []), { not: {} }];
+      else result["not"] = {};
+    }
     if (names.length) {
       // The root file keeps its first anchor in the target's spelling; every reference to an anchor
       // becomes a pointer, so another file's anchors, and those of a resource an `$id` below the root

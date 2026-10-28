@@ -214,8 +214,14 @@ type Document = { schema: Value; path: string | undefined; rootName: string; nam
  */
 const EVALUATING = ["allOf", "anyOf", "oneOf", "if", "then", "else", "dependentSchemas", "$ref", "$dynamicRef", "$recursiveRef"];
 
+/** The members of TypeScript's `Object` interface (lib.es5.d.ts), which TypeScript takes every object to have. */
+const OBJECT_MEMBERS = new Set(["constructor", "toString", "toLocaleString", "valueOf", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable"]);
+
 /** The keywords that annotate a value and say nothing about which values pass. */
 const ANNOTATIONS = ["$comment", "title", "description", "default", "examples", "deprecated", "readOnly", "writeOnly"];
+
+/** Whether a schema accepts every value as written: `true`, or an object of annotations alone (`{}`, `{ "title": "Anything" }`). */
+const acceptsEvery = (schema: Value | undefined): boolean => schema === true || (isObj(schema) && Object.keys(schema).every((key) => ANNOTATIONS.includes(key)));
 
 /**
  * How an object under `unevaluatedProperties` is closed (`closingOf`): the keys a part of it that
@@ -268,8 +274,6 @@ function propertyTest(test: Value | undefined): { key: string; values: Primitive
   const keys = isObj(test["properties"]) ? Object.keys(test["properties"]) : [];
   if (keys.length !== 1) return undefined;
   const key = keys[0]!;
-  // ajv does not test a `__proto__` key in `properties`, so the `if` does not test the value.
-  if (key === "__proto__") return undefined;
   if (test["required"] !== undefined && !(Array.isArray(test["required"]) && test["required"].every((name) => name === key))) return undefined;
   const values = literalsOf((test["properties"] as Obj)[key], true);
   return values && { key, values };
@@ -372,6 +376,8 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     if (schema["type"] !== undefined) keep((typeof schema["type"] === "string" ? [schema["type"]] : strings(schema["type"])).map(jsonType));
     if (Object.hasOwn(schema, "const")) keep([typeOfValue(schema["const"]!)]);
     if (Array.isArray(schema["enum"])) keep(schema["enum"].map(typeOfValue));
+    // A `not` whose schema accepts every value accepts none (`{ "not": {} }`); any other `not` leaves the type as it is.
+    if (Object.hasOwn(schema, "not") && acceptsEvery(schema["not"])) keep([]);
     for (const member of Array.isArray(schema["allOf"]) ? schema["allOf"] : []) keep(possibleTypes(member, seen));
     for (const keyword of ["anyOf", "oneOf"]) {
       const members = schema[keyword];
@@ -433,11 +439,12 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     const lines: string[] = [];
     const valueTypes: string[] = [];
     for (const [key, property] of Object.entries(properties)) {
-      // ajv skips a `__proto__` key in `properties` (`allSchemaProperties`, dist/vocabularies/code.js),
-      // so a value's own `__proto__` is one of the keys the index signature covers, as below.
-      if (key === "__proto__") continue;
-      const type = emit(property, inner);
       const optional = !required.has(key);
+      // TypeScript gives every object the members of its `Object` interface (`toString`, `constructor`),
+      // so `{}` is not assignable to `toString?: { length?: string }` (TS2322, through `toString.length`),
+      // though the validator, which reads the value's own properties, accepts it: an optional property of
+      // such a name admits the member's type too, which a value without its own has.
+      const type = optional && OBJECT_MEMBERS.has(key) ? union([emit(property, inner), `globalThis.Object[${JSON.stringify(key)}]`]) : emit(property, inner);
       valueTypes.push(type, ...(optional ? ["undefined"] : []));
       // An optional property may hold `undefined`, which the validator passes as absent. Its `?`
       // says so unless the project turns on `exactOptionalPropertyTypes`, so `| undefined` is written
@@ -451,7 +458,7 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     // pattern matches it (all of them apply, so their union admits it), or of `additionalProperties`
     // when none does: it is one of the keys the index signature covers.
     for (const key of required) {
-      if (Object.hasOwn(properties, key) && key !== "__proto__") continue;
+      if (Object.hasOwn(properties, key)) continue;
       const matching = patterns.filter((pattern) => pattern.test(key) !== false);
       const type = matching.length ? union(matching.map((pattern) => pattern.type)) : additionalType;
       // A pattern that cannot be read here may not match: the key may be an additional one too.
@@ -621,7 +628,6 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       if (Object.hasOwn(part, "$dynamicRef") || Object.hasOwn(part, "$recursiveRef")) open = true;
       if (part !== schema && isObj(part["patternProperties"]) && Object.keys(part["patternProperties"]).length) open = true;
       for (const [key, property] of Object.entries(isObj(part["properties"]) ? part["properties"] : {})) {
-        if (key === "__proto__") continue;
         if (!inPlace) keys.add(key);
         else if (index) index.push(emit(property, inner));
       }
