@@ -3,8 +3,9 @@ import type { ReactNode } from 'react';
 /*
  * The Inference section's cards, Reylo's (its components/inferred.tsx) without the dialect switch: a
  * schema and the type dotschema gives it, in one card of labelled rows, Schema and Type, both visible
- * at once. The page writes `<Inferred>` around a schema block; lib/remark-schemas.ts fills the Type
- * row with the declaration the mapper's module holds for the schema, so a card cannot go stale.
+ * at once. The page writes `<Inferred>` around a titled schema block; lib/remark-schemas.ts takes the
+ * title off, the Schema label standing for it, and fills the Type row with the type the mapper's
+ * module holds for the schema, the root as its bare type, so a card cannot go stale.
  */
 
 /** The card. */

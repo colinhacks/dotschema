@@ -20,7 +20,8 @@
    #f4f4f2 by day and #f4f4f5 on #0b0b0c by night; the mark is a solid stamp in
    the headings' ink (lib/mark.ts), links are heavy ink underlines, the title is
    huge and tight, and colour is left to the code, where Zod's blue carries the
-   keywords (lib/mdx-options.ts). Every bold stroke is one width and one ink,
+   keywords and a schema's keys, strings and numbers have colours of their own
+   (lib/code-theme.ts). Every bold stroke is one width and one ink,
    `--dotschema-rule`: the title's and each section's rule, the table of
    contents' marker, a callout's bar, the active tab's rule and a link's
    underline ("Make sure that all the bold borders are consistent everywhere");
@@ -88,8 +89,17 @@
   --color-fd-error: hsl(2, 70%, 68%);
 }
 
-/* The grain lies on the page itself, so the columns that scroll over it keep it. */
-body {
+/* The grain lies under the page and stays put while it scrolls (the maintainer, 2026-10-27: "seems
+   like the bg texture should be fixed, not scrolling"): a layer fixed to the viewport behind the
+   body's content, which the browser composites once and moves nothing on a scroll, where
+   `background-attachment: fixed` repaints the whole background each frame. The columns over it
+   have no ground of their own, so they keep it. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background-image: var(--dotschema-grain);
 }
 
@@ -131,6 +141,15 @@ html .prose h3 {
   font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: -0.035em;
+}
+
+/* The FAQ's questions, docs-kit's accordions, are headings in the prose, which the rule above set
+   bold and large; they are set at the weight of a label, a size over the text (the maintainer,
+   2026-10-27: "the FAQ questions shoujldn't be so bold"). */
+#nd-page .dk-accordions > [data-state] > h3 {
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 
 /* Links: the text's colour, a heavy ink underline. */
@@ -188,21 +207,34 @@ html #nd-page .prose :where(code):not(:where(pre code)),
   border-radius: var(--dotschema-radius);
 }
 
-/* Twoslash's popups, the pinned type cards and the pinned error cards are the ink, by day and by
-   night: a dark card on the light page and a light one on the dark page, each painting its code in
-   the other theme's colours. */
+/* Twoslash's popups, the pinned type cards and the pinned error cards. By day they are the ink, a
+   dark card on the light page painting its code in the night's colours; by night a raised card a
+   step lighter than the code block (#1c1c1e on #121213 and the page's #0b0b0c) with the hairline
+   border, painting its code in the night's own colours, where until 2026-10-27 they were a
+   near-white card, the maintainer: "the white twoslash popover is pretty agressive in dark
+   mode...fix". Each card's arrow, Fumadocs' diamond, takes the card's ground and edge. */
 .fd-twoslash-popover,
 #nd-page :is(.twoslash-query-line, .dk-error-line) .twoslash-popup-container {
-  background: var(--dotschema-ink);
-  border-color: var(--dotschema-ink);
+  --dotschema-popup: var(--dotschema-ink);
+  --dotschema-popup-edge: var(--dotschema-ink);
+  background: var(--dotschema-popup);
+  border-color: var(--dotschema-popup-edge);
+}
+
+#nd-page :is(.twoslash-query-line, .dk-error-line) .twoslash-popup-arrow {
+  background: var(--dotschema-popup);
+  border-color: var(--dotschema-popup-edge);
+}
+
+html:not(.dark) :is(.fd-twoslash-popover, #nd-page :is(.twoslash-query-line, .dk-error-line) .twoslash-popup-container) {
   color: var(--color-fd-background);
 }
 
-#nd-page figure.shiki .dk-error-text .dk-error-message {
+html:not(.dark) #nd-page figure.shiki .dk-error-text .dk-error-message {
   color: var(--color-fd-background);
 }
 
-#nd-page figure.shiki .dk-error-text .dk-error-source {
+html:not(.dark) #nd-page figure.shiki .dk-error-text .dk-error-source {
   color: color-mix(in srgb, var(--color-fd-background) 60%, var(--dotschema-ink));
 }
 
@@ -210,26 +242,21 @@ html:not(.dark) :is(.fd-twoslash-popover, .twoslash-query-line .twoslash-popup-c
   color: var(--shiki-dark) !important;
 }
 
-.dark :is(.fd-twoslash-popover, .twoslash-query-line .twoslash-popup-container) .shiki span {
-  color: var(--shiki-light) !important;
-}
-
-.fd-twoslash-popover .twoslash-popup-docs {
+html:not(.dark) .fd-twoslash-popover .twoslash-popup-docs {
   border-top-color: color-mix(in srgb, var(--color-fd-background) 20%, transparent);
   color: color-mix(in srgb, var(--color-fd-background) 70%, var(--dotschema-ink));
 }
 
-/* The code's keywords in Zod's blue (lib/mdx-options.ts) are set a weight heavier. */
-html:not(.dark) .shiki span[style*='--shiki-light:#3060ff' i],
-.dark .shiki span[style*='--shiki-dark:#6f95ff' i] {
-  font-weight: 600;
+.dark :is(.fd-twoslash-popover, #nd-page :is(.twoslash-query-line, .dk-error-line) .twoslash-popup-container) {
+  --dotschema-popup: #1c1c1e;
+  --dotschema-popup-edge: var(--color-fd-border);
+  color: var(--color-fd-popover-foreground);
 }
 
-/* A terminal's red (`ansi` blocks: tsc's "error") is GitHub's dark red, #f97583, which the
-   replacements above take for a keyword; its light twin, #cb2431, tells it apart. */
-.dark .shiki span[style*='--shiki-light:#cb2431' i] {
-  color: #f97583 !important;
-  font-weight: inherit;
+/* The code's keywords in Zod's blue (lib/code-theme.ts) are set a weight heavier. */
+html:not(.dark) .shiki span[style*='--shiki-light:#2b55ee' i],
+.dark .shiki span[style*='--shiki-dark:#6f95ff' i] {
+  font-weight: 600;
 }
 
 /* The theme switch: the chosen theme, Fumadocs' `bg-fd-accent` icon, is a disc of ink. */

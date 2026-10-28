@@ -2,69 +2,85 @@
 // build/client/opengraph-image.png at build time: the page links it as og:image, and as X's image
 // too, with a hash of this file's text in its URL (lib/og.server.ts). The card is drawn here rather
 // than in a module this file imports, so that a change to the card changes the URL and the caches
-// of X and Slack fetch the new card.
+// of X and Slack fetch the new card; so its colours are copied here from app/global.css and
+// lib/code-theme.ts rather than imported.
 //
-// The maintainer's pick of 2026-10-27, 6 of the second round ("Graphite, saber"): a graphite ground,
-// the mark of lib/mark.ts and the name, the tagline as the headline on the left, and on the right
-// the hero's main.ts in a dark editor running off the card's right edge and foot, its edge a blade
-// of light in Zod's blues, as Reylo's mark blooms: a pale core line, a tight bright light round it
-// and a wide far one, and a little of the light inside. The type of `data` after `user.is(data)` sits
-// in the flow under `data;`, as the page's Twoslash query shows it, the mapper's own text, `{ name:
-// string; role?: "admin" | "member"; }`, over four lines, and the `}` closing the `if`
-// follows it; the code and the type are one size ("The font size needs to be the same for both the
-// code and the auto completion", and of the `}` the first round left out, "It's so easy to include
-// it"). No address: the card is the same at any domain. Drawn by @vercel/og's ImageResponse (Satori)
-// in Geist and Geist Mono (assets/fonts, SIL Open Font License), the code in GitHub's dark colours.
-// Satori lays out flex boxes only, so every element with more than one child is a flex box. X lays
-// the domain over the card's bottom-left corner, about 380 × 90 of it on a phone, which the layout
-// leaves empty.
+// Monolith, the site's look, the maintainer's answer of 2026-10-27 to how the card should change
+// with the site: "Redraw it in Monolith". The night page's ink ground, #0b0b0c, under its grain;
+// the mark of lib/mark.ts and the name in its paper, #f4f4f5, the tagline as the headline on the
+// left, its second sentence grey, and the rule of the page's title, 3 pixels of paper, under the
+// name. On the right, two of the page's code blocks in its night colours, running off the card's
+// right edge: behind, the foot of the hero's user.schema.jsonc running off the top, its keys,
+// strings, punctuation and `false` in the site's palette; in front of it the hero's main.ts running
+// off the foot, the type of `data` after
+// `user.is(data)` in the page's pinned query card under `data;`, the mapper's text for it over four
+// lines, then the `}` closing the `if`. The code and the type are one size, 27 pixels ("The font size
+// needs to be the same for both the code and the auto completion", and of the `}` the first round
+// left out, "It's so easy to include it"); no address, so the card is the same at any domain
+// (the first card's "drop the URL ... the code block should take up a lot of space ... The text is
+// way too small right now"). It replaces "Graphite, saber", the maintainer's pick of the second
+// round, a graphite ground and an editor edged in a blade of Zod's blues.
+//
+// Drawn by @vercel/og's ImageResponse (Satori) in Geist and Geist Mono (assets/fonts, SIL Open Font
+// License), keywords in Geist Mono 500 as the page sets them heavier. Satori lays out flex boxes
+// only, so every element with more than one child is a flex box. X lays the domain over the card's
+// bottom-left corner, about 380 × 90 of it on a phone, which the layout leaves empty.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ReactNode } from 'react';
 import { markColor, markSvgIn } from '@/lib/mark';
 import { ogSize } from '@/lib/og';
 
+/** The night page's colours (app/global.css's `.dark`) and its code's (lib/code-theme.ts). */
 const color = {
-  ground: '#121212',
-  ink: '#ffffff',
-  soft: '#8c8c8c',
-  editor: '#0d1117',
-  bar: '#7d8590',
-  line: '#30363d',
-  type: '#161b22',
-  keyword: '#ff7b72',
-  plain: '#e6edf3',
-  string: '#a5d6ff',
-  func: '#d2a8ff',
-  property: '#79c0ff',
+  ground: '#0b0b0c',
+  paper: '#f4f4f5',
+  soft: '#8a8a8a',
+  block: '#121213',
+  edge: '#2a2a2a',
+  query: '#1c1c1e',
+  text: '#e9e9e9',
+  keyword: '#6f95ff',
+  string: '#6fcf97',
+  number: '#f0a35a',
+  key: '#9db6ff',
+  punctuation: '#8a8a8a',
 };
 
-/** The blade round the editor: the core, a rim this wide, the light outside it and the light inside. */
-const blade = {
-  core: 'linear-gradient(to top, #b9cdff, #eef8ff)',
-  rim: 3.5,
-  outer: '0 0 4px 2px rgba(200,230,255,1), 0 0 12px 5px rgba(69,169,255,.95), 0 0 34px 12px rgba(58,106,255,.75), 0 0 90px 24px rgba(58,106,255,.45)',
-  inner: 'inset 0 0 22px 2px rgba(69,169,255,.45)',
-};
+/** The night page's grain (app/global.css's `--dotschema-grain`), drawn over the card's width. */
+const grain = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="3" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .21 -.07"/></filter><rect width="100%" height="100%" filter="url(#n)"/></svg>`;
 
-type Ink = 'keyword' | 'plain' | 'string' | 'func' | 'property';
+type Ink = 'keyword' | 'text' | 'string' | 'number' | 'key' | 'punctuation';
 type Token = [text: string, ink: Ink];
 
-// The hero's main.ts (content/docs/index.mdx), without its blank lines, to the `}` that closes the `if`.
-const code: Token[][] = [
-  [['import', 'keyword'], [' user ', 'plain'], ['from', 'keyword'], [' "./user.schema.jsonc"', 'string'], [';', 'plain']],
-  [['const', 'keyword'], [' data ', 'plain'], ['=', 'keyword'], [' ', 'plain'], ['await', 'keyword'], [' request.', 'plain'], ['json', 'func'], ['();', 'plain']],
-  [['if', 'keyword'], [' (user.', 'plain'], ['is', 'func'], ['(data)) {', 'plain']],
-  [['  data;', 'plain']],
+// The hero's user.schema.jsonc (content/docs/index.mdx), whose foot the card shows.
+const schema: Token[][] = [
+  [['{', 'punctuation']],
+  [['  ', 'text'], ['"type"', 'key'], [': ', 'punctuation'], ['"object"', 'string'], [',', 'punctuation']],
+  [['  ', 'text'], ['"properties"', 'key'], [': {', 'punctuation']],
+  [['    ', 'text'], ['"name"', 'key'], [': { ', 'punctuation'], ['"type"', 'key'], [': ', 'punctuation'], ['"string"', 'string'], [', ', 'punctuation'], ['"minLength"', 'key'], [': ', 'punctuation'], ['1', 'number'], [' },', 'punctuation']],
+  [['    ', 'text'], ['"role"', 'key'], [': { ', 'punctuation'], ['"enum"', 'key'], [': [', 'punctuation'], ['"admin"', 'string'], [', ', 'punctuation'], ['"member"', 'string'], ['] }', 'punctuation']],
+  [['  },', 'punctuation']],
+  [['  ', 'text'], ['"required"', 'key'], [': [', 'punctuation'], ['"name"', 'string'], ['],', 'punctuation']],
+  [['  ', 'text'], ['"additionalProperties"', 'key'], [': ', 'punctuation'], ['false', 'number']],
+  [['}', 'punctuation']],
 ];
-const close: Token[][] = [[['}', 'plain']]];
+
+// The hero's main.ts, without its blank lines, to the `}` that closes the `if`.
+const code: Token[][] = [
+  [['import', 'keyword'], [' user ', 'text'], ['from', 'keyword'], [' "./user.schema.jsonc"', 'string'], [';', 'text']],
+  [['const', 'keyword'], [' data ', 'text'], ['=', 'keyword'], [' ', 'text'], ['await', 'keyword'], [' request.json();', 'text']],
+  [['if', 'keyword'], [' (user.is(data)) {', 'text']],
+  [['  data;', 'text']],
+];
+const close: Token[][] = [[['}', 'text']]];
 
 // The type of `data` there, as the mapper's module gives it.
 const type: Token[][] = [
-  [['const', 'keyword'], [' data', 'plain'], [': {', 'plain']],
-  [['  name', 'property'], [': ', 'plain'], ['string', 'property'], [';', 'plain']],
-  [['  role', 'property'], ['?: ', 'plain'], ['"admin"', 'string'], [' | ', 'plain'], ['"member"', 'string'], [';', 'plain']],
-  [['}', 'plain']],
+  [['const', 'keyword'], [' data', 'text'], [': {', 'text']],
+  [['  name', 'text'], [': ', 'keyword'], ['string', 'text'], [';', 'text']],
+  [['  role', 'text'], ['?: ', 'keyword'], ['"admin"', 'string'], [' | ', 'keyword'], ['"member"', 'string'], [';', 'text']],
+  [['}', 'text']],
 ];
 
 const MONO = 'Geist Mono';
@@ -72,6 +88,9 @@ const SANS = 'Geist';
 /** The size of the code and of the type, and Geist Mono's advance, in ems. */
 const CODE = 27;
 const ADVANCE = 0.6;
+const RADIUS = 6;
+/** A code line's height, in ems. */
+const LINE = 1.4;
 
 function Lines({ lines, height }: { lines: Token[][]; height: number }) {
   return (
@@ -79,7 +98,7 @@ function Lines({ lines, height }: { lines: Token[][]; height: number }) {
       {lines.map((line, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', whiteSpace: 'pre', height: Math.round(CODE * height) }}>
           {line.map(([text, ink], j) => (
-            <span key={j} style={{ color: color[ink] }}>
+            <span key={j} style={{ color: color[ink], fontWeight: ink === 'keyword' ? 500 : 400 }}>
               {text}
             </span>
           ))}
@@ -89,63 +108,57 @@ function Lines({ lines, height }: { lines: Token[][]; height: number }) {
   );
 }
 
-/** The mark of lib/mark.ts, in the dark page's ink on the graphite ground. */
+/** The mark of lib/mark.ts, in the night page's ink. */
 function Mark({ size }: { size: number }) {
   const src = `data:image/svg+xml;base64,${Buffer.from(markSvgIn(markColor.paper)).toString('base64')}`;
   return <img src={src} width={size} height={size} />;
 }
 
-/** main.ts in an editor, the blade round it, at the card's right, running off its edge and foot. */
-function Editor(): ReactNode {
-  const radius = 18;
-  const bar = Math.round(CODE * 1.6);
-  const padX = Math.round(CODE * 0.5);
-  const padY = Math.round(CODE * 0.35);
-  const { rim } = blade;
+/** A page's code block: a title bar with the file's name over the code, its frame a hairline. */
+function Block({ name, left, top, height, shadow, children }: { name?: string; left: number; top: number; height: number; shadow?: boolean; children: ReactNode }) {
+  const bar = Math.round(CODE * 1.45);
   return (
-    <div style={{ display: 'flex', position: 'absolute', left: 448 - rim, top: 60 - rim, width: 860 + 2 * rim, height: 620 + 2 * rim, padding: rim, borderRadius: radius + rim, backgroundImage: blade.core, boxShadow: blade.outer }}>
-      <div style={{ display: 'flex', position: 'relative', width: '100%', height: '100%' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: color.editor, borderRadius: radius, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: bar, borderBottom: `1.5px solid ${color.line}`, position: 'relative', fontFamily: SANS, fontSize: 16, color: color.bar }}>
-            {['#ff5f57', '#febc2e', '#28c840'].map((dot, i) => (
-              <div key={dot} style={{ position: 'absolute', left: 20 + i * 19, top: Math.round(bar / 2 - 6), width: 12, height: 12, borderRadius: 6, background: dot }} />
-            ))}
-            main.ts
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', paddingTop: Math.round(CODE * 0.7), paddingLeft: Math.round(CODE * 1.05) }}>
-            <Lines lines={code} height={1.5} />
-            <div style={{ display: 'flex', alignSelf: 'flex-start', marginLeft: Math.round(2 * CODE * ADVANCE) - padX, marginTop: 3, marginBottom: 7, padding: `${padY}px ${padX}px`, background: color.type, border: `1.5px solid ${color.line}`, borderRadius: Math.round(CODE * 0.35) }}>
-              <Lines lines={type} height={1.42} />
-            </div>
-            <Lines lines={close} height={1.5} />
-          </div>
-        </div>
-        <div style={{ display: 'flex', position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', borderRadius: radius, boxShadow: blade.inner }} />
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', position: 'absolute', left, top, width: 1200 - left + 40, height, background: color.block, border: `1.5px solid ${color.edge}`, borderRadius: RADIUS, overflow: 'hidden', boxShadow: shadow ? '0 18px 48px -8px rgba(0,0,0,.85)' : 'none' }}>
+      {name && <div style={{ display: 'flex', alignItems: 'center', height: bar, flexShrink: 0, paddingLeft: Math.round(CODE * 1.05), borderBottom: `1.5px solid ${color.edge}`, fontFamily: SANS, fontSize: 19, color: color.soft }}>{name}</div>}
+      <div style={{ display: 'flex', flexDirection: 'column', paddingTop: Math.round(CODE * 0.55), paddingLeft: Math.round(CODE * 1.05) }}>{children}</div>
     </div>
   );
 }
 
 function Card(): ReactNode {
+  const padX = Math.round(CODE * 0.5);
+  const padY = Math.round(CODE * 0.3);
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', position: 'relative', background: color.ground, fontFamily: SANS, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', position: 'absolute', left: 60, top: 54 }}>
-        <Mark size={41} />
-        <div style={{ display: 'flex', marginLeft: 12, fontSize: 36, fontWeight: 600, letterSpacing: -0.7, color: color.ink }}>dotschema</div>
+      <img src={`data:image/svg+xml;base64,${Buffer.from(grain).toString('base64')}`} width={1200} height={630} style={{ position: 'absolute', left: 0, top: 0 }} />
+      <div style={{ display: 'flex', flexDirection: 'column', position: 'absolute', left: 60, top: 52, width: 330 }}>
+        <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 18, borderBottom: `3px solid ${color.paper}` }}>
+          <Mark size={44} />
+          <div style={{ display: 'flex', marginLeft: 13, fontSize: 40, fontWeight: 600, letterSpacing: -1.6, color: color.paper }}>dotschema</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', marginTop: 34, fontSize: 48, fontWeight: 600, lineHeight: 1.12, letterSpacing: -1.9 }}>
+          <div style={{ display: 'flex', color: color.paper }}>Import JSON</div>
+          <div style={{ display: 'flex', color: color.paper }}>Schemas into</div>
+          <div style={{ display: 'flex', color: color.paper }}>TypeScript.</div>
+          <div style={{ display: 'flex', marginTop: 18, color: color.soft }}>Fully typed,</div>
+          <div style={{ display: 'flex', color: color.soft }}>scary fast.</div>
+        </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', position: 'absolute', left: 60, top: 150, fontSize: 50, fontWeight: 600, lineHeight: 1.14, letterSpacing: -1.2 }}>
-        <div style={{ display: 'flex', color: color.ink }}>Import JSON</div>
-        <div style={{ display: 'flex', color: color.ink }}>Schemas into</div>
-        <div style={{ display: 'flex', color: color.ink }}>TypeScript.</div>
-        <div style={{ display: 'flex', marginTop: 20, color: color.soft }}>Fully typed,</div>
-        <div style={{ display: 'flex', color: color.soft }}>scary fast.</div>
-      </div>
-      <Editor />
+      <Block left={500} top={-168} height={400}>
+        <Lines lines={schema} height={LINE} />
+      </Block>
+      <Block name="main.ts" left={430} top={196} height={460} shadow>
+        <Lines lines={code} height={LINE} />
+        <div style={{ display: 'flex', alignSelf: 'flex-start', marginLeft: Math.round(2 * CODE * ADVANCE) - padX, marginTop: 4, marginBottom: 6, padding: `${padY}px ${padX}px`, background: color.query, border: `1.5px solid ${color.edge}`, borderRadius: RADIUS }}>
+          <Lines lines={type} height={1.3} />
+        </div>
+        <Lines lines={close} height={LINE} />
+      </Block>
     </div>
   );
 }
 
-const font = async (file: string, name: string, weight: 400 | 600) => ({
+const font = async (file: string, name: string, weight: 400 | 500 | 600) => ({
   name,
   weight,
   style: 'normal' as const,
@@ -159,6 +172,10 @@ const font = async (file: string, name: string, weight: 400 | 600) => ({
  */
 export async function loader() {
   const { ImageResponse } = await import('@vercel/og');
-  const fonts = await Promise.all([font('Geist-600.ttf', SANS, 600), font('GeistMono-400.ttf', MONO, 400)]);
+  const fonts = await Promise.all([
+    font('Geist-600.ttf', SANS, 600),
+    font('GeistMono-400.ttf', MONO, 400),
+    font('GeistMono-500.ttf', MONO, 500),
+  ]);
   return new ImageResponse(<Card />, { ...ogSize, fonts });
 }

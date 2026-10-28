@@ -194,7 +194,7 @@ An `anyOf` or a `oneOf` is a union:
 
 </Inferred>
 
-A `oneOf` whose variants a `const` tells apart is a union that narrows on it:
+A `oneOf` whose variants a `const` tells apart is a discriminated union:
 
 <Inferred>
 
@@ -224,17 +224,6 @@ A `oneOf` whose variants a `const` tells apart is a union that narrows on it:
 ```
 
 </Inferred>
-
-```ts twoslash title="main.ts"
-declare const input: unknown;
-// ---cut---
-import event from "./event.schema.jsonc";
-
-if (event.is(input) && input.kind === "click") {
-  input;
-//^?
-}
-```
 
 ### Intersections
 
@@ -332,6 +321,83 @@ A `$ref` back into its own file is a type that refers to itself:
 
 </Inferred>
 
+Two schemas of one file that refer to each other are two types that do:
+
+<Inferred>
+
+```jsonc title="person.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "pets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pet" }
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false,
+  "$defs": {
+    "pet": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "owner": { "$ref": "#" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    }
+  }
+}
+```
+
+</Inferred>
+
+### References
+
+A `$ref` can point to another schema file, by a path relative to this one:
+
+```jsonc tab="team.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "members": {
+      "type": "array",
+      "items": { "$ref": "./user.schema.jsonc" }
+    }
+  },
+  "required": ["members"],
+  "additionalProperties": false
+}
+```
+
+```jsonc tab="user.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "role": { "enum": ["admin", "member"] }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}
+```
+
+The type imports the other file's, by its name:
+
+```ts twoslash title="main.ts"
+import team from "./team.schema.jsonc";
+
+type Members = team.Type["members"];
+//   ^?
+```
+
+A `$ref` with a fragment points into the other file, to a definition or an anchor:
+
+```jsonc
+{ "$ref": "./place.schema.jsonc#/$defs/address" }
+```
+
 ### Never
 
 A `false` schema allows no value, so its type is `never`:
@@ -351,61 +417,7 @@ A `false` schema allows no value, so its type is `never`:
 
 </Inferred>
 
-### Doc comments
-
-A `/** */` comment above a property is its doc comment, which an editor shows on hover:
-
-<Inferred>
-
-```jsonc title="user.schema.jsonc"
-{
-  "type": "object",
-  "properties": {
-    /** The name the user signs in with. */
-    "name": { "type": "string", "minLength": 1 },
-    "role": { "enum": ["admin", "member"] }
-  },
-  "required": ["name"],
-  "additionalProperties": false
-}
-```
-
-</Inferred>
-
-A `description` is one too:
-
-<Inferred>
-
-```jsonc title="price.schema.jsonc"
-{
-  "description": "An amount in cents.",
-  "type": "integer",
-  "minimum": 0
-}
-```
-
-</Inferred>
-
-The `deprecated`, `default` and `examples` keywords are tags of the doc comment:
-
-<Inferred>
-
-```jsonc title="subscription.schema.jsonc"
-{
-  "type": "object",
-  "properties": {
-    "plan": {
-      "enum": ["free", "pro"],
-      "default": "free",
-      "examples": ["pro"]
-    },
-    "legacyId": { "type": "string", "deprecated": true }
-  },
-  "additionalProperties": false
-}
-```
-
-</Inferred>
+{/* TODO: add the `{ "not": {} }` case here, a card whose type is `never`, once the types give it `never` (until then they give `unknown`). */}
 
 ### Checks
 
@@ -423,34 +435,123 @@ A keyword no TypeScript type can express leaves the type as it is, and the valid
 
 </Inferred>
 
-### Every keyword
+### Formats
 
-dotschema reads every keyword of draft-06, draft-07, 2019-09 and 2020-12, and the validator checks each one that says something about a value. What each one does to the type:
+Zod's string formats are checked as Zod checks them, `jwt` among them:
 
-| Keyword | The type |
+```jsonc title="session.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "token": { "type": "string", "format": "jwt" }
+  }
+}
+```
+
+```ts twoslash title="main.ts"
+import session from "./session.schema.jsonc";
+
+session.validate({ token: "not a token" });
+// { issues: [{
+//   message: "must match format \"jwt\"",
+//   path: ["token"],
+//   keyword: "format",
+// }] }
+```
+
+JSON Schema's own formats, each passing every 2020-12 format test of the [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite):
+
+| Format | A value it accepts |
 | --- | --- |
-| `type` | Its type, and a list of types a union |
-| `enum`, `const` | A literal type |
-| `properties` | The object's keys |
-| `required` | The keys that are not optional |
-| `additionalProperties` | The type of every other key, and `false` no other key |
-| `patternProperties` | The type of the keys it matches |
-| `unevaluatedProperties` | The type of every key no other keyword evaluates, and `false` no other key |
-| `items` | The type of every item, or of the items after `prefixItems`, and a list of schemas a tuple |
-| `prefixItems` | A tuple |
-| `additionalItems` | The items after a tuple's |
-| `minItems` | The tuple's items that are not optional |
-| `allOf` | An intersection |
-| `anyOf`, `oneOf` | A union |
-| `if`, `then`, `else` | A union of `then` and `else`, when `if` tests a `const` |
-| `$ref` | The type it refers to |
-| `$defs`, `definitions` | A type of its own, exported by its key |
-| `$id` | A URI for a `$ref` to refer to, and the base of each `$ref` inside it |
-| `$anchor`, `$dynamicAnchor` | A name for a `$ref` to refer to |
-| `$dynamicRef`, `$recursiveRef` | `unknown` |
-| `description` | A doc comment |
-| `deprecated` | A `@deprecated` tag, which an editor strikes through |
-| `default`, `examples` | A `@default` tag and an `@example` tag for each, as JSON |
-| `readOnly` | A `readonly` property |
-| `not`, `multipleOf`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `unevaluatedItems`, `minProperties`, `maxProperties`, `propertyNames`, `dependentRequired`, `dependentSchemas`, `dependencies` | Nothing: the validator checks it |
-| `$schema`, `$vocabulary`, `$recursiveAnchor`, `$comment`, `title`, `writeOnly`, `contentEncoding`, `contentMediaType`, `contentSchema` | Nothing |
+| `date-time` | `2026-10-27T09:30:00Z` |
+| `date` | `2026-10-27` |
+| `time` | `09:30:00+01:00` |
+| `duration` | `P1DT12H` |
+| `email` | `ada@example.com` |
+| `idn-email` | `ada@bücher.example` |
+| `hostname` | `api.example.com` |
+| `idn-hostname` | `bücher.example` |
+| `ipv4` | `192.168.0.1` |
+| `ipv6` | `2001:db8::1` |
+| `uri` | `https://example.com/a?b=c` |
+| `uri-reference` | `../a?b=c` |
+| `iri` | `https://bücher.example/straße` |
+| `iri-reference` | `/straße` |
+| `uri-template` | `https://example.com/{user}` |
+| `uuid` | `f81d4fae-7dec-11d0-a765-00a0c91e6bf6` |
+| `json-pointer` | `/properties/name` |
+| `relative-json-pointer` | `1/name` |
+| `regex` | `^[a-z]+$` |
+
+Zod's formats, in kebab case like JSON Schema's own, and by the names `z.toJSONSchema` gives them too (`credit_card`):
+
+| Format | A value it accepts |
+| --- | --- |
+| `jwt` | `eyJhbGciOiJIUzI1NiJ9.e30.c2ln` |
+| `credit-card` | `4242424242424242` |
+| `iban` | `GB82WEST12345698765432` |
+| `base64` | `aGVsbG8=` |
+| `base64url` | `aGVsbG8` |
+| `cidrv4` | `192.168.0.0/24` |
+| `cidrv6` | `2001:db8::/32` |
+| `mac` | `00:1a:2b:3c:4d:5e` |
+| `e164` | `+14155550123` |
+| `emoji` | `🦕` |
+| `nanoid` | `V1StGXR8_Z5jdHi6B-myT` |
+| `cuid` | `cjld2cjxh0000qzrmn831i7rn` |
+| `cuid2` | `tz4a98xxat96iws9zmbrgj3a` |
+| `ulid` | `01ARZ3NDEKTSV4RRFFQ69G5FAV` |
+| `xid` | `9m4e2mr0ui3e8a215n4g` |
+| `ksuid` | `0ujtsYcgvSTl8PAuAdqWYSMnLOv` |
+| `hex` | `deadbeef` |
+| `currency-code` | `USD` |
+| `lowercase` | `dotschema` |
+| `uppercase` | `DOTSCHEMA` |
+| `md5-hex`, `md5-base64`, `md5-base64url` | An MD5 digest, in hex, base64 or base64url |
+| `sha1-hex`, `sha1-base64`, `sha1-base64url` | A SHA-1 digest |
+| `sha256-hex`, `sha256-base64`, `sha256-base64url` | A SHA-256 digest |
+| `sha384-hex`, `sha384-base64`, `sha384-base64url` | A SHA-384 digest |
+| `sha512-hex`, `sha512-base64`, `sha512-base64url` | A SHA-512 digest |
+
+OpenAPI's formats, and four more of ajv-formats':
+
+| Format | A value it accepts |
+| --- | --- |
+| `int32` | `2147483647` |
+| `int64` | `9007199254740991` |
+| `float` | `1.5` |
+| `double` | `1.5` |
+| `byte` | `aGVsbG8=` |
+| `password`, `binary` | Any string: they check nothing |
+| `iso-date-time` | `2026-10-27T09:30:00` |
+| `iso-time` | `09:30:00` |
+| `url` | `https://example.com` |
+| `json-pointer-uri-fragment` | `#/properties/name` |
+
+A format no table names is not checked.
+
+### Unrecognized keywords
+
+A keyword the schema's draft doesn't define is ignored, by the type and by the validator, so a schema written for another validator still compiles:
+
+```jsonc title="account.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "x-internal": true,
+      "tsType": "AccountId"
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}
+```
+
+```ts twoslash title="main.ts"
+import account from "./account.schema.jsonc";
+
+type Id = account.Type["id"];
+//   ^?
+```

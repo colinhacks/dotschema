@@ -1,0 +1,48 @@
+---
+title: "Reference"
+---
+
+## Reference
+
+### Keywords
+
+dotschema reads every keyword of draft-06, draft-07, 2019-09 and 2020-12, and the validator checks each one that says something about a value. What each one does to the type:
+
+| Keyword | The type |
+| --- | --- |
+| `type` | Its type, and a list of types a union |
+| `enum`, `const` | A literal type |
+| `properties` | The object's keys |
+| `required` | The keys that are not optional |
+| `additionalProperties` | The type of every other key, and `false` no other key |
+| `patternProperties` | The type of the keys it matches |
+| `unevaluatedProperties` | The type of every key no other keyword evaluates, and `false` no other key |
+| `items` | The type of every item, or of the items after `prefixItems`, and a list of schemas a tuple |
+| `prefixItems` | A tuple |
+| `additionalItems` | The items after a tuple's |
+| `minItems` | The tuple's items that are not optional |
+| `allOf` | An intersection |
+| `anyOf`, `oneOf` | A union |
+| `if`, `then`, `else` | A union of `then` and `else`, when `if` tests a `const` |
+| `$ref` | The type it refers to |
+| `$defs`, `definitions` | A type of its own, exported by its key |
+| `$id` | A URI for a `$ref` to refer to, and the base of each `$ref` inside it |
+| `$anchor`, `$dynamicAnchor` | A name for a `$ref` to refer to |
+| `$dynamicRef`, `$recursiveRef` | `unknown` |
+| `description` | A doc comment |
+| `deprecated` | A `@deprecated` tag, which an editor strikes through |
+| `default`, `examples` | A `@default` tag and an `@example` tag for each, as JSON |
+| `readOnly` | A `readonly` property |
+| `not`, `multipleOf`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `unevaluatedItems`, `minProperties`, `maxProperties`, `propertyNames`, `dependentRequired`, `dependentSchemas`, `dependencies` | Nothing: the validator checks it |
+| `$schema`, `$vocabulary`, `$recursiveAnchor`, `$comment`, `title`, `writeOnly`, `contentEncoding`, `contentMediaType`, `contentSchema` | Nothing |
+
+### Drafts
+
+The `$schema` keyword picks the draft, 06, 07, 2019-09 or 2020-12, and a schema without it is draft-07:
+
+```jsonc
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string"
+}
+```

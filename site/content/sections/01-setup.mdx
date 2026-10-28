@@ -40,6 +40,8 @@ Add dotschema to `tsconfig.json` as a content mapper:
 }
 ```
 
+<Callout title="JSON5">A schema can also be a `.schema.json5` file: add `.schema.json5` to `extensions`, and `json5` to a webpack, Rspack or Jest pattern, as in `\.schema\.(jsonc|json5)$`.</Callout>
+
 Then type-check with `--runExternalCode`, which lets `tsc` run content mappers:
 
 ```jsonc title="package.json"
@@ -195,7 +197,7 @@ export default {
   module: {
     rules: [
       {
-        test: /\.schema\.(jsonc|json5)$/,
+        test: /\.schema\.jsonc$/,
         use: "dotschema/webpack",
       },
     ],
@@ -214,7 +216,7 @@ export default {
   module: {
     rules: [
       {
-        test: /\.schema\.(jsonc|json5)$/,
+        test: /\.schema\.jsonc$/,
         use: "dotschema/webpack",
       },
     ],
@@ -247,9 +249,9 @@ Add dotschema's transformer to your Jest config:
 ```js title="jest.config.js"
 export default {
   transform: {
-    "\\.schema\\.(jsonc|json5)$": "dotschema/jest",
+    "\\.schema\\.jsonc$": "dotschema/jest",
   },
-  extensionsToTreatAsEsm: [".jsonc", ".json5"],
+  extensionsToTreatAsEsm: [".jsonc"],
 };
 ```
 
@@ -260,13 +262,13 @@ NODE_OPTIONS=--experimental-vm-modules npx jest
 
 <Details summary="Beside another transformer for .jsonc" id="jest-transformers">
 
-Jest runs the first pattern that matches a file, so beside another transformer for `.jsonc` or `.json5`, such as Motherload's, dotschema's pattern comes first:
+Jest runs the first pattern that matches a file, so beside another transformer for `.jsonc`, such as Motherload's, dotschema's pattern comes first:
 
 ```js title="jest.config.js"
 export default {
   transform: {
-    "\\.schema\\.(jsonc|json5)$": "dotschema/jest",
-    "\\.(jsonc|json5)$": "motherload/jest",
+    "\\.schema\\.jsonc$": "dotschema/jest",
+    "\\.jsonc$": "motherload/jest",
   },
 };
 ```

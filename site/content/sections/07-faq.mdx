@@ -5,6 +5,29 @@ title: "FAQ"
 ## FAQ
 
 <Accordions>
+<Accordion title="Can a schema file hold comments?" id="faq-comments">
+
+Yes. A schema file is JSONC, so it can hold comments and trailing commas:
+
+```jsonc title="user.schema.jsonc"
+{
+  // who can sign in
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "role": { "enum": ["admin", "member"] },
+  },
+  "required": ["name"],
+  "additionalProperties": false,
+}
+```
+
+</Accordion>
+<Accordion title="Which drafts does dotschema read?" id="faq-drafts">
+
+Draft-06, draft-07, 2019-09 and 2020-12. The [`$schema` keyword](#drafts) picks one, and a schema without it is draft-07. A draft-04 or older schema is an error at the type check.
+
+</Accordion>
 <Accordion title="Does a bundle carry a validator library?" id="faq-bundle">
 
 No. Each schema's module is built with its validator compiled, so it imports nothing, and a bundle carries the validator and no validator library. A bundled app needs dotschema only to build, as a devDependency.

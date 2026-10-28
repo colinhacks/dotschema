@@ -1,0 +1,67 @@
+---
+title: "Doc comments"
+---
+
+## Doc comments
+
+A schema's doc comments are the type's, which an editor shows on hover.
+
+### Comments
+
+A `/** */` comment above a property is its doc comment:
+
+<Inferred>
+
+```jsonc title="user.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    /** The name the user signs in with. */
+    "name": { "type": "string", "minLength": 1 },
+    "role": { "enum": ["admin", "member"] }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}
+```
+
+</Inferred>
+
+### Descriptions
+
+A `description` is a doc comment too:
+
+<Inferred>
+
+```jsonc title="price.schema.jsonc"
+{
+  "description": "An amount in cents.",
+  "type": "integer",
+  "minimum": 0
+}
+```
+
+</Inferred>
+
+### Tags
+
+The `deprecated`, `default` and `examples` keywords are tags of the doc comment:
+
+<Inferred>
+
+```jsonc title="subscription.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "plan": {
+      "enum": ["free", "pro"],
+      "default": "free",
+      "examples": ["pro"]
+    },
+    "legacyId": { "type": "string", "deprecated": true }
+  },
+  "additionalProperties": false
+}
+```
+
+</Inferred>

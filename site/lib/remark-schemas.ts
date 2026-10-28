@@ -41,9 +41,12 @@ import { pageFiles } from './page-files.ts';
 //   say what dotschema's src/ gives now.
 // - The Inference cards. An `<Inferred>` element around a schema block is a card of the Inference
 //   section (components/inferred.tsx): its children become two labelled rows, the block as the
-//   Schema, and as the Type the declarations of the module dotschema gives that file, without the
-//   module's imports, its re-export as `Type`, the schema's own text and the values. A schema with
-//   a problem, or a type wider than a code line may be, fails the build.
+//   Schema, without its title bar (the block's `title` still names the file it is, and is taken off
+//   only once every block has seen it), and as the Type the declarations of the module dotschema
+//   gives that file, without the module's imports, its re-export as `Type`, the schema's own text
+//   and the values, the root first as its bare type (`string | number`, `{ ... }`), named only
+//   where the types refer to it or it has a doc comment, and each definition it uses declared by
+//   its name. A schema with a problem, or a type wider than a code line may be, fails the build.
 
 type Node = {
   type: string;
@@ -83,17 +86,42 @@ const jsx = (name: string, attributes: [string, string][], children: Node[]): No
 /**
  * The declarations a schema's module gives its root and its definitions, as a card's Type row shows
  * them: the text before the schema's own (`type Json`), without the imports, the re-export as
- * `Type`, or `export` before a definition's declaration.
+ * `Type`, or `export` before a definition's declaration, and the root as its bare type (`bare`).
  */
 function declarations(types: string): string {
   const end = types.search(/^\/\*\* The JSON Schema as written|^type Json = /m);
-  return (end < 0 ? types : types.slice(0, end))
-    .split('\n')
+  const lines = (end < 0 ? types : types.slice(0, end)).split('\n');
+  // The module names its root for the file and exports it as `Type` (`export type { Id as Type };`),
+  // or names it `Type` itself when the file is named so.
+  const root = lines.map((line) => /^export type \{ (\w+) as Type \};$/.exec(line)?.[1]).find(Boolean) ?? 'Type';
+  const text = lines
     .filter((line) => !/^import type /.test(line) && !/^export type \{ \w+ as Type \};$/.test(line))
     .join('\n')
     .replace(/^export (?=interface |type )/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  return bare(text, root);
+}
+
+/**
+ * The declarations with the root's written as its bare type, first: `string | number` for
+ * `type Id = string | number;`, `{ ... }` for `interface Profile { ... }`. The root keeps its name
+ * where the types refer to it, as a recursive schema's do, and where it carries a doc comment, which
+ * reads oddly above a bare type.
+ */
+function bare(text: string, name: string): string {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line === `interface ${name} {` || line.startsWith(`type ${name} = `));
+  if (start < 0 || lines[start - 1]?.trimEnd().endsWith('*/')) return text;
+  // A declaration ends on the first line at its own indent that closes it.
+  const end = /^type .*;$/.test(lines[start]!) ? start : lines.findIndex((line, i) => i > start && /^\S/.test(line) && /[;}]$/.test(line));
+  if (end < 0) return text;
+  const own = lines.slice(start, end + 1).join('\n');
+  const head = own.startsWith('interface ') ? `interface ${name} ` : `type ${name} = `;
+  const rest = [...lines.slice(0, start), ...lines.slice(end + 1)].join('\n').trim();
+  if (new RegExp(`\\b${name}\\b`).test(`${own.slice(head.length)}\n${rest}`)) return text;
+  const type = own.slice(head.length).replace(/;$/, '');
+  return rest ? `${type}\n\n${rest}` : type;
 }
 
 /** The file TypeScript looks up for `./name.ext` under allowArbitraryExtensions. */
@@ -330,6 +358,9 @@ export function remarkSchemas() {
       const type = declarations(module.types);
       const wider = type.split('\n').filter((line) => line.length > WIDEST);
       if (wider.length) throw new Error(`dotschema: the type of ${name}'s card has lines wider than ${WIDEST} characters (${file.path}):\n${wider.join('\n')}`);
+      // The card's Schema label stands in for the block's title bar, so the file name, which placed
+      // the file for every block of the page above, is taken off the block here.
+      node.meta = (node.meta ?? '').replace(/(?:^|\s+)title="[^"]*"/, '').trim() || null;
       card.children = [
         jsx('InferredRow', [['label', 'Schema']], [node]),
         jsx('InferredTypes', [], [jsx('InferredRow', [['label', 'Type']], [{ type: 'code', lang: 'ts', meta: null, value: type }])]),
