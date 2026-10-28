@@ -1,4 +1,4 @@
-// The format `currency_code`, Zod's: an ISO 4217 alphabetic currency code, one of the list Zod
+// The format `currency-code`, Zod's: an ISO 4217 alphabetic currency code, one of the list Zod
 // holds. Zod's `currencyCode`, unchanged, a regular expression in a file of its own: it is long,
 // and a module that uses it carries the file once, where ajv writes a literal into each validator.
 //

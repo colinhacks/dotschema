@@ -1,7 +1,7 @@
 // dotschema's formats (src/formats/): the JSON Schema Test Suite's format tests, which assume that
 // `format` asserts, as it does here, and which all pass; the copies of ajv-formats' formats against
-// ajv-formats itself; Zod's formats against Zod itself; and the files a module carries, which are the
-// formats it uses. The suite's files are in tests/fixtures/format-suite, copied from
+// ajv-formats itself; Zod's formats against Zod itself, by dotschema's names and by Zod's where they
+// differ; and the files a module carries, which are the formats it uses. The suite's files are in tests/fixtures/format-suite, copied from
 // json-schema-org/JSON-Schema-Test-Suite at 89e83a7 (2026-10-22), tests/draft2020-12/optional/format;
 // its tests/draft7/optional/format holds the same tests but for duration and uuid, which draft-07 does
 // not name, and each runs under both drafts here.
@@ -12,7 +12,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import * as z from "zod";
-import { formatDefinitions } from "../src/formats/index.ts";
+import { ALIASES, FORMATS, formatDefinitions } from "../src/formats/index.ts";
 import { schemaCode } from "../src/schema.ts";
 import { evaluate, ROOT } from "./helpers.ts";
 
@@ -21,10 +21,10 @@ const SUITE = join(ROOT, "tests/fixtures/format-suite");
 type Group = { description: string; schema: Record<string, unknown>; tests: { description: string; data: unknown; valid: boolean }[] };
 const suite: Record<string, Group[]> = Object.fromEntries(readdirSync(SUITE).filter((file) => file.endsWith(".json")).map((file) => [file.slice(0, -".json".length), JSON.parse(readFileSync(join(SUITE, file), "utf8"))]));
 
-/** Zod's formats, each by the name z.toJSONSchema writes, with the Zod schema that checks it. */
+/** Zod's formats, each by dotschema's name, kebab case, with the Zod schema that checks it. */
 const ZOD: Record<string, z.ZodType> = {
   jwt: z.jwt(),
-  credit_card: z.creditCard(),
+  "credit-card": z.creditCard(),
   iban: z.iban(),
   base64: z.base64(),
   base64url: z.base64url(),
@@ -40,10 +40,10 @@ const ZOD: Record<string, z.ZodType> = {
   xid: z.xid(),
   ksuid: z.ksuid(),
   hex: z.hex(),
-  currency_code: z.currencyCode(),
+  "currency-code": z.currencyCode(),
   lowercase: z.string().lowercase(),
   uppercase: z.string().uppercase(),
-  ...Object.fromEntries((["md5", "sha1", "sha256", "sha384", "sha512"] as const).flatMap((alg) => (["hex", "base64", "base64url"] as const).map((enc) => [`${alg}_${enc}`, z.hash(alg, { enc })]))),
+  ...Object.fromEntries((["md5", "sha1", "sha256", "sha384", "sha512"] as const).flatMap((alg) => (["hex", "base64", "base64url"] as const).map((enc) => [`${alg}-${enc}`, z.hash(alg, { enc })]))),
 };
 
 /** Strings each of Zod's formats takes and strings either side of it, every one checked against every format. */
@@ -60,7 +60,7 @@ const ZOD_SAMPLES: string[] = [
   "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0",
   "eyJhbGciOiJub25lIn0.e30.sig.extra",
   `${btoa('{"alg":"HS256","kid":"??>"}').replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}.e30.sig`,
-  // credit_card: valid numbers bare, spaced and hyphenated; a wrong check digit; doubled separators; too short and too long.
+  // credit-card: valid numbers bare, spaced and hyphenated; a wrong check digit; doubled separators; too short and too long.
   ...["4111111111111111", "4111 1111 1111 1111", "4111-1111-1111-1111", "5555555555554444", "378282246310005", "6011111111111117", "4111111111111112", "4111  1111 1111 1111", "4111 1111 1111 1111 ", "411111111111", "41111111111", "41111111111111111111", "4111-1111 1111-1111"],
   // iban: valid ones; a wrong checksum; lowercase; the check digits 00, 01 and 99 the shape refuses; too short.
   ...["DE89370400440532013000", "GB82WEST12345698765432", "NL91ABNA0417164300", "DE89370400440532013001", "de89370400440532013000", "DE00370400440532013000", "DE99370400440532013000", "DE8937040044"],
@@ -72,7 +72,7 @@ const ZOD_SAMPLES: string[] = [
   ...["00:1A:2B:3C:4D:5E", "00:1a:2b:3c:4d:5e", "00-1A-2B-3C-4D-5E", "00:1A:2b:3C:4D:5E", "+14155552671", "+1415555", "14155552671", "+0123456789", "+1234567890123456", "😀", "👍🏽", "🇺🇸", "1️⃣", "a😀", "☺", "♥", "#", "\u200d"],
   // nanoid, cuid, cuid2, ulid, xid, ksuid.
   ...["V1StGXR8_Z5jdHi6B-myT", "V1StGXR8_Z5jdHi6B-my", "cjld2cjxh0000qzrmn831i7rn", "c123456", "C1", "tz4a98xxat96iws9zmbrgj3a", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "8ARZ3NDEKTSV4RRFFQ69G5FAV0", "01ARZ3NDEKTSV4RRFFQ69G5FAI", "9m4e2mr0ui3e8a215n4g", "9m4e2mr0ui3e8a215n4w", "0ujtsYcgvSTl8PAuAdqWYSMnLOv", "0ujtsYcgvSTl8PAuAdqWYSMnLO_"],
-  // hex, currency_code.
+  // hex, currency-code.
   ...["48656c6c6f", "DEADBEEF", "0xdead", "USD", "usd", "XYZ", "EUR", "EURO"],
   // Each digest of "dotschema" in each encoding, and one character short.
   ...(["md5", "sha1", "sha256", "sha384", "sha512"] as const).flatMap((alg) => (["hex", "base64", "base64url"] as const).flatMap((enc) => { const digest = createHash(alg).update("dotschema").digest(enc); return [digest, digest.slice(1)]; })),
@@ -126,7 +126,7 @@ test("dotschema's copies of ajv-formats' formats give its verdicts and its order
     uuid: ["urn:uuid:2eb8aa08-aa98-11ea-b4aa-73b441d16380"],
   };
   // Every format ajv-formats has, and no other but Zod's and the internationalized ones.
-  assert.deepEqual(Object.keys(ours).filter((name) => !(name in ZOD) && !["idn-hostname", "idn-email", "iri", "iri-reference"].includes(name)).sort(), Object.keys(theirs).sort());
+  assert.deepEqual(Object.keys(FORMATS).filter((name) => !(name in ZOD) && !["idn-hostname", "idn-email", "iri", "iri-reference"].includes(name)).sort(), Object.keys(theirs).sort());
   const differ: Record<string, string[]> = {};
   // ajv-formats' email, hostname, uri, uri-reference, uri-template and regex are replaced, not copied; the suite tests them.
   const replaced = ["email", "hostname", "uri", "uri-reference", "uri-template", "regex"];
@@ -147,11 +147,28 @@ test("dotschema's copies of ajv-formats' formats give its verdicts and its order
   for (const [name, samples] of Object.entries(ordered)) for (const a of samples) for (const b of samples) assert.equal(ours[name].compare(a, b), theirs[name].compare(a, b), `${name}: ${a} ${b}`);
 });
 
-test("Zod's formats are spelled as z.toJSONSchema writes them", () => {
-  for (const [name, schema] of Object.entries(ZOD)) assert.equal((z.toJSONSchema(schema) as { format?: string }).format, name);
+/** Zod's own name for each of its formats that dotschema names otherwise, by dotschema's name. */
+const ZOD_NAME: Record<string, string> = Object.fromEntries(Object.entries(ALIASES).map(([alias, name]) => [name, alias]));
+
+test("Zod's formats are named in kebab case, each name z.toJSONSchema writes either that name or an alias of it", () => {
+  // Every format by its own name in kebab case or one word, as JSON Schema names its own; the aliases apart, each the name of a format and none a format of its own.
+  for (const name of Object.keys(FORMATS)) assert.match(name, /^[a-z0-9]+(?:-[a-z0-9]+)*$/, name);
+  for (const [alias, name] of Object.entries(ALIASES)) {
+    assert.ok(name in FORMATS, alias);
+    assert.ok(!(alias in FORMATS), alias);
+  }
+  const written: string[] = [];
+  for (const [name, schema] of Object.entries(ZOD)) {
+    const format = (z.toJSONSchema(schema) as { format?: string }).format!;
+    assert.equal(ALIASES[format] ?? format, name);
+    if (format !== name) written.push(format);
+  }
+  // The aliases are exactly the names Zod writes that are not dotschema's: credit_card, currency_code and the fifteen digests.
+  assert.deepEqual(written.sort(), Object.keys(ALIASES).sort());
+  assert.equal(written.length, 17);
 });
 
-test("each of Zod's formats gives Zod's verdict, alone and, but for one, in the schema z.toJSONSchema writes", async () => {
+test("each of Zod's formats gives Zod's verdict, alone by its name and by Zod's alias and, but for one, in the schema z.toJSONSchema writes", async () => {
   const moduleOfSchema = async (schema: object) => {
     const { code, problems } = schemaCode(JSON.stringify(schema), PATH);
     assert.deepEqual(problems, []);
@@ -159,7 +176,8 @@ test("each of Zod's formats gives Zod's verdict, alone and, but for one, in the 
   };
   const differ: Record<string, string[]> = {};
   for (const [name, schema] of Object.entries(ZOD)) {
-    const modules = { alone: await moduleOfSchema({ type: "string", format: name }), zod: await moduleOfSchema(z.toJSONSchema(schema)) };
+    const modules: Record<string, any> = { alone: await moduleOfSchema({ type: "string", format: name }), zod: await moduleOfSchema(z.toJSONSchema(schema)) };
+    if (ZOD_NAME[name]) modules.alias = await moduleOfSchema({ type: "string", format: ZOD_NAME[name] });
     const accepted = ZOD_SAMPLES.filter((value) => schema.safeParse(value).success);
     // The samples hold strings the format takes and strings it does not.
     assert.ok(accepted.length > 0 && accepted.length < ZOD_SAMPLES.length, name);
@@ -212,6 +230,18 @@ test("a module carries the file of each format it checks with a function, and th
   assert.deepEqual(formatFiles(iri.code), ["iri", "iri-reference"]);
   assert.equal(iri.code.match(/^\/\/ The grammar of RFC 3987/gm)?.length, 1);
   assert.equal(iri.code.match(/^\/\/ The grammar of RFC 3986/gm)?.length, 1);
+  // A format by Zod's alias carries its format's file, and a module that uses it by both names carries the file once.
+  for (const [alias, name] of [["credit_card", "credit-card"], ["currency_code", "currency-code"]]) {
+    const byAlias = await build({ a: { type: "string", format: alias } });
+    assert.deepEqual(formatFiles(byAlias.code), [name]);
+    const both = await build({ a: { type: "string", format: alias }, b: { type: "string", format: name } });
+    assert.deepEqual(formatFiles(both.code), [name]);
+    assert.match(both.code, new RegExp(`^const __formats = \\{ "${name}": __require\\((\\d+)\\), "${alias}": __require\\(\\1\\) \\};$`, "m"));
+  }
+  const card = await build({ a: { type: "string", format: "credit_card" }, b: { type: "string", format: "currency_code" } });
+  assert.deepEqual([card.module.is({ a: "4111 1111 1111 1111", b: "USD" }), card.module.is({ a: "4111 1111 1111 1112" }), card.module.is({ b: "usd" })], [true, false, false]);
+  // A digest by Zod's alias is a regular expression, as by its name: no file.
+  assert.deepEqual(formatFiles((await build({ a: { type: "string", format: "sha256_hex" } })).code), []);
   // Each file once, for both validators and for each property that uses it.
   const several = await build({ a: { format: "date-time" }, b: { format: "date-time", formatMinimum: "2026-01-01T00:00:00Z" }, c: { format: "date" }, d: { format: "uri" } });
   assert.deepEqual(formatFiles(several.code), ["date", "date-time", "time", "uri"]);

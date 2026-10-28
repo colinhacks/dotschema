@@ -50,12 +50,12 @@ JSON Schema's own formats, each passing every 2020-12 format test of the [JSON S
 | `relative-json-pointer` | `1/name` |
 | `regex` | `^[a-z]+$` |
 
-Zod's formats, by the names `z.toJSONSchema` gives them:
+Zod's formats, in kebab case like JSON Schema's own, and by the names `z.toJSONSchema` gives them too (`credit_card`):
 
 | Format | A value it accepts |
 | --- | --- |
 | `jwt` | `eyJhbGciOiJIUzI1NiJ9.e30.c2ln` |
-| `credit_card` | `4242424242424242` |
+| `credit-card` | `4242424242424242` |
 | `iban` | `GB82WEST12345698765432` |
 | `base64` | `aGVsbG8=` |
 | `base64url` | `aGVsbG8` |
@@ -71,14 +71,14 @@ Zod's formats, by the names `z.toJSONSchema` gives them:
 | `xid` | `9m4e2mr0ui3e8a215n4g` |
 | `ksuid` | `0ujtsYcgvSTl8PAuAdqWYSMnLOv` |
 | `hex` | `deadbeef` |
-| `currency_code` | `USD` |
+| `currency-code` | `USD` |
 | `lowercase` | `dotschema` |
 | `uppercase` | `DOTSCHEMA` |
-| `md5_hex`, `md5_base64`, `md5_base64url` | An MD5 digest, in hex, base64 or base64url |
-| `sha1_hex`, `sha1_base64`, `sha1_base64url` | A SHA-1 digest |
-| `sha256_hex`, `sha256_base64`, `sha256_base64url` | A SHA-256 digest |
-| `sha384_hex`, `sha384_base64`, `sha384_base64url` | A SHA-384 digest |
-| `sha512_hex`, `sha512_base64`, `sha512_base64url` | A SHA-512 digest |
+| `md5-hex`, `md5-base64`, `md5-base64url` | An MD5 digest, in hex, base64 or base64url |
+| `sha1-hex`, `sha1-base64`, `sha1-base64url` | A SHA-1 digest |
+| `sha256-hex`, `sha256-base64`, `sha256-base64url` | A SHA-256 digest |
+| `sha384-hex`, `sha384-base64`, `sha384-base64url` | A SHA-384 digest |
+| `sha512-hex`, `sha512-base64`, `sha512-base64url` | A SHA-512 digest |
 
 OpenAPI's formats, and four more of ajv-formats':
 

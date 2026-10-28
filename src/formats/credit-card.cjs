@@ -1,4 +1,4 @@
-// The format `credit_card`, Zod's: 12 to 19 digits, each pair separated by at most one space or
+// The format `credit-card`, Zod's: 12 to 19 digits, each pair separated by at most one space or
 // hyphen, whose Luhn checksum is right. Zod's `isValidCreditCard`, unchanged, with its Luhn check,
 // which Zod adapted from valibot's.
 //

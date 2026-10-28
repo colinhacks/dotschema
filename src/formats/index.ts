@@ -19,9 +19,10 @@
 // but where the JSON Schema Test Suite shows a defect: `date-time`, `time`, `duration` and `uuid`
 // are changed copies, and `email`, `hostname`, `uri`, `uri-reference`, `uri-template` and
 // `regex` dotschema's own (DESIGN.md, "Formats"). Zod's formats are copies of Zod 4.6.7's checks,
-// unchanged. The IDN and IRI formats are dotschema's own. The regular expressions below are
-// ajv-formats' (Copyright (c) 2020 Evgeny Poberezkin) and Zod's (Copyright (c) 2025 Colin
-// McDonnell), both under the MIT license, whose text each file here carries.
+// unchanged, named in kebab case, with Zod's own snake-case names as aliases (ALIASES). The IDN and
+// IRI formats are dotschema's own. The regular expressions below are ajv-formats' (Copyright (c)
+// 2020 Evgeny Poberezkin) and Zod's (Copyright (c) 2025 Colin McDonnell), both under the MIT
+// license, whose text each file here carries.
 import { createRequire } from "node:module";
 
 export type Format = RegExp | true | { file: string };
@@ -72,12 +73,13 @@ export const FORMATS: Readonly<Record<string, Format>> = Object.freeze(Object.as
   double: { file: "double.cjs" },
   password: true,
   binary: true,
-  // Zod's formats, by the names z.toJSONSchema writes, each checked as Zod 4.6.7 checks it: by its
-  // regular expression, copied from Zod's src/v4/core/regexes.ts, or by a function, copied from its
-  // src/v4/core/schemas.ts into a file (MIT, credited in each). Zod writes each with a `pattern`
-  // beside it but for jwt; a schema written by hand needs only the `format`.
+  // Zod's formats, each checked as Zod 4.6.7 checks it: by its regular expression, copied from Zod's
+  // src/v4/core/regexes.ts, or by a function, copied from its src/v4/core/schemas.ts into a file
+  // (MIT, credited in each). Named in kebab case, as JSON Schema names its own (`date-time`), where
+  // z.toJSONSchema writes some in snake case, which ALIASES keeps (below). Zod writes each with a
+  // `pattern` beside it but for jwt; a schema written by hand needs only the `format`.
   jwt: { file: "jwt.cjs" },
-  credit_card: { file: "credit_card.cjs" },
+  "credit-card": { file: "credit-card.cjs" },
   iban: { file: "iban.cjs" },
   base64: { file: "base64.cjs" },
   base64url: { file: "base64url.cjs" },
@@ -95,41 +97,73 @@ export const FORMATS: Readonly<Record<string, Format>> = Object.freeze(Object.as
   xid: /^[0-9a-vA-V]{20}$/,
   ksuid: /^[A-Za-z0-9]{27}$/,
   hex: /^[0-9a-fA-F]*$/,
-  currency_code: { file: "currency_code.cjs" },
+  "currency-code": { file: "currency-code.cjs" },
   lowercase: /^[^A-Z]*$/,
   uppercase: /^[^a-z]*$/,
   // z.hash(algorithm, { enc }), each digest's length in hex, in base64 with its padding, and in base64url without.
-  md5_hex: /^[0-9a-fA-F]{32}$/,
-  md5_base64: /^[A-Za-z0-9+/]{22}==$/,
-  md5_base64url: /^[A-Za-z0-9_-]{22}$/,
-  sha1_hex: /^[0-9a-fA-F]{40}$/,
-  sha1_base64: /^[A-Za-z0-9+/]{27}=$/,
-  sha1_base64url: /^[A-Za-z0-9_-]{27}$/,
-  sha256_hex: /^[0-9a-fA-F]{64}$/,
-  sha256_base64: /^[A-Za-z0-9+/]{43}=$/,
-  sha256_base64url: /^[A-Za-z0-9_-]{43}$/,
-  sha384_hex: /^[0-9a-fA-F]{96}$/,
-  sha384_base64: /^[A-Za-z0-9+/]{64}$/,
-  sha384_base64url: /^[A-Za-z0-9_-]{64}$/,
-  sha512_hex: /^[0-9a-fA-F]{128}$/,
-  sha512_base64: /^[A-Za-z0-9+/]{86}==$/,
-  sha512_base64url: /^[A-Za-z0-9_-]{86}$/,
+  "md5-hex": /^[0-9a-fA-F]{32}$/,
+  "md5-base64": /^[A-Za-z0-9+/]{22}==$/,
+  "md5-base64url": /^[A-Za-z0-9_-]{22}$/,
+  "sha1-hex": /^[0-9a-fA-F]{40}$/,
+  "sha1-base64": /^[A-Za-z0-9+/]{27}=$/,
+  "sha1-base64url": /^[A-Za-z0-9_-]{27}$/,
+  "sha256-hex": /^[0-9a-fA-F]{64}$/,
+  "sha256-base64": /^[A-Za-z0-9+/]{43}=$/,
+  "sha256-base64url": /^[A-Za-z0-9_-]{43}$/,
+  "sha384-hex": /^[0-9a-fA-F]{96}$/,
+  "sha384-base64": /^[A-Za-z0-9+/]{64}$/,
+  "sha384-base64url": /^[A-Za-z0-9_-]{64}$/,
+  "sha512-hex": /^[0-9a-fA-F]{128}$/,
+  "sha512-base64": /^[A-Za-z0-9+/]{86}==$/,
+  "sha512-base64url": /^[A-Za-z0-9_-]{86}$/,
+}));
+
+/**
+ * Zod's spellings of its formats where they are not dotschema's, each with the name of the format in
+ * FORMATS it is: the names z.toJSONSchema writes in snake case (Zod 4.6.7's `z.creditCard()`,
+ * `z.currencyCode()` and `z.hash(algorithm, { enc })`), so a schema it wrote is checked as one written
+ * with the kebab-case name. Apart from FORMATS, which lists each format once by its own name; ajv
+ * registers both (`formatDefinitions`), and a module that uses an alias carries its format's file
+ * (`formatFile`).
+ */
+export const ALIASES: Readonly<Record<string, string>> = Object.freeze(Object.assign(Object.create(null) as Record<string, string>, {
+  credit_card: "credit-card",
+  currency_code: "currency-code",
+  md5_hex: "md5-hex",
+  md5_base64: "md5-base64",
+  md5_base64url: "md5-base64url",
+  sha1_hex: "sha1-hex",
+  sha1_base64: "sha1-base64",
+  sha1_base64url: "sha1-base64url",
+  sha256_hex: "sha256-hex",
+  sha256_base64: "sha256-base64",
+  sha256_base64url: "sha256-base64url",
+  sha384_hex: "sha384-hex",
+  sha384_base64: "sha384-base64",
+  sha384_base64url: "sha384-base64url",
+  sha512_hex: "sha512-hex",
+  sha512_base64: "sha512-base64",
+  sha512_base64url: "sha512-base64url",
 }));
 
 const require = createRequire(import.meta.url);
 
 const fileOf = (format: Format | undefined): string | undefined => (typeof format === "object" && !(format instanceof RegExp) ? format.file : undefined);
 
-/** Each format as ajv's `addFormat` takes it, a file's `module.exports` in place of the file. */
+/** The format a name gives, by its own name or an alias; undefined for a name no format has. */
+const formatOf = (name: string): Format | undefined => FORMATS[ALIASES[name] ?? name];
+
+/** Each format as ajv's `addFormat` takes it, a file's `module.exports` in place of the file, by its name and then by each alias. */
 export function formatDefinitions(): [name: string, definition: unknown][] {
-  return Object.entries(FORMATS).map(([name, format]) => {
+  return [...Object.keys(FORMATS), ...Object.keys(ALIASES)].map((name) => {
+    const format = formatOf(name)!;
     const file = fileOf(format);
     return [name, file ? require(`./${file}`) : format];
   });
 }
 
-/** The absolute path of the file a format is checked by, which a module that uses it inlines; undefined for a regular expression, `true`, or a name no format has. */
+/** The absolute path of the file a format is checked by, which a module that uses it, by its name or an alias, inlines; undefined for a regular expression, `true`, or a name no format has. */
 export function formatFile(name: string): string | undefined {
-  const file = fileOf(FORMATS[name]);
+  const file = fileOf(formatOf(name));
   return file ? require.resolve(`./${file}`) : undefined;
 }
