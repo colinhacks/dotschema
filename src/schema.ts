@@ -503,7 +503,7 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
   }
   // The types read each `$ref` as a pointer from its file's root, resolved against the `$id`s above it (refs.ts).
   const resolved = resolvedSchemas(files);
-  const { declarations, rootName, rootType, definitions } = schemaModuleTypes(resolved.get(path)!, { path, read: (other) => resolved.get(other) }, draft, options);
+  const { declarations, rootName, rootType, rootDoc, definitions } = schemaModuleTypes(resolved.get(path)!, { path, read: (other) => resolved.get(other) }, draft, options);
   const typeOf = (entry: ModuleEntry, type: string, literalType: string) =>
     entry.shape ? `__DotschemaObjectSchema<${type}, ${literalType}, ${keyUnion(entry.shape.keys)}>` : `__DotschemaSchema<${type}, ${literalType}>`;
   const [rootEntry, ...definitionEntries] = entries;
@@ -511,7 +511,7 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
     const definition = definitions.find((d) => d.keyword === entry.entry![0] && d.key === entry.entry![1])!;
     return [
       `${definition.doc}export declare const ${definition.valueName}: ${typeOf(entry, definition.type, `${LITERAL_NAME}[${JSON.stringify(definition.keyword)}][${JSON.stringify(definition.key)}]`)};`,
-      `export declare namespace ${definition.valueName} { export type { ${definition.typeName} as Type }; }`,
+      `${definition.doc}export declare namespace ${definition.valueName} { export type { ${definition.typeName} as Type }; }`,
     ].join("\n");
   });
   return {
@@ -527,11 +527,11 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
       // The root's type written out rather than named, so a hover over a value `.validate()` or `.is()`
       // gives prints the schema's properties, and a `$ref` within them by its name (the maintainer, on
       // 2026-10-26: "People want to see the actual properties for visibility").
-      `declare const schema: ${typeOf(rootEntry!, rootType, LITERAL_NAME)};`,
+      `${rootDoc}declare const schema: ${typeOf(rootEntry!, rootType, LITERAL_NAME)};`,
       // A namespace of types alone, which merges with the const, so the default import names the
       // type too: `user.Type` (the maintainer, on 2026-10-26: "I think the default import should have
       // a `.Type` property on it. That should be the recommended way to access it.").
-      `declare namespace schema { export type { ${rootName} as Type }; }`,
+      `${rootDoc}declare namespace schema { export type { ${rootName} as Type }; }`,
       "export default schema;",
       // Each definition's validator, named for its key in camelCase, with its type as `.Type` (the
       // maintainer's pick of 2026-10-26: "import { address } from "./user.schema.jsonc", with

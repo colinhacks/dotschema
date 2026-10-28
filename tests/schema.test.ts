@@ -305,6 +305,15 @@ test("a /** */ comment before a property's key is its doc comment in the module'
   assert.deepEqual(Object.keys(user.schema.properties.name), ["type", "nullable"]);
 });
 
+test("a deprecated root or definition is deprecated in every declaration of its name, the validator and its namespace too, which an editor strikes through only then", () => {
+  const source = JSON.stringify({ $schema: "https://json-schema.org/draft/2020-12/schema", description: "A gone thing.", deprecated: true, type: "object", properties: { a: { $ref: "#/$defs/old" } }, $defs: { old: { type: "string", deprecated: true } } });
+  const { types, problems } = schemaTypes(source, join(ROOT, "tests/fixtures/gone.schema.jsonc"));
+  assert.deepEqual(problems, []);
+  const root = "/**\n * A gone thing.\n * @deprecated\n */\n";
+  for (const declaration of ["interface Gone {", "declare const schema: ", "declare namespace schema {"]) assert.ok(types.includes(`\n${root}${declaration}`), declaration);
+  for (const declaration of ["export type Old = string;", "export declare const old: ", "export declare namespace old {"]) assert.ok(types.includes(`\n/** @deprecated */\n${declaration}`), declaration);
+});
+
 // The floors of the parsers' ranges (DESIGN.md, "Packaging"): json5 before 2.2.2 made a `__proto__`
 // key the object's prototype (CVE-2022-46175), and jsonc-parser before 3.1.0 read U+2028 as a line
 // break and U+00A0 as white space, so a file read otherwise under an older copy in the same range.

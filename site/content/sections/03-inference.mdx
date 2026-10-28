@@ -36,6 +36,24 @@ const ada: profile.Type = { name: "Ada", age: 36 };
 const bob: profile.Type = { name: "Bob", age: "old" };
 ```
 
+A `readOnly` property is `readonly`:
+
+<Inferred>
+
+```jsonc title="article.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "id": { "type": "string", "readOnly": true },
+    "title": { "type": "string" }
+  },
+  "required": ["id", "title"],
+  "additionalProperties": false
+}
+```
+
+</Inferred>
+
 ### Null
 
 A list of types is a union, `null` among them:
@@ -243,6 +261,27 @@ An `allOf` is an intersection:
 
 </Inferred>
 
+With `unevaluatedProperties: false` beside it, the intersection allows no other key:
+
+<Inferred>
+
+```jsonc title="manager.schema.jsonc"
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    {
+      "type": "object",
+      "properties": { "name": { "type": "string" } },
+      "required": ["name"]
+    }
+  ],
+  "properties": { "reports": { "type": "integer" } },
+  "unevaluatedProperties": false
+}
+```
+
+</Inferred>
+
 ### Conditionals
 
 An `if` that tests a `const` makes `then` and `else` a union:
@@ -347,6 +386,27 @@ A `description` is one too:
 
 </Inferred>
 
+The `deprecated`, `default` and `examples` keywords are tags of the doc comment:
+
+<Inferred>
+
+```jsonc title="subscription.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "plan": {
+      "enum": ["free", "pro"],
+      "default": "free",
+      "examples": ["pro"]
+    },
+    "legacyId": { "type": "string", "deprecated": true }
+  },
+  "additionalProperties": false
+}
+```
+
+</Inferred>
+
 ### Checks
 
 A keyword no TypeScript type can express leaves the type as it is, and the validator checks it:
@@ -375,7 +435,7 @@ dotschema reads every keyword of draft-06, draft-07, 2019-09 and 2020-12, and th
 | `required` | The keys that are not optional |
 | `additionalProperties` | The type of every other key, and `false` no other key |
 | `patternProperties` | The type of the keys it matches |
-| `unevaluatedProperties` | No other key, when it is `false` beside `properties` alone |
+| `unevaluatedProperties` | The type of every key no other keyword evaluates, and `false` no other key |
 | `items` | The type of every item, or of the items after `prefixItems`, and a list of schemas a tuple |
 | `prefixItems` | A tuple |
 | `additionalItems` | The items after a tuple's |
@@ -389,5 +449,8 @@ dotschema reads every keyword of draft-06, draft-07, 2019-09 and 2020-12, and th
 | `$anchor`, `$dynamicAnchor` | A name for a `$ref` to refer to |
 | `$dynamicRef`, `$recursiveRef` | `unknown` |
 | `description` | A doc comment |
+| `deprecated` | A `@deprecated` tag, which an editor strikes through |
+| `default`, `examples` | A `@default` tag and an `@example` tag for each, as JSON |
+| `readOnly` | A `readonly` property |
 | `not`, `multipleOf`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `unevaluatedItems`, `minProperties`, `maxProperties`, `propertyNames`, `dependentRequired`, `dependentSchemas`, `dependencies` | Nothing: the validator checks it |
-| `$schema`, `$vocabulary`, `$recursiveAnchor`, `$comment`, `title`, `default`, `examples`, `deprecated`, `readOnly`, `writeOnly`, `contentEncoding`, `contentMediaType`, `contentSchema` | Nothing |
+| `$schema`, `$vocabulary`, `$recursiveAnchor`, `$comment`, `title`, `writeOnly`, `contentEncoding`, `contentMediaType`, `contentSchema` | Nothing |

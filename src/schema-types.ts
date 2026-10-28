@@ -7,7 +7,7 @@
 // widens that part of the type to `unknown`. A `$ref` to another schema file is a type imported
 // from that file's own module (refs.ts).
 import { basename } from "node:path";
-import { literal, propertyName, type Value } from "./core/serialize.ts";
+import { literal, propertyName, toJs, type Value } from "./core/serialize.ts";
 import type { TypeOptions } from "./core/universal.ts";
 import { docOfKey, docOfRoot } from "./parse.ts";
 import { fileOf, fragmentPath, pointTo, specifierOf } from "./refs.ts";
@@ -69,16 +69,36 @@ function objectLiteral(type: string): boolean {
   return false;
 }
 
+/** A value as JSON on one line, for a doc comment; JSON5's `Infinity` and `NaN` as JSON5 writes them. */
+function jsonOf(value: Value): string {
+  if (Array.isArray(value)) return `[${value.map(jsonOf).join(", ")}]`;
+  if (isObj(value)) {
+    const keys = Object.keys(value);
+    return keys.length ? `{ ${keys.map((key) => `${JSON.stringify(key)}: ${jsonOf(value[key]!)}`).join(", ")} }` : "{}";
+  }
+  return toJs(value);
+}
+
 /**
  * A schema's JSDoc: its `description`, or else `comment`, the text of the `/**` comment written
- * before its key or before the file's root (parse.ts), the maintainer's choice of 2026-10-26.
+ * before its key or before the file's root (parse.ts), the maintainer's choice of 2026-10-26; then
+ * the annotations an editor shows as tags, the maintainer's pick of 2026-10-27: `@deprecated` for
+ * `deprecated: true`, unless the text has that tag already, `@default` with the `default` value and
+ * one `@example` for each of `examples`, each value as JSON. A star before a slash in any of them
+ * is written `*\/`, which ends no comment and, inside a JSON string, is still the same string.
  */
 function doc(schema: Value | undefined, indent: string, comment?: string): string {
   const text = isObj(schema) && typeof schema["description"] === "string" ? schema["description"] : comment;
-  if (text === undefined) return "";
-  const lines = text.replace(/\*\//g, "*\\/").split(/\r?\n/);
-  if (lines.length === 1) return `${indent}/** ${lines[0]} */\n`;
-  return `${indent}/**\n${lines.map((line) => `${indent} *${line ? ` ${line}` : ""}`).join("\n")}\n${indent} */\n`;
+  const lines = text === undefined ? [] : text.split(/\r?\n/);
+  if (isObj(schema)) {
+    if (schema["deprecated"] === true && !lines.some((line) => /^\s*@deprecated\b/.test(line))) lines.push("@deprecated");
+    if (Object.hasOwn(schema, "default")) lines.push(`@default ${jsonOf(schema["default"]!)}`);
+    for (const example of Array.isArray(schema["examples"]) ? schema["examples"] : []) lines.push(`@example ${jsonOf(example)}`);
+  }
+  if (!lines.length) return "";
+  const escaped = lines.map((line) => line.replace(/\*\//g, "*\\/"));
+  if (escaped.length === 1) return `${indent}/** ${escaped[0]} */\n`;
+  return `${indent}/**\n${escaped.map((line) => `${indent} *${line ? ` ${line}` : ""}`).join("\n")}\n${indent} */\n`;
 }
 
 /** A definition's key as a type name: PascalCase, a valid identifier, and unique. */
@@ -194,7 +214,21 @@ type Document = { schema: Value; path: string | undefined; rootName: string; nam
  */
 const EVALUATING = ["allOf", "anyOf", "oneOf", "if", "then", "else", "dependentSchemas", "$ref", "$dynamicRef", "$recursiveRef"];
 
-const ANNOTATIONS = ["$comment", "title", "description"];
+/** The keywords that annotate a value and say nothing about which values pass. */
+const ANNOTATIONS = ["$comment", "title", "description", "default", "examples", "deprecated", "readOnly", "writeOnly"];
+
+/**
+ * How an object under `unevaluatedProperties` is closed (`closingOf`): the keys a part of it that
+ * the type does not declare in place may evaluate, each an optional `unknown` property of the
+ * object's own type, and its index signature, when it needs one.
+ */
+interface Closing {
+  keys: Set<string>;
+  index: string | undefined;
+}
+
+/** A schema being typed as a part of an object closed under `unevaluatedProperties`: that object itself (`root`), or a part of it the type declares in place. */
+type InPlace = { closing: Closing; root: boolean };
 
 /** The JSON types, in the order a union of them is written. */
 const JSON_TYPES = ["object", "array", "string", "number", "boolean", "null"] as const;
@@ -260,8 +294,8 @@ export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Dra
   return schemaModuleTypes(root, files, draft, options).declarations;
 }
 
-/** The declarations, as `schemaDeclarations` writes them; the root's name; and the root's type as text, which the module's default export takes so a hover prints its properties. */
-export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft, options?: TypeOptions): { declarations: string; rootName: string; rootType: string; definitions: Definition[] } {
+/** The declarations, as `schemaDeclarations` writes them; the root's name; the root's type as text, which the module's default export takes so a hover prints its properties; and the root's doc comment, which the default export carries too. */
+export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft, options?: TypeOptions): { declarations: string; rootName: string; rootType: string; rootDoc: string; definitions: Definition[] } {
   const prefixItems = draft === undefined || draft === "2020-12";
   const itemLists = draft === undefined || draft !== "2020-12";
   const unevaluated = draft === undefined || draft !== "draft-07";
@@ -355,15 +389,17 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     return types;
   }
 
-  function refType(ref: string, indent: string): string {
+  function refType(ref: string, indent: string, inPlace?: { within: ReadonlySet<JsonType>; closing: Closing }): string {
     // A URL, a file that cannot be read, an anchor ajv does not resolve or a malformed pointer is
     // unknown, as ajv reports the last two. An anchor is the schema it is declared in, by the rules
-    // of a pointer to it: the root and a definition by name, anything else inlined.
+    // of a pointer to it: the root and a definition by name, anything else inlined. A reference
+    // that is a part of an object closed under `unevaluatedProperties` is always inlined, without
+    // the index signature its name would bring, since the keys it evaluates are the object's.
     const at = locate(ref);
     if (!at) return "unknown";
     const { document, path } = at;
-    if (path.length === 0) return nameIn(document, "Type");
-    const named = path.length === 2 ? document.names.get(`${path[0]}\0${path[1]}`) : undefined;
+    if (!inPlace && path.length === 0) return nameIn(document, "Type");
+    const named = !inPlace && path.length === 2 ? document.names.get(`${path[0]}\0${path[1]}`) : undefined;
     if (named) return nameIn(document, named);
     // By where it points, so a pointer and an anchor to one schema stop each other's recursion.
     const key = JSON.stringify([document.path, ...path]);
@@ -372,22 +408,27 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     inlining.add(key);
     const outer = current;
     current = document;
-    const type = emit(target, indent);
+    const type = emit(target, indent, inPlace?.within, inPlace?.closing);
     current = outer;
     inlining.delete(key);
     return type;
   }
 
-  function objectType(schema: Obj, indent: string): string {
+  function objectType(schema: Obj, indent: string, inPlace?: InPlace): string {
     const inner = `${indent}  `;
     const properties = isObj(schema["properties"]) ? schema["properties"] : {};
     const required = new Set(strings(schema["required"]));
-    // Keys outside `properties`: an index signature, unless `additionalProperties` (or, without it,
-    // `unevaluatedProperties`, when no keyword beside it can allow another key) is false. Its type
-    // covers the named properties too, as TypeScript requires.
-    const additional = schema["additionalProperties"];
-    const closed = additional === false || (additional === undefined && unevaluated && schema["unevaluatedProperties"] === false && !EVALUATING.some((k) => Object.hasOwn(schema, k)));
-    const additionalType = closed ? "never" : additional === undefined || additional === true ? "unknown" : emit(additional, inner);
+    // Keys outside `properties`: an index signature, unless `additionalProperties` is false. With
+    // nothing beside it that can evaluate a key, `unevaluatedProperties` is `additionalProperties`
+    // by another name; with something, the object is closed in place (`closingOf`), and has no
+    // index signature of its own but the one its closing gives the object itself. Its type covers
+    // the named properties too, as TypeScript requires.
+    const ownUnevaluated = unevaluated && !EVALUATING.some((k) => Object.hasOwn(schema, k)) ? schema["unevaluatedProperties"] : undefined;
+    const additional = schema["additionalProperties"] ?? ownUnevaluated;
+    const closed = additional === false;
+    // In place, a required key that `properties` does not list may be one another part evaluates:
+    // the type of every value a key can hold, or `unknown` where the object has no index signature.
+    const additionalType = inPlace ? (inPlace.root ? (inPlace.closing.index ?? "unknown") : "unknown") : closed ? "never" : additional === undefined || additional === true ? "unknown" : emit(additional, inner);
     const patterns = isObj(schema["patternProperties"]) ? Object.entries(schema["patternProperties"]).map(([source, pattern]) => ({ test: patternTest(source), type: emit(pattern, inner) })) : [];
     const lines: string[] = [];
     const valueTypes: string[] = [];
@@ -400,8 +441,11 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       valueTypes.push(type, ...(optional ? ["undefined"] : []));
       // An optional property may hold `undefined`, which the validator passes as absent. Its `?`
       // says so unless the project turns on `exactOptionalPropertyTypes`, so `| undefined` is written
-      // there, and where the project's options are not known.
-      lines.push(`${doc(property, inner, docOfKey(properties, key))}${inner}${propertyName(key)}${optional ? "?" : ""}: ${optional && exactOptional ? union([type, "undefined"]) : type};`);
+      // there, and where the project's options are not known. A property whose schema says
+      // `readOnly: true` is `readonly`, which TypeScript does not hold against assignment either way,
+      // so every value the validator accepts still is one.
+      const readonly = isObj(property) && property["readOnly"] === true ? "readonly " : "";
+      lines.push(`${doc(property, inner, docOfKey(properties, key))}${inner}${readonly}${propertyName(key)}${optional ? "?" : ""}: ${optional && exactOptional ? union([type, "undefined"]) : type};`);
     }
     // A required key that `properties` does not list takes the type of the `patternProperties` whose
     // pattern matches it (all of them apply, so their union admits it), or of `additionalProperties`
@@ -413,6 +457,16 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       // A pattern that cannot be read here may not match: the key may be an additional one too.
       const unsure = matching.some((pattern) => pattern.test(key) === undefined);
       lines.push(`${inner}${propertyName(key)}: ${unsure ? union([type, additionalType]) : type};`);
+    }
+    if (inPlace) {
+      // The keys the parts the type does not declare in place may evaluate, with no type of their
+      // own, and the index signature, which holds every key, so it is the type of every value one
+      // can hold; a part has none.
+      if (inPlace.root) {
+        for (const key of inPlace.closing.keys) if (!Object.hasOwn(properties, key) && !required.has(key)) lines.push(`${inner}${propertyName(key)}?: unknown;`);
+        if (inPlace.closing.index !== undefined) lines.push(`${inner}[key: string]: ${inPlace.closing.index};`);
+      }
+      return lines.length ? `{\n${lines.join("\n")}\n${indent}}` : "{}";
     }
     const extra = patterns.map((pattern) => pattern.type);
     if (!closed) extra.push(additionalType);
@@ -448,21 +502,18 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
   }
 
   /**
-   * The `if`/`then`/`else` of an object schema, its own and those of `allOf` members that hold
-   * nothing else, as a union with one member per value of a required property they test, when that
-   * property's schema lists its values (`enum` or `const`) and each `if` tests the value alone. Each
-   * member is that value with the `then` of every test it passes and the `else` of every test it
-   * fails, so every value the validator accepts is in the member for its own value, and TypeScript
-   * narrows the union on the property. A conditional of another shape is not read, and widens.
+   * The conditionals of an object schema that `conditionalCases` reads, its own and those of `allOf`
+   * members that hold nothing else: the property they test, its listed values, and each test's
+   * values and branches, with the schema that holds it.
    */
-  function conditionalCases(schema: Obj, indent: string): string | undefined {
+  function conditionalsRead(schema: Obj): { key: string; domain: Primitive[]; tests: { values: Primitive[]; then: Value | undefined; else: Value | undefined; conditional: Obj }[] } | undefined {
     const onlyConditional = (member: Value) => isObj(member) && Object.hasOwn(member, "if") && Object.keys(member).every((k) => ["if", "then", "else", ...ANNOTATIONS].includes(k));
     const conditionals = [schema, ...(Array.isArray(schema["allOf"]) ? schema["allOf"].filter(onlyConditional) : [])].filter((member): member is Obj => isObj(member) && Object.hasOwn(member, "if"));
     const properties = isObj(schema["properties"]) ? schema["properties"] : {};
     const required = new Set(strings(schema["required"]));
     let key: string | undefined;
     let domain: Primitive[] = [];
-    const tests: { values: Primitive[]; then: Value | undefined; else: Value | undefined }[] = [];
+    const tests: { values: Primitive[]; then: Value | undefined; else: Value | undefined; conditional: Obj }[] = [];
     for (const conditional of conditionals) {
       const test = propertyTest(conditional["if"]);
       if (!test || !required.has(test.key) || (key !== undefined && test.key !== key)) continue;
@@ -471,22 +522,36 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
         if (!values) continue;
         [key, domain] = [test.key, values];
       }
-      tests.push({ values: test.values, then: conditional["then"], else: conditional["else"] });
+      tests.push({ values: test.values, then: conditional["then"], else: conditional["else"], conditional });
     }
-    if (key === undefined) return undefined;
+    return key === undefined ? undefined : { key, domain, tests };
+  }
+
+  /**
+   * The `if`/`then`/`else` of an object schema, its own and those of `allOf` members that hold
+   * nothing else, as a union with one member per value of a required property they test, when that
+   * property's schema lists its values (`enum` or `const`) and each `if` tests the value alone. Each
+   * member is that value with the `then` of every test it passes and the `else` of every test it
+   * fails, so every value the validator accepts is in the member for its own value, and TypeScript
+   * narrows the union on the property. A conditional of another shape is not read, and widens.
+   */
+  function conditionalCases(schema: Obj, indent: string, closing?: Closing): string | undefined {
+    const read = conditionalsRead(schema);
+    if (!read) return undefined;
+    const { key, domain, tests } = read;
     const name = propertyName(key);
     const variants = domain.map((value) => {
       const members = [`{ ${name}: ${literal(value)} }`];
       for (const test of tests) {
         const branch = test.values.includes(value) ? test.then : test.else;
-        if (branch !== undefined) members.push(emit(branch, indent, OBJECT));
+        if (branch !== undefined) members.push(emit(branch, indent, OBJECT, closing));
       }
       return members.includes("never") ? "never" : members.filter((member) => member !== "unknown").map(paren).join(" & ");
     });
     return union(variants.map(paren));
   }
 
-  function typeOf(name: string, schema: Obj, indent: string): string {
+  function typeOf(name: string, schema: Obj, indent: string, inPlace?: InPlace): string {
     switch (name) {
       case "string":
         return "string";
@@ -499,8 +564,8 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
         return "null";
       case "object": {
         // An object's `if`/`then`/`else`, when they test a property's listed values.
-        const object = objectType(schema, indent);
-        const cases = conditionalCases(schema, indent);
+        const object = objectType(schema, indent, inPlace);
+        const cases = conditionalCases(schema, indent, inPlace?.closing);
         return cases === undefined ? object : cases === "never" ? "never" : `${object} & ${paren(cases)}`;
       }
       case "array":
@@ -511,25 +576,117 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
   }
 
   /**
+   * How an object schema with `unevaluatedProperties` and a keyword beside it that evaluates keys
+   * in place is closed, or undefined where it cannot be closed soundly and stays open. The keys a
+   * value may hold are those that the schema or a part of it that passed evaluated: its own
+   * `properties` and `patternProperties`, and those of each member of `allOf`, `anyOf` and `oneOf`,
+   * each `$ref` target, `if`, `then`, `else` and `dependentSchemas`, in turn. The parts the type
+   * writes in place, `allOf`'s members, a `$ref`'s target, `oneOf`'s members and the branches of a
+   * conditional `conditionalCases` reads, declare their own keys, without the index signature that
+   * would let any key through: the value holds the keys of the one member, or the one branch, that
+   * passed. Every other part's keys are optional `unknown` properties of the schema's own type:
+   * `anyOf`'s members, since a value can pass several and hold the keys of each; an `if`, whose
+   * keys ajv 8.20.0 counts as evaluated where it failed beside an `else` alone; and the conditionals
+   * and `dependentSchemas` the type does not read. A part with `additionalProperties` or
+   * `unevaluatedProperties` of its own evaluates every key, and its own type says which; under
+   * `anyOf` or a part the type does not read, nothing could. It stays open there, and where a
+   * part's `patternProperties` would need an index signature that every key of the value meets,
+   * where a `$ref` does not resolve or is dynamic, and where the schema's own index signature,
+   * for its patterns or for `unevaluatedProperties` given as a schema, would have to hold a key
+   * typed `unknown`.
+   */
+  function closingOf(schema: Obj, indent: string): Closing | undefined {
+    const inner = `${indent}  `;
+    const keys = new Set<string>();
+    const ownPatterns = isObj(schema["patternProperties"]) ? Object.values(schema["patternProperties"]) : [];
+    const rest = schema["unevaluatedProperties"];
+    // The index signature, when the schema has one: the type of every value a key can hold.
+    const index = ownPatterns.length || isObj(rest) ? [...(isObj(rest) ? [emit(rest, inner)] : []), ...ownPatterns.map((pattern) => emit(pattern, inner))] : undefined;
+    // The conditionals `conditionalCases` reads, whose branches it writes in place.
+    const read = new Set<Obj>();
+    // The parts walked, in place and not: one reached both ways has its keys declared both ways.
+    const seen = { true: new Set<Obj>(), false: new Set<Obj>() };
+    let open = false;
+    let evaluatesAll = false;
+    const walk = (part: Value | undefined, inPlace: boolean) => {
+      if (open || !isObj(part) || seen[`${inPlace}`].has(part)) return;
+      seen[`${inPlace}`].add(part);
+      if (part !== schema && (Object.hasOwn(part, "additionalProperties") || Object.hasOwn(part, "unevaluatedProperties"))) {
+        // `unevaluatedProperties: true` lets every key through and says nothing of the part's own
+        // type, which is no object type at all without another object keyword beside it.
+        if (inPlace && part["unevaluatedProperties"] !== true) evaluatesAll = true;
+        else open = true;
+        return;
+      }
+      if (Object.hasOwn(part, "$dynamicRef") || Object.hasOwn(part, "$recursiveRef")) open = true;
+      if (part !== schema && isObj(part["patternProperties"]) && Object.keys(part["patternProperties"]).length) open = true;
+      for (const [key, property] of Object.entries(isObj(part["properties"]) ? part["properties"] : {})) {
+        if (key === "__proto__") continue;
+        if (!inPlace) keys.add(key);
+        else if (index) index.push(emit(property, inner));
+      }
+      if (typeof part["$ref"] === "string") {
+        const at = locate(part["$ref"]);
+        const target = at && pointTo(at.document.schema, at.path);
+        if (target === undefined) open = true;
+        else {
+          const outer = current;
+          current = at!.document;
+          walk(target, inPlace);
+          current = outer;
+        }
+      }
+      const reading = conditionalsRead(part);
+      for (const test of reading?.tests ?? []) read.add(test.conditional);
+      for (const member of Array.isArray(part["allOf"]) ? part["allOf"] : []) walk(member, inPlace);
+      for (const member of Array.isArray(part["anyOf"]) ? part["anyOf"] : []) walk(member, false);
+      for (const member of Array.isArray(part["oneOf"]) ? part["oneOf"] : []) walk(member, inPlace);
+      if (Object.hasOwn(part, "if")) {
+        walk(part["if"], false);
+        walk(part["then"], inPlace && read.has(part));
+        walk(part["else"], inPlace && read.has(part));
+      }
+      for (const dependent of isObj(part["dependentSchemas"]) ? Object.values(part["dependentSchemas"]) : []) walk(dependent, false);
+    };
+    walk(schema, true);
+    // The keys the schema's own type would declare `unknown`, which no index signature but `unknown` holds.
+    const own = new Set([...(isObj(schema["properties"]) ? Object.keys(schema["properties"]) : []), ...strings(schema["required"])]);
+    if (open || (index && ([...keys].some((key) => !own.has(key)) || evaluatesAll))) return undefined;
+    return { keys, index: index && union([...index, "undefined"]) };
+  }
+
+  /**
    * The type of the values `schema` accepts. `within` holds the JSON types the value is known to
    * have already, when the schema is a member of another's `allOf`, `anyOf` or `oneOf` (the other's
    * own), or a `then` or `else` read as an object; the type leaves out every other JSON type.
+   * `closing` is the closing of the object under `unevaluatedProperties` that the schema is a part
+   * of, in place.
    */
-  function emit(schema: Value, indent: string, within?: ReadonlySet<JsonType>): string {
+  function emit(schema: Value, indent: string, within?: ReadonlySet<JsonType>, closing?: Closing): string {
     if (schema === true) return "unknown";
     if (schema === false) return "never";
     if (!isObj(schema)) return "unknown";
     const possible = new Set([...possibleTypes(schema)].filter((type) => !within || within.has(type)));
     if (!possible.size) return "never";
+    // A schema with `unevaluatedProperties` and a keyword beside it that evaluates keys is closed
+    // in place, when it can be; one with `additionalProperties`, or `unevaluatedProperties` it
+    // cannot close, evaluates every key itself, so the closing of an object it is a part of stops.
+    const own = unevaluated && !Object.hasOwn(schema, "additionalProperties") && schema["unevaluatedProperties"] !== undefined && schema["unevaluatedProperties"] !== true && EVALUATING.some((k) => Object.hasOwn(schema, k)) ? closingOf(schema, indent) : undefined;
+    const evaluatesAll = Object.hasOwn(schema, "additionalProperties") || (unevaluated && Object.hasOwn(schema, "unevaluatedProperties"));
+    const inPlace: InPlace | undefined = own ? { closing: own, root: true } : closing && !evaluatesAll ? { closing, root: false } : undefined;
     const parts: string[] = [];
-    if (typeof schema["$ref"] === "string") parts.push(refType(schema["$ref"], indent));
+    if (typeof schema["$ref"] === "string") parts.push(refType(schema["$ref"], indent, inPlace && { within: possible, closing: inPlace.closing }));
     if (Object.hasOwn(schema, "const")) parts.push(literal(schema["const"]!));
     else if (Array.isArray(schema["enum"])) parts.push(union(schema["enum"].map((value) => literal(value))));
     else {
       // Without `type`, a keyword that applies to one type constrains a value of that type alone,
       // and a value of every other type the schema allows passes it, as the spec has it.
       const declared = typeof schema["type"] === "string" ? [schema["type"]] : strings(schema["type"]);
-      const objects = ["properties", "required", "additionalProperties", "patternProperties"].some((k) => Object.hasOwn(schema, k));
+      // So is `unevaluatedProperties`, where it says something of the object's own type: as
+      // `additionalProperties` by another name, or closing the object with keys of its own.
+      const rest = unevaluated ? schema["unevaluatedProperties"] : undefined;
+      const restConstrains = rest !== undefined && rest !== true && (own ? own.keys.size > 0 || own.index !== undefined : !EVALUATING.some((k) => Object.hasOwn(schema, k)));
+      const objects = restConstrains || ["properties", "required", "additionalProperties", "patternProperties"].some((k) => Object.hasOwn(schema, k));
       const arrays = ["items", ...(prefixItems ? ["prefixItems"] : []), ...(itemLists ? ["additionalItems"] : [])].some((k) => Object.hasOwn(schema, k));
       // The types the keywords constrain first, then the rest.
       const order = [...(objects ? ["object"] : []), ...(arrays ? ["array"] : []), ...JSON_TYPES.filter((type) => !(objects && type === "object") && !(arrays && type === "array"))] as JsonType[];
@@ -537,14 +694,16 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       // `$ref` or the enclosing schema, which say them as parts of their own.
       const constrained = (objects && possible.has("object")) || (arrays && possible.has("array"));
       const types = declared.length ? declared.filter((name) => jsonType(name) === undefined || possible.has(jsonType(name)!)) : constrained ? order.filter((type) => possible.has(type)) : [];
-      if (types.length) parts.push(union(types.map((name) => typeOf(name, schema, indent))));
+      if (types.length) parts.push(union(types.map((name) => typeOf(name, schema, indent, inPlace))));
     }
-    for (const member of Array.isArray(schema["allOf"]) ? schema["allOf"] : []) parts.push(emit(member, indent, possible));
+    for (const member of Array.isArray(schema["allOf"]) ? schema["allOf"] : []) parts.push(emit(member, indent, possible, inPlace?.closing));
     for (const keyword of ["anyOf", "oneOf"]) {
       const members = schema[keyword];
-      if (Array.isArray(members)) parts.push(union(members.map((member) => emit(member, indent, possible))));
+      if (Array.isArray(members)) parts.push(union(members.map((member) => emit(member, indent, possible, inPlace?.closing))));
     }
-    const meaningful = parts.filter((part) => part !== "unknown");
+    // An object closed in place whose own type declares no key adds nothing to its parts' types.
+    const typed = parts.filter((part) => part !== "unknown");
+    const meaningful = typed.length > 1 ? typed.filter((part) => part !== "{}") : typed;
     if (parts.includes("never")) return "never";
     if (!meaningful.length) return "unknown";
     return meaningful.length === 1 ? meaningful[0]! : meaningful.map(paren).join(" & ");
@@ -568,5 +727,5 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     }),
   ].join("\n\n");
   const lines = [...imports].map(([specifier, byName]) => `import type { ${[...byName].map(([exported, local]) => (exported === local ? exported : `${exported} as ${local}`)).join(", ")} } from ${JSON.stringify(specifier)};`);
-  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, rootType, definitions: definitions.map(([, , , definition]) => definition) };
+  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, rootType, rootDoc: doc(root, "", docOfRoot(root)), definitions: definitions.map(([, , , definition]) => definition) };
 }

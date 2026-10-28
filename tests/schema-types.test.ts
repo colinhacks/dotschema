@@ -157,6 +157,31 @@ test("a doc comment before a definition's key is the definition's, and one befor
   assert.equal(emitText("{ definitions: { /** An id. */ id: { type: 'string' } }, $ref: '#/definitions/id' }", "json5"), "export type Type = Id;\n\n/** An id. */\nexport type Id = string;");
 });
 
+test("readOnly is readonly, and deprecated, default and examples are tags of the doc comment, as JSON, after its text", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      id: { type: "string", readOnly: true },
+      email: { type: "string", description: "Where */ we write.", deprecated: true },
+      role: { enum: ["admin", "member"], default: "member", examples: ["admin", "member"] },
+      tags: { type: "array", items: { type: "string" }, default: [], examples: [["a", "*/"], { x: 1 }] },
+      // `title` and `writeOnly` leave no trace.
+      n: { type: "number", title: "N", writeOnly: true },
+    },
+    required: ["id"],
+    additionalProperties: false,
+  };
+  assert.equal(
+    emit(schema),
+    'export interface Type {\n  readonly id: string;\n  /**\n   * Where *\\/ we write.\n   * @deprecated\n   */\n  email?: string | undefined;\n  /**\n   * @default "member"\n   * @example "admin"\n   * @example "member"\n   */\n  role?: "admin" | "member" | undefined;\n  /**\n   * @default []\n   * @example ["a", "*\\/"]\n   * @example { "x": 1 }\n   */\n  tags?: string[] | undefined;\n  n?: number | undefined;\n}',
+  );
+  // A comment that has the tag already keeps it once; a definition and the root take the tags too.
+  assert.equal(emitText('{ "type": "object", "properties": { /** Old.\n * @deprecated Use b. */ "a": { "deprecated": true } }, "additionalProperties": false }'), "export interface Type {\n  /**\n   * Old.\n   * @deprecated Use b.\n   */\n  a?: unknown;\n}");
+  assert.equal(emit({ $ref: "#/$defs/old", deprecated: true, $defs: { old: { type: "string", deprecated: true, default: "x" } } }), '/** @deprecated */\nexport type Type = Old;\n\n/**\n * @deprecated\n * @default "x"\n */\nexport type Old = string;');
+  // JSON5's values that JSON lacks, as JSON5 writes them.
+  assert.equal(emitText("{ type: 'number', default: Infinity, examples: [NaN, -Infinity] }", "json5"), "/**\n * @default Infinity\n * @example NaN\n * @example -Infinity\n */\nexport type Type = number;");
+});
+
 test("every emitted declaration type-checks", () => {
   const schemas = [
     { type: "object", properties: { a: { type: "string" }, b: { type: "array", items: { $ref: "#/$defs/x" } } }, additionalProperties: { type: "number" }, $defs: { x: { anyOf: [{ type: "object", properties: { k: { const: "x" } }, required: ["k"] }, { enum: [1, 2] }] } } },
@@ -169,6 +194,7 @@ test("every emitted declaration type-checks", () => {
   schemas.forEach((schema, i) => writeFileSync(join(dir, `s${i}.ts`), `${emit(JSON.parse(JSON.stringify(schema)))}\n`));
   // Doc comments, from a parsed file's `/**` comments.
   writeFileSync(join(dir, "docs.ts"), `${emitText('/** Root. */ { "type": "object", "properties": { /**\n * Two lines,\n * @deprecated and a tag. */ "a": { "type": "string" } }, "$defs": { /** A definition. */ "d": {} } }')}\n`);
+  writeFileSync(join(dir, "annotations.ts"), `${emit({ type: "object", properties: { a: { readOnly: true, deprecated: true, default: { "*/": "*/" }, examples: [[1, "@x"], null] } } })}\nexport const t: Type = { a: 1 };\n`);
   writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, target: "esnext", module: "nodenext" }, include: ["*.ts"] }));
   const { status, out } = run(TSC, ["-p", join(dir, "tsconfig.json")]);
   assert.equal(out, "");
@@ -300,6 +326,68 @@ test("the type admits every value the validator accepts, and narrows: conditiona
     { schema: { items: { type: "string" } }, samples: [["a"], [1], 5, {}] },
   ]);
   assert.deepEqual(counts, [4, 3, 2, 1, 5, 2, 2, 3, 3]);
+});
+
+test("unevaluatedProperties closes an object whose keys allOf, a $ref, oneOf and a conditional evaluate, each part declaring its own", () => {
+  // A `$ref` in place is inlined, without the index signature its name would bring.
+  assert.equal(
+    emit({ type: "object", properties: { at: { type: "string" } }, allOf: [{ $ref: "#/$defs/base" }], oneOf: [{ properties: { kind: { const: "a" }, x: { type: "number" } }, required: ["kind"] }, { properties: { kind: { const: "b" } }, required: ["kind"] }], unevaluatedProperties: false, $defs: { base: { properties: { id: { type: "string" } }, required: ["id"] } } }).split("\n\n")[0],
+    'export type Type = {\n  at?: string | undefined;\n} & {\n  id: string;\n} & ({\n  kind: "a";\n  x?: number | undefined;\n} | {\n  kind: "b";\n});',
+  );
+  // A conditional the type reads closes each of its members to its own branch.
+  assert.equal(
+    emit({ type: "object", properties: { kind: { enum: ["a", "b"] } }, required: ["kind"], if: { properties: { kind: { const: "a" } } }, then: { properties: { x: { type: "number" } } }, else: { properties: { y: { type: "string" } } }, unevaluatedProperties: false }),
+    'export type Type = {\n  kind: "a" | "b";\n} & (({ kind: "a" } & {\n  x?: number | undefined;\n}) | ({ kind: "b" } & {\n  y?: string | undefined;\n}));',
+  );
+  // As a schema, unevaluatedProperties is an index signature that holds every key, so every key's type is in it.
+  assert.equal(emit({ type: "object", properties: { a: { type: "string" } }, allOf: [{ properties: { b: { type: "number" } } }], unevaluatedProperties: { type: "boolean" } }), "export type Type = {\n  a?: string | undefined;\n  [key: string]: boolean | string | number | undefined;\n} & {\n  b?: number | undefined;\n};");
+  // With nothing beside it that evaluates a key, it is additionalProperties.
+  assert.equal(emit({ type: "object", properties: { a: { type: "string" } }, unevaluatedProperties: { type: "boolean" } }), "export interface Type {\n  a?: string | undefined;\n  [key: string]: boolean | string | undefined;\n}");
+});
+
+test("the keys of anyOf's members and of the parts the type does not read are optional and unknown, since a value may hold them", () => {
+  // A value can pass both members of `anyOf`, and hold `a` and `b`; `c` is evaluated where `a` is present.
+  assert.equal(
+    emit({ type: "object", anyOf: [{ properties: { a: { type: "string" } }, required: ["a"] }, { properties: { b: { type: "number" } }, required: ["b"] }], dependentSchemas: { a: { properties: { c: {} } } }, unevaluatedProperties: false }),
+    "export type Type = {\n  a?: unknown;\n  b?: unknown;\n  c?: unknown;\n} & ({\n  a: string;\n} | {\n  b: number;\n});",
+  );
+  // ajv counts an `if`'s keys as evaluated beside an `else` alone, also where the `if` failed.
+  assert.equal(emit({ type: "object", if: { properties: { foo: { const: "then" } }, required: ["foo"] }, else: { properties: { baz: { type: "string" } }, required: ["baz"] }, unevaluatedProperties: false }), "export interface Type {\n  foo?: unknown;\n  baz?: unknown;\n}");
+});
+
+test("where a part could let any key through, or a $ref is not followed, unevaluatedProperties leaves the object open", () => {
+  const open = (schema: Record<string, unknown>) => assert.match(emit({ type: "object", ...schema, unevaluatedProperties: false }), /\[key: string\]: unknown;/, JSON.stringify(schema));
+  // A member of anyOf that evaluates every key, when it passes; patternProperties in a part, whose index signature would hold every key; a URL and a dynamic reference.
+  open({ anyOf: [{ properties: { a: {} }, additionalProperties: true }] });
+  open({ allOf: [{ patternProperties: { "^x": { type: "number" } } }] });
+  open({ allOf: [{ $ref: "https://example.com/a" }] });
+  open({ $dynamicAnchor: "a", allOf: [{ $dynamicRef: "#a" }] });
+  // An index signature of the object's own beside a key typed unknown, and a part that sets unevaluatedProperties to true.
+  open({ patternProperties: { "^x": { type: "number" } }, dependentSchemas: { a: { properties: { c: {} } } } });
+  open({ allOf: [{ unevaluatedProperties: true }] });
+  // Draft-07 has no unevaluatedProperties.
+  assert.match(schemaDeclarations({ type: "object", allOf: [{ properties: { a: {} } }], unevaluatedProperties: false }, undefined, "draft-07"), /\[key: string\]: unknown;/);
+});
+
+test("the type of an object closed under unevaluatedProperties admits every value the validator accepts, and refuses a key nothing evaluates", async () => {
+  const D = "https://json-schema.org/draft/2020-12/schema";
+  const refused = (key: string) => ["declare const v: Type;", "// @ts-expect-error: no part evaluates the key", `export const no: Type = { ...v, ${key}: 1 };`].join("\n");
+  const counts = await agrees([
+    { schema: { $schema: D, type: "object", properties: { a: { type: "string" } }, allOf: [{ properties: { b: { type: "number" } } }, { required: ["c"] }, { properties: { c: true } }], unevaluatedProperties: false }, samples: [{ c: 1 }, { a: "x", b: 1, c: 1 }, { c: 1, z: 1 }, {}], use: refused("z") },
+    { schema: { $schema: D, $ref: "#/$defs/base", properties: { extra: { type: "number" } }, unevaluatedProperties: false, $defs: { base: { type: "object", properties: { a: { type: "string" } }, required: ["a"] } } }, samples: [{ a: "x" }, { a: "x", extra: 1 }, { a: "x", z: 1 }], use: refused("z") },
+    { schema: { $schema: D, type: "object", anyOf: [{ properties: { kind: { const: "a" }, x: { type: "number" } }, required: ["kind"] }, { properties: { y: { type: "number" } } }], unevaluatedProperties: false }, samples: [{ kind: "a", x: 1, y: 2 }, { y: 1 }, { kind: "b", x: 1 }, { kind: "a", z: 1 }], use: refused("z") },
+    { schema: { $schema: D, type: "object", oneOf: [{ properties: { kind: { const: "a" }, x: { type: "number" } }, required: ["kind"] }, { properties: { kind: { const: "b" } }, required: ["kind"], additionalProperties: true }], unevaluatedProperties: false }, samples: [{ kind: "a", x: 1 }, { kind: "b", z: 1 }, { kind: "a", z: 1 }], use: ["declare const v: Type & { kind: \"a\" };", "// @ts-expect-error: only the member that passed evaluates its keys", "export const no: Type = { ...v, z: 1 };"].join("\n") },
+    {
+      schema: { $schema: D, type: "object", properties: { kind: { enum: ["a", "b"] } }, required: ["kind"], if: { properties: { kind: { const: "a" } } }, then: { properties: { x: { type: "number" } } }, unevaluatedProperties: false },
+      samples: [{ kind: "a", x: 1 }, { kind: "b" }, { kind: "b", x: 1 }],
+      use: ["declare const v: Type & { kind: \"b\" };", "// @ts-expect-error: `x` is evaluated only where the `if` passed", "export const no: Type = { ...v, x: 1 };"].join("\n"),
+    },
+    { schema: { $schema: D, if: { properties: { foo: { const: "then" } }, required: ["foo"] }, else: { properties: { baz: { type: "string" } }, required: ["baz"] }, unevaluatedProperties: false }, samples: [{ baz: "b" }, { foo: "else", baz: "b" }, { foo: "then" }, { foo: "then", bar: 1 }] },
+    { schema: { $schema: D, type: "object", properties: { a: { type: "string" } }, dependentSchemas: { a: { properties: { b: { type: "number" } } } }, unevaluatedProperties: false }, samples: [{ a: "s", b: 1 }, { b: 1 }, { a: "s", z: 1 }], use: refused("z") },
+    { schema: { $schema: D, type: "object", patternProperties: { "^x": { type: "number" } }, allOf: [{ properties: { b: { type: "boolean" } } }], unevaluatedProperties: { type: "string" } }, samples: [{ x1: 1, b: true, s: "s" }, { s: 1 }, { x1: "s" }] },
+    { schema: { $schema: D, properties: { a: { type: "string" } }, allOf: [{ unevaluatedProperties: true }], unevaluatedProperties: false }, samples: [{ a: "s", z: 1 }, 5] },
+  ]);
+  assert.deepEqual(counts, [2, 2, 2, 2, 2, 2, 1, 1, 2]);
 });
 
 test("a required key that `properties` does not list takes the type of the patterns that match it, or of additionalProperties", async () => {
