@@ -21,7 +21,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ReactNode } from 'react';
-import { markSvg } from '@/lib/mark';
+import { markColor, markSvgIn } from '@/lib/mark';
 import { ogSize } from '@/lib/og';
 
 const color = {
@@ -89,9 +89,9 @@ function Lines({ lines, height }: { lines: Token[][]; height: number }) {
   );
 }
 
-/** The mark of lib/mark.ts. */
+/** The mark of lib/mark.ts, in the dark page's ink on the graphite ground. */
 function Mark({ size }: { size: number }) {
-  const src = `data:image/svg+xml;base64,${Buffer.from(markSvg()).toString('base64')}`;
+  const src = `data:image/svg+xml;base64,${Buffer.from(markSvgIn(markColor.paper)).toString('base64')}`;
   return <img src={src} width={size} height={size} />;
 }
 

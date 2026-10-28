@@ -13,37 +13,45 @@
  * ways up (`flip.html`) picked D, the point up and the dot lowered into the wide part. The shield
  * keeps the proportions of Zod's (`logo.svg` in Zod's repository: a flat edge 60% of the width, the
  * widest point 44% of the way from it), turned over on a 32-unit square, its corners rounded by a
- * 2-unit stroke, and the gradient is Zod's, #3a6aff at the foot to #45a9ff at the top. The same
- * drawing serves the light and the dark page.
+ * 2-unit stroke. It was solid in Zod's gradient, #3a6aff at the foot to #45a9ff at the top, until the
+ * site took Monolith the same day (app/global.css): now it is a stamp in the headings' ink, #0b0b0c
+ * on the light page and #f4f4f5 on the dark one, so it and every accent are one family.
  */
 export type Mark = {
   name: string;
-  /**
-   * The drawing's elements, in SVG, on a 32-unit square. `id` names its gradient and must be unique
-   * in the document: the brand is drawn twice on a page, one copy hidden at each width, and a
-   * browser paints no gradient from inside a hidden SVG.
-   */
-  svg: (id: string) => string;
+  /** The drawing's elements, in SVG, on a 32-unit square, in one paint: a colour, or `currentColor`. */
+  svg: (paint: string) => string;
 };
 
 /**
  * The dot is a hole in the shape, a circle of radius 5.5 under the even-odd rule, which the 2-unit
- * stroke narrows to 4.5, rather than a mask, so the drawing needs one id and no more.
+ * stroke narrows to 4.5.
  */
 const shieldDot: Mark = {
   name: 'Shield dot',
-  svg: (id) =>
-    `<defs><linearGradient id="${id}" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#3a6aff"/><stop offset="1" stop-color="#45a9ff"/></linearGradient></defs>` +
-    `<path d="M8.6 26.5H23.4L28.8 17.4L16 6L3.2 17.4ZM16 13.1A5.5 5.5 0 1 0 16 24.1A5.5 5.5 0 1 0 16 13.1Z" fill="url(#${id})" fill-rule="evenodd" stroke="url(#${id})" stroke-width="2" stroke-linejoin="round"/>`,
+  svg: (paint) =>
+    `<path d="M8.6 26.5H23.4L28.8 17.4L16 6L3.2 17.4ZM16 13.1A5.5 5.5 0 1 0 16 24.1A5.5 5.5 0 1 0 16 13.1Z" fill="${paint}" fill-rule="evenodd" stroke="${paint}" stroke-width="2" stroke-linejoin="round"/>`,
 };
 
 /** The mark the site shows. */
 export const mark: Mark = shieldDot;
 
-/** The dark page's background, the tile of the icons a home screen shows. */
-export const markColor = { background: '#0e0e0e' };
+/**
+ * Monolith's two inks, the headings' colour of each page (app/global.css), and the tile of the icons
+ * a home screen shows, the dark page's ground.
+ */
+export const markColor = { ink: '#0b0b0c', paper: '#f4f4f5', background: '#0b0b0c' };
 
-/** The mark as an SVG document, the same on a light page and a dark one. */
+/**
+ * The mark as an SVG document: the light page's ink, or the dark page's where the reader's system
+ * is dark, as a browser tab's favicon.
+ */
 export function markSvg(drawing: Mark = mark): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${drawing.svg('mark')}</svg>\n`;
+  const style = `<style>path{fill:${markColor.ink};stroke:${markColor.ink}}@media (prefers-color-scheme:dark){path{fill:${markColor.paper};stroke:${markColor.paper}}}</style>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${style}${drawing.svg(markColor.ink)}</svg>\n`;
+}
+
+/** The mark in one paint, for a picture whose ground is known: the tiles and the link preview. */
+export function markSvgIn(paint: string, drawing: Mark = mark): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${drawing.svg(paint)}</svg>\n`;
 }

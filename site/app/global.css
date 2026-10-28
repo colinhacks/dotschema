@@ -14,38 +14,45 @@
   --font-hand: 'Caveat', 'Caveat Fallback';
 }
 
-/* ── dotschema: neutral greys and one blue ────────────────────────────────────
-   Every surface and rule is a colourless grey, white by day and near-black by
-   night (Reylo's greys), so the blue is the page's only colour: it marks links,
-   the open Twoslash name, the active table-of-contents entry, the selection and
-   the mark (docs-kit's `--dk-accent`). The blue is the README demo's
-   background, #3d5afe, by day; where it carries text (`--color-fd-primary`:
-   active tabs, links on hover, the star note) it deepens to #304ffe. By night
-   both are #8c9eff. Measured as WCAG contrast on the page, the code blocks, the
-   muted panels and the popups: #3d5afe 4.71 to 5.13 and #304ffe 5.24 to 5.71 by
-   day, #8c9eff 7.00 to 7.77 by night, each AA for text or better. The code
-   keeps docs-kit's GitHub colours. ── */
+/* ── Monolith ─────────────────────────────────────────────────────────────────
+   The maintainer's pick of 2026-10-27 among ten looks ("Monolith is so good"):
+   no blue chrome at all. The page is ink on a grained ground, #0b0b0c on
+   #f4f4f2 by day and #f4f4f5 on #0b0b0c by night; the mark is a solid stamp in
+   the headings' ink (lib/mark.ts), links are heavy ink underlines, the title is
+   huge and tight, and colour is left to the code, where Zod's blue carries the
+   keywords (lib/mdx-options.ts). Every bold stroke is one width and one ink,
+   `--dotschema-rule`: the title's and each section's rule, the table of
+   contents' marker, a callout's bar, the active tab's rule and a link's
+   underline ("Make sure that all the bold borders are consistent everywhere");
+   every other line is the 1px hairline `--color-fd-border`, and every card's
+   corner is `--dotschema-radius`. Measured as WCAG contrast: the muted grey
+   #6b6b6b 4.85:1 on the day ground and #8a8a8a 5.6:1 on the night one. ── */
 
 :root {
-  --dk-accent: #3d5afe;
+  --dotschema-ink: #0b0b0c;
+  --dotschema-rule: 3px;
+  --dotschema-radius: 4px;
+  --dotschema-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .24 -.08'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --dk-accent: var(--dotschema-ink);
+  --dk-star: var(--dotschema-ink);
 
-  --color-fd-background: hsl(0, 0%, 100%);
-  --color-fd-foreground: hsl(0, 0%, 16%);
-  --color-fd-headings: hsl(0, 0%, 5%);
-  --color-fd-muted: hsl(0, 0%, 96%);
-  --color-fd-muted-foreground: hsl(0, 0%, 40%);
-  --color-fd-popover: hsl(0, 0%, 100%);
-  --color-fd-popover-foreground: hsl(0, 0%, 16%);
-  --color-fd-card: hsl(0, 0%, 98%);
-  --color-fd-card-foreground: hsl(0, 0%, 16%);
-  --color-fd-border: hsl(0, 0%, 89%);
-  --color-fd-primary: #304ffe;
-  --color-fd-primary-foreground: hsl(0, 0%, 100%);
-  --color-fd-secondary: hsl(0, 0%, 97%);
-  --color-fd-secondary-foreground: hsl(0, 0%, 16%);
-  --color-fd-accent: hsl(0, 0%, 94%);
-  --color-fd-accent-foreground: hsl(0, 0%, 5%);
-  --color-fd-ring: #3d5afe;
+  --color-fd-background: #f4f4f2;
+  --color-fd-foreground: #262626;
+  --color-fd-headings: #0b0b0c;
+  --color-fd-muted: #efefec;
+  --color-fd-muted-foreground: #6b6b6b;
+  --color-fd-popover: #fbfbfa;
+  --color-fd-popover-foreground: #262626;
+  --color-fd-card: #fbfbfa;
+  --color-fd-card-foreground: #262626;
+  --color-fd-border: #d9d9d6;
+  --color-fd-primary: #0b0b0c;
+  --color-fd-primary-foreground: #ffffff;
+  --color-fd-secondary: #f9f9f7;
+  --color-fd-secondary-foreground: #262626;
+  --color-fd-accent: #e8e8e5;
+  --color-fd-accent-foreground: #0b0b0c;
+  --color-fd-ring: #0b0b0c;
 
   --color-fd-info: hsl(212, 45%, 42%);
   --color-fd-warning: hsl(40, 92%, 36%);
@@ -54,30 +61,181 @@
 }
 
 .dark {
-  --dk-accent: #8c9eff;
+  --dotschema-ink: #f4f4f5;
+  --dotschema-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .21 -.07'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 
-  --color-fd-background: hsl(0, 0%, 5.5%);
-  --color-fd-foreground: hsl(0, 0%, 86%);
-  --color-fd-headings: hsl(0, 0%, 98%);
-  --color-fd-muted: hsl(0, 0%, 10%);
-  --color-fd-muted-foreground: hsl(0, 0%, 63%);
-  --color-fd-popover: hsl(0, 0%, 8%);
-  --color-fd-popover-foreground: hsl(0, 0%, 86%);
-  --color-fd-card: hsl(0, 0%, 8.5%);
-  --color-fd-card-foreground: hsl(0, 0%, 86%);
-  --color-fd-border: hsl(0, 0%, 17%);
-  --color-fd-primary: #8c9eff;
-  --color-fd-primary-foreground: hsl(0, 0%, 5.5%);
-  --color-fd-secondary: hsl(0, 0%, 9%);
-  --color-fd-secondary-foreground: hsl(0, 0%, 98%);
-  --color-fd-accent: hsl(0, 0%, 14%);
-  --color-fd-accent-foreground: hsl(0, 0%, 98%);
-  --color-fd-ring: #8c9eff;
+  --color-fd-background: #0b0b0c;
+  --color-fd-foreground: #d9d9d9;
+  --color-fd-headings: #f4f4f5;
+  --color-fd-muted: #18181a;
+  --color-fd-muted-foreground: #8a8a8a;
+  --color-fd-popover: #121213;
+  --color-fd-popover-foreground: #d9d9d9;
+  --color-fd-card: #121213;
+  --color-fd-card-foreground: #d9d9d9;
+  --color-fd-border: #2a2a2a;
+  --color-fd-primary: #f4f4f5;
+  --color-fd-primary-foreground: #0b0b0c;
+  --color-fd-secondary: #101011;
+  --color-fd-secondary-foreground: #f4f4f5;
+  --color-fd-accent: #222224;
+  --color-fd-accent-foreground: #f4f4f5;
+  --color-fd-ring: #f4f4f5;
 
   --color-fd-info: hsl(212, 60%, 70%);
   --color-fd-warning: hsl(46, 90%, 60%);
   --color-fd-success: hsl(150, 40%, 60%);
   --color-fd-error: hsl(2, 70%, 68%);
+}
+
+/* The grain lies on the page itself, so the columns that scroll over it keep it. */
+body {
+  background-image: var(--dotschema-grain);
+}
+
+/* The brand: the name in the title's weight and tracking. */
+#nd-docs-layout a[href='/'] {
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+/* The title, huge and tight, ruled off; the tagline under it in the headings' ink. */
+#nd-page h1 {
+  font-size: clamp(3rem, 2rem + 5vw, 4.5rem);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.065em;
+  padding-bottom: 0.875rem;
+  border-bottom: var(--dotschema-rule) solid var(--dotschema-ink);
+}
+
+#nd-page .dk-title-row {
+  border-bottom: var(--dotschema-rule) solid var(--dotschema-ink);
+}
+
+#nd-page .prose .dk-subheader {
+  font-size: 1.3125rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--color-fd-headings);
+}
+
+html .prose h2 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  border-bottom: var(--dotschema-rule) solid var(--dotschema-ink);
+}
+
+html .prose h3 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+/* Links: the text's colour, a heavy ink underline. */
+html .prose a:not(.not-prose a) {
+  font-weight: 600;
+  text-decoration-color: var(--dotschema-ink);
+  text-decoration-thickness: var(--dotschema-rule);
+  text-underline-offset: 4px;
+}
+
+/* The table of contents: the active entry bold, its marker the rule's ink and width on the
+   hairline track (Fumadocs' path, `stroke-fd-primary`). */
+#nd-toc a[data-active='true'] {
+  font-weight: 700;
+}
+
+#nd-toc svg path.stroke-fd-primary {
+  stroke-width: var(--dotschema-rule);
+}
+
+/* The active tab's rule (Fumadocs' bar under the label). */
+#nd-page [role='tab'][data-state='active'] > div {
+  height: var(--dotschema-rule);
+  background: var(--dotschema-ink);
+}
+
+/* A callout is a bar of the rule's ink and width beside its text, with no box. */
+#nd-page .dk-callout {
+  border-width: 0 0 0 var(--dotschema-rule);
+  border-color: var(--dotschema-ink);
+  border-radius: 0;
+  background: transparent;
+}
+
+#nd-page .dk-callout-head {
+  background: transparent;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+#nd-page .dk-callout-body figure.shiki {
+  background: var(--color-fd-card);
+}
+
+/* Every card's corner: code blocks, Fumadocs' tabs and their panels (`rounded-xl`), tables, popups,
+   the accordions' answers, and the chips of inline code. */
+#nd-page figure.shiki,
+#nd-page .rounded-xl,
+#nd-page .prose table,
+#nd-page .dk-accordions [data-dk-accordion-panel] > div,
+html #nd-page .prose :where(code):not(:where(pre code)),
+#nd-toc code,
+.fd-twoslash-popover,
+#nd-page .twoslash-popup-container {
+  border-radius: var(--dotschema-radius);
+}
+
+/* Twoslash's popups, the pinned type cards and the pinned error cards are the ink, by day and by
+   night: a dark card on the light page and a light one on the dark page, each painting its code in
+   the other theme's colours. */
+.fd-twoslash-popover,
+#nd-page :is(.twoslash-query-line, .dk-error-line) .twoslash-popup-container {
+  background: var(--dotschema-ink);
+  border-color: var(--dotschema-ink);
+  color: var(--color-fd-background);
+}
+
+#nd-page figure.shiki .dk-error-text .dk-error-message {
+  color: var(--color-fd-background);
+}
+
+#nd-page figure.shiki .dk-error-text .dk-error-source {
+  color: color-mix(in srgb, var(--color-fd-background) 60%, var(--dotschema-ink));
+}
+
+html:not(.dark) :is(.fd-twoslash-popover, .twoslash-query-line .twoslash-popup-container) .shiki span {
+  color: var(--shiki-dark) !important;
+}
+
+.dark :is(.fd-twoslash-popover, .twoslash-query-line .twoslash-popup-container) .shiki span {
+  color: var(--shiki-light) !important;
+}
+
+.fd-twoslash-popover .twoslash-popup-docs {
+  border-top-color: color-mix(in srgb, var(--color-fd-background) 20%, transparent);
+  color: color-mix(in srgb, var(--color-fd-background) 70%, var(--dotschema-ink));
+}
+
+/* The code's keywords in Zod's blue (lib/mdx-options.ts) are set a weight heavier. */
+html:not(.dark) .shiki span[style*='--shiki-light:#3060ff' i],
+.dark .shiki span[style*='--shiki-dark:#6f95ff' i] {
+  font-weight: 600;
+}
+
+/* A terminal's red (`ansi` blocks: tsc's "error") is GitHub's dark red, #f97583, which the
+   replacements above take for a keyword; its light twin, #cb2431, tells it apart. */
+.dark .shiki span[style*='--shiki-light:#cb2431' i] {
+  color: #f97583 !important;
+  font-weight: inherit;
+}
+
+/* The theme switch: the chosen theme, Fumadocs' `bg-fd-accent` icon, is a disc of ink. */
+[data-theme-toggle] > svg.bg-fd-accent {
+  background: var(--dotschema-ink);
+  color: var(--color-fd-background);
 }
 
 /* ── The Inference section's cards (components/inferred.tsx) ──────────────────
@@ -88,8 +246,8 @@
 #nd-page .dotschema-inferred {
   margin-block: 1rem;
   border: 1px solid var(--color-fd-border);
-  border-radius: 0.75rem;
-  background: var(--color-fd-secondary);
+  border-radius: var(--dotschema-radius);
+  background: var(--color-fd-card);
   overflow: hidden;
 }
 
