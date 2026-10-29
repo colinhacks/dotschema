@@ -43,10 +43,10 @@ import { pageFiles } from './page-files.ts';
 //   section (components/inferred.tsx): its children become two labelled rows, the block as the
 //   Schema, without its title bar (the block's `title` still names the file it is, and is taken off
 //   only once every block has seen it), and as the Type the declarations of the module dotschema
-//   gives that file, without the module's imports, its exports as `output` and `input`, the schema's own text
-//   and the values, the root first as its bare type (`string | number`, `{ ... }`), named only
-//   where the types refer to it or it has a doc comment, and each definition it uses declared by
-//   its name. A schema with a problem, or a type wider than a code line may be, fails the build.
+//   gives that file, without the module's imports, its exports as `output` and `input`, its input
+//   types where they are its own (`UserInput`), the schema's own text and the values, the root
+//   first as its bare type (`string | number`, `{ ... }`), named only where the types refer to it
+//   or it has a doc comment, and each definition it uses declared by its name. A schema with a problem, or a type wider than a code line may be, fails the build.
 
 type Node = {
   type: string;
@@ -86,22 +86,44 @@ const jsx = (name: string, attributes: [string, string][], children: Node[]): No
 /**
  * The declarations a schema's module gives its root and its definitions, as a card's Type row shows
  * them: the text before the schema's own (`type Json`), without the imports, the exports as
- * `output` and `input`, or `export` before a definition's declaration, and the root as its bare
- * type (`bare`).
+ * `output` and `input`, the declarations of each input type (`UserInput`, what a value
+ * `.validate()` accepts may be, where the card shows the type of the value it gives), or `export`
+ * before a definition's declaration, and the root as its bare type (`bare`).
  */
 function declarations(types: string): string {
   const end = types.search(/^\/\*\* The JSON Schema as written|^type Json = /m);
-  const lines = (end < 0 ? types : types.slice(0, end)).split('\n');
+  // The input types: those the module exports `as input`, typed apart from the root or a
+  // definition, and a definition's alias of itself where it is not (`export type AddressInput = Address;`).
+  const inputs = new Set([...types.matchAll(/\b(\w+) as input\b/g)].map((match) => match[1]!));
+  for (const [, alias, name] of types.matchAll(/^export type (\w+) = (\w+);$/gm)) if (alias!.startsWith(`${name}Input`)) inputs.add(alias!);
+  const lines = withoutInputs((end < 0 ? types : types.slice(0, end)).split('\n'), inputs);
   // The module names its root for the file, exports it as `output` (`export type { Id as output };`)
-  // and declares `input` an alias of it (`export type input = Id;`).
+  // and its input as `input`, an alias of it (`export type input = Id;`) or a re-export.
   const root = lines.map((line) => /^export type \{ (\w+) as output \};$/.exec(line)?.[1]).find(Boolean) ?? 'output';
   const text = lines
-    .filter((line) => !/^import type /.test(line) && !/^export type \{ \w+ as output \};$/.test(line) && !/^export type input = \w+;$/.test(line))
+    .filter((line) => !/^import type /.test(line) && !/^export type \{ \w+ as (?:output|input) \};$/.test(line) && !/^export type input = \w+;$/.test(line))
     .join('\n')
     .replace(/^export (?=interface |type )/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   return bare(text, root);
+}
+
+/** `lines` without the declaration of each name of `names`, and the doc comment above it. */
+function withoutInputs(lines: string[], names: Set<string>): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const name = /^(?:export )?(?:interface (\w+) |type (\w+) = )/.exec(lines[i]!);
+    if (!name || !names.has((name[1] ?? name[2])!)) {
+      out.push(lines[i]!);
+      continue;
+    }
+    // A declaration ends on its own line or on the first line at its own indent that closes it.
+    const end = /^(?:export )?type .*;$/.test(lines[i]!) ? i : lines.findIndex((line, j) => j > i && /^\S/.test(line) && /[;}]$/.test(line));
+    if (out.at(-1)?.trimEnd().endsWith('*/')) while (out.length && !out.pop()!.trimStart().startsWith('/**'));
+    i = end < 0 ? lines.length : end;
+  }
+  return out;
 }
 
 /**

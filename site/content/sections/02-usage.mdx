@@ -30,6 +30,142 @@ if (result.issues) {
 }
 ```
 
+### Defaults
+
+A property's `default` is filled in where the value leaves it out:
+
+```jsonc title="settings.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "theme": {
+      "enum": ["light", "dark"],
+      "default": "light"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+```ts twoslash title="main.ts"
+import settings from "./settings.schema.jsonc";
+
+settings.validate({});
+// { value: { theme: "light" } }
+```
+
+A default its own schema refuses is a type error:
+
+```jsonc title="settings.schema.jsonc" errors
+{
+  "type": "object",
+  "properties": {
+    "theme": {
+      "enum": ["light", "dark"],
+      "default": "blue"
+    }
+  }
+}
+```
+
+### Transforms
+
+The `transform` keyword changes a string before it's checked:
+
+```jsonc title="handle.schema.jsonc"
+{
+  "type": "string",
+  "pattern": "^[a-z_]+$",
+  "transform": ["trim", "toLowerCase"]
+}
+```
+
+```ts twoslash title="main.ts"
+import handle from "./handle.schema.jsonc";
+
+handle.validate("  Ada_L ");
+// { value: "ada_l" }
+```
+
+The transforms are `trim`, `trimStart`, `trimEnd`, `toLowerCase`, `toUpperCase` and `toEnumCase`, which gives an `enum`'s own spelling:
+
+```jsonc title="role.schema.jsonc"
+{
+  "enum": ["Admin", "Member"],
+  "transform": ["toEnumCase"]
+}
+```
+
+```ts twoslash title="main.ts"
+import role from "./role.schema.jsonc";
+
+role.validate("admin");
+// { value: "Admin" }
+```
+
+### Unlisted keys
+
+A key the schema doesn't list is dropped from the value:
+
+```jsonc title="visitor.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" }
+  }
+}
+```
+
+```ts twoslash title="main.ts"
+import visitor from "./visitor.schema.jsonc";
+
+visitor.validate({ name: "Ada", admin: true });
+// { value: { name: "Ada" } }
+```
+
+An object whose `additionalProperties` says what its other keys may be keeps them:
+
+```jsonc title="labels.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" }
+  },
+  "additionalProperties": { "type": "string" }
+}
+```
+
+```ts twoslash title="main.ts"
+import labels from "./labels.schema.jsonc";
+
+labels.validate({ name: "Ada", team: "core" });
+// { value: { name: "Ada", team: "core" } }
+```
+
+### Copies
+
+The value given is never changed, since `.validate()` copies what it fills in, transforms or drops:
+
+```ts twoslash title="main.ts"
+import visitor from "./visitor.schema.jsonc";
+
+const input = { name: "Ada", admin: true };
+visitor.validate(input);
+// { value: { name: "Ada" } }
+input;
+// { name: "Ada", admin: true }
+```
+
+Where nothing changes, the value is the one given:
+
+```ts twoslash title="main.ts"
+import visitor from "./visitor.schema.jsonc";
+
+const input = { name: "Ada" };
+visitor.validate(input);
+// { value: input }, the same object
+```
+
 ### `.is()`
 
 The `.is()` method is a type guard, which stops at the first failure:
@@ -62,12 +198,27 @@ if (!result.issues) {
 
 ### `.input`
 
-The `.input` type is the value the schema accepts, the same type as `.output`:
+The `.input` type is the value the schema accepts, which may leave out a property with a default:
 
 ```ts twoslash title="main.ts"
-import user from "./user.schema.jsonc";
+// @errors: 2741
+import settings from "./settings.schema.jsonc";
 
-const ada: user.input = { name: "Ada", role: "admin" };
+const saved: settings.input = {};
+const loaded: settings.output = {};
+```
+
+The `.is()` method narrows to it, since the value it checks is left as it was:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import settings from "./settings.schema.jsonc";
+
+if (settings.is(input)) {
+  input;
+//^?
+}
 ```
 
 ### `.pick()`

@@ -10,7 +10,9 @@ import event, { type output as Event } from "./event.schema.jsonc";
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 const expect = <T extends true>() => {};
 
-expect<Equal<User, { name: string; email?: string; role: "admin" | "member"; tags?: string[]; address?: address.output }>>();
+expect<Equal<User, { name: string; email?: string; role: "admin" | "member"; tags: string[]; address?: address.output }>>();
+// The type `.validate()` gives has the defaulted tags; its input, the type of a value that passes, may leave them out.
+expect<Equal<user.input, { name: string; email?: string; role: "admin" | "member"; tags?: string[]; address?: address.input }>>();
 // Each definition is a validator of its own, named for its key, with its types as `.output` and `.input`.
 expect<Equal<address.output, { street?: string; city: string }>>();
 expect<Equal<ReturnType<typeof address.validate>, SchemaResult<address.output>>>();
@@ -33,17 +35,16 @@ user.pick("nickname");
 // @ts-expect-error an event is a oneOf, whose properties picking would not filter: it has no pick
 event.pick;
 // The default import names the types too: `.output`, the value `.validate()` returns, and `.input`,
-// the value it accepts, today the same type.
+// the value it accepts, the same type where nothing is filled in, transformed or dropped.
 expect<Equal<user.output, User>>();
 expect<Equal<team.output, Team>>();
-expect<Equal<user.input, User>>();
 expect<Equal<address.input, address.output>>();
 // @ts-expect-error `.Type` is gone, with no alias left behind
 type Gone = user.Type;
 expect<Equal<ReturnType<typeof user.validate>, SchemaResult<User>>>();
-// `.is()` is a type guard: the value it accepts is a User where it returns true.
+// `.is()` is a type guard: the value it accepts is a user's input where it returns true, its tags not filled in.
 const someone: unknown = { name: "Ada", role: "admin" };
-if (user.is(someone)) expect<Equal<typeof someone, User>>();
+if (user.is(someone)) expect<Equal<typeof someone, user.input>>();
 // @ts-expect-error a schema module has no parse: nothing on it throws
 user.parse;
 // @ts-expect-error a failed result has no value, as in Standard Schema: its issues are checked first
@@ -58,10 +59,10 @@ user.schema satisfies { type?: string; required?: string[]; properties?: object 
 // A $ref to another schema file is that file's type: its root, or the definition it points to.
 // Nothing here imports shared/place.schema.jsonc; TypeScript reaches it through team's module.
 expect<Equal<Team, { lead: User; members: User[]; office?: { city: string; manager?: User } }>>();
-// A schema module is a Standard JSON Schema too.
-const teamAsJsonSchema: StandardJSONSchemaV1<Team> = team;
-// @ts-expect-error a member is a User, whose role is required
-const noRole: Team = { lead: { name: "Ada", role: "admin" }, members: [{ name: "Grace" }] };
+// A schema module is a Standard JSON Schema too, of its input and its output.
+const teamAsJsonSchema: StandardJSONSchemaV1<team.input, Team> = team;
+// @ts-expect-error a member is a user, whose role is required
+const noRole: team.input = { lead: { name: "Ada", role: "admin" }, members: [{ name: "Grace" }] };
 // A oneOf whose variants a `const` tells apart narrows: each case sees its own variant, and with no
 // default the switch type-checks only because it is exhaustive.
 const describe = (e: Event): string => {
@@ -74,22 +75,23 @@ const describe = (e: Event): string => {
 };
 const clickX = (e: Event): number => {
   if (e.kind === "click") return e.x;
-  // @ts-expect-error past the click branch e is a visit, whose x is not known to be a number
+  // @ts-expect-error past the click branch e is a visit, which has no x
   return e.x;
 };
 
-// `.validate()` gives the value it was given, or every issue: each with its path, its keyword and ajv's message.
-const checked = user.validate({ name: "Ada", role: "admin", email: "ada@example.com" });
+// `.validate()` gives the value, its name trimmed and its tags filled in, or every issue: each with its path, its keyword and ajv's message.
+const checked = user.validate({ name: " Ada ", role: "admin", email: "ada@example.com" });
 const failed = user.validate({ name: "", role: "owner", email: "not an email" });
 const standard = user["~standard"].validate({ name: "Ada" });
 expect<Equal<typeof standard, SchemaResult<User>>>();
-// `.is()` narrows an unknown value to an Event; past `.validate()`'s issues, its value is one.
+// `.is()` narrows an unknown value to an event's input; past `.validate()`'s issues, its value is an Event,
+// without the keys the schema does not list.
 const click: unknown = { at: "2026-10-20T09:00:00Z", kind: "click", x: 3, y: 4 };
-const fifth = event.validate({ at: "2026-10-20T09:00:00Z", kind: "click", x: 5, y: 6 });
+const fifth = event.validate({ at: "2026-10-20T09:00:00Z", kind: "click", x: 5, y: 6, note: "dropped" });
 
 console.log(
   JSON.stringify({
-    valid: checked.issues ? checked.issues.length : checked.value.name,
+    valid: checked.issues ? checked.issues.length : [checked.value.name, checked.value.tags],
     invalid: failed.issues?.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "),
     keywords: failed.issues?.map((issue) => issue.keyword),
     // The Standard Schema validate is the module's own: a missing role, its key the end of the path.
@@ -119,6 +121,7 @@ console.log(
     ],
     described: event.is(click) ? describe(click) : "not an event",
     clickX: fifth.issues ? fifth.issues.length : clickX(fifth.value),
+    kept: fifth.issues ? fifth.issues.length : Object.keys(fifth.value).join(),
     // user.schema.jsonc's address definition, imported as a validator: valid, then a missing city and an extra key.
     address: [address.is({ city: "Paris" }), address.validate({ street: "Rue de Rivoli", zip: "75001" }).issues?.map((issue) => `${issue.path.join(".")}: ${issue.keyword}`)],
     // A user with only a name and a role: closed, so an email is now an additional property; then the omitted role is no longer required.

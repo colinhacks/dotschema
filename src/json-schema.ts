@@ -13,12 +13,13 @@
 // is, never a schema that validates otherwise than dotschema's validator does.
 import { basename } from "node:path";
 import type { Value } from "./core/serialize.ts";
-import { fragmentOf, pointer, resolveRef, SCHEMA_SUFFIX, specifierOf, type Files } from "./refs.ts";
+import { fragmentOf, mapSchemas, pointer, pointTo, resolveRef, SCHEMA_SUFFIX, specifierOf, type Files } from "./refs.ts";
 import type { Draft } from "./schema-types.ts";
 
 export type JsonSchemaTarget = "draft-07" | "draft-2020-12";
 
-export type JsonSchemaResult = { schema: Value } | { error: string };
+/** A target's document, and where it differs, the document of the value `.validate()` gives (`outputDocument`); or why the target has none. */
+export type JsonSchemaResult = { schema: Value; output?: Value } | { error: string };
 
 /** The unit of an entry's document that is the entry itself (`jsonSchema`). */
 const ENTRY = "\0entry";
@@ -89,7 +90,39 @@ const WALK_MAP = new Set([...MAP, "$defs", "definitions", "dependentSchemas", "d
  * folded in beside it ([DESIGN.md](../DESIGN.md#each-definition-a-validator)).
  */
 export function jsonSchemas(files: Files, rootPath: string, draft: Draft, entry?: Entry): Record<JsonSchemaTarget, JsonSchemaResult> {
-  return { "draft-07": jsonSchema(files, rootPath, draft, "draft-07", entry), "draft-2020-12": jsonSchema(files, rootPath, draft, "draft-2020-12", entry) };
+  const withOutput = (result: JsonSchemaResult): JsonSchemaResult => {
+    const output = "schema" in result ? outputDocument(result.schema) : undefined;
+    return output === undefined ? result : { ...result, output };
+  };
+  return { "draft-07": withOutput(jsonSchema(files, rootPath, draft, "draft-07", entry)), "draft-2020-12": withOutput(jsonSchema(files, rootPath, draft, "draft-2020-12", entry)) };
+}
+
+/**
+ * The document of the value `.validate()` gives (output.ts), for Standard JSON Schema's `output`:
+ * each property with a `default`, its own or, without one, its `$ref`'s target's, required, as
+ * `.validate()` fills it in. Undefined where that changes nothing. The keys `.validate()` drops from
+ * an open object are not written as `additionalProperties: false`, which in one member of an
+ * `allOf` would refuse the keys another lists.
+ */
+function outputDocument(document: Value): Value | undefined {
+  let changed = false;
+  const defaulted = (schema: Value | undefined, depth = 0): boolean => {
+    if (!isObj(schema)) return false;
+    if (Object.hasOwn(schema, "default")) return true;
+    const ref = schema["$ref"];
+    const segments = typeof ref === "string" && ref.startsWith("#") && depth < 16 ? pointer(ref.slice(1)) : undefined;
+    return segments !== undefined && defaulted(pointTo(document, segments), depth + 1);
+  };
+  const output = mapSchemas(document, (schema) => {
+    const properties = schema["properties"];
+    if (!isObj(properties)) return;
+    const required = Array.isArray(schema["required"]) ? schema["required"] : [];
+    const more = Object.keys(properties).filter((key) => !required.includes(key) && defaulted(properties[key]));
+    if (!more.length) return;
+    schema["required"] = [...required, ...more];
+    changed = true;
+  });
+  return changed ? output : undefined;
 }
 
 /** A definition of the root file, by its keyword and key, made the root of its own document. */

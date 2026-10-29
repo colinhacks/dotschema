@@ -57,19 +57,22 @@ test("a library that re-exports a schema module emits its declarations: the sche
   // The module's default export writes its root's properties out, so the declarations do too.
   // A plain object is an ObjectSchema, and a picked schema's type is written out too.
   assert.match(declarations, /scores: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.Schema<\{/);
-  assert.match(declarations, /export declare const summary: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.ObjectSchema<\{\n\s+name: string;\n\}, unknown, "name">;/);
+  assert.match(declarations, /export declare const summary: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.ObjectSchema<\{\n\s+name: string;\n\}, unknown, "name", \{\n\s+name: string;\n\}>;/);
   assert.match(declarations, /user: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.ObjectSchema<\{\n\s+name: string;\n\s+role\?: "admin" \| "member";\n\s+\}, \{\n\s+readonly type: "object";/);
   assert.doesNotMatch(declarations, /\bJson\b/);
   assert.match(declarations, /export declare const check: \(value: unknown\) => value is \{\n\s+name: string;\n\s+role\?: "admin" \| "member";\n\};/);
   // The mapper writes an optional key as the project's compiler options read it: under
   // exactOptionalPropertyTypes the `?` no longer admits undefined, which ajv passes as absent, so
-  // `| undefined` is written; without it, the `?` already does.
-  assert.match(emit("--exactOptionalPropertyTypes"), /export declare const check: \(value: unknown\) => value is \{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\};/);
+  // the input, which `.is()` narrows to, writes `| undefined`, written out as the type is; the type
+  // `.validate()` gives drops such a property, and does not.
+  const exact = emit("--exactOptionalPropertyTypes");
+  assert.match(exact, /export declare const check: \(value: unknown\) => value is \{\n\s+name: string;\n\s+role\?: "admin" \| "member" \| undefined;\n\};/);
+  assert.match(exact, /user: import\("\.\.\/\.\.\/\.\.\/src\/index\.js"\)\.ObjectSchema<\{\n\s+name: string;\n\s+role\?: "admin" \| "member";\n\s+\}, \{/);
 });
 
 // What lab/basic/main.ts prints, piece by piece.
 // user.schema.jsonc's validate: the value, then every issue with its path and keyword, role's with the schema's own message; `~standard.validate` the same function, a missing property's key ending the path; the vendor; an array index a number, through team.schema.jsonc's $ref.
-const VALIDATE = '"valid":"Ada","invalid":"name: must NOT have fewer than 1 characters; email: must match format \\"email\\"; role: must be admin or member","keywords":["minLength","format","enum"],"standard":[true,["role"]],"vendor":"dotschema","memberPath":["members",1,"name"]';
+const VALIDATE = '"valid":["Ada",[]],"invalid":"name: must NOT have fewer than 1 characters; email: must match format \\"email\\"; role: must be admin or member","keywords":["minLength","format","enum"],"standard":[true,["role"]],"vendor":"dotschema","memberPath":["members",1,"name"]';
 // point.schema.jsonc: an integer, and a label of at most 16 characters.
 const POINTS = '"points":[true,false,false]';
 // team.schema.jsonc: valid, then failing user.schema.jsonc's and shared/place.schema.jsonc's rules through its $refs.
@@ -77,7 +80,7 @@ const TEAM = '"team":[true,false,false]';
 // team.schema.jsonc through Standard JSON Schema, in 2020-12 and draft-07: the other two files folded in, its $refs pointers.
 const JSON_SCHEMA = '"teamJsonSchema":[["https://json-schema.org/draft/2020-12/schema","#/$defs/user","user,place"],["http://json-schema.org/draft-07/schema#","#/definitions/user","user,place"]]';
 // event.schema.jsonc: a click and a visit, then a bad date-time, a bad uri and a click with a visit's field; then main.ts's narrowing functions.
-const EVENTS = '"events":[true,true,false,false,false],"described":"3,4","clickX":5';
+const EVENTS = '"events":[true,true,false,false,false],"described":"3,4","clickX":5,"kept":"at,kind,x,y"';
 // user.schema.jsonc's address definition, imported as a validator: valid, then a missing city and an extra key.
 const ADDRESS = '"address":[true,["city: required","zip: additionalProperties"]]';
 // `.pick()` and `.omit()`: the picked schema's issues in ajv's order, a chain, and its Standard JSON Schema.

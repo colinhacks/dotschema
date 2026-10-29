@@ -3,12 +3,14 @@
   "title": "User",
   "type": "object",
   "properties": {
-    "name": { "type": "string", "minLength": 1 },
+    // `.validate()` trims the name before it checks it, and gives the trimmed name.
+    "name": { "type": "string", "minLength": 1, "transform": ["trim"] },
     /** Where the app sends the user's mail. */
     "email": { "type": "string", "format": "email" },
     // A message of the schema's own, in place of ajv's; the issue's keyword is still `enum`.
     "role": { "enum": ["admin", "member"], "errorMessage": "must be admin or member" },
-    "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    // An absent `tags` is filled with its default, so the type `.validate()` gives has it.
+    "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] },
     "address": { "$ref": "#/definitions/address" }
   },
   "required": ["name", "role"],

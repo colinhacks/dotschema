@@ -46,6 +46,31 @@ export function parseSchemaFile(source: string): Parsed {
   return parsed.ok || !mark ? parsed : { ok: false, problems: parsed.problems.map((problem) => ({ ...problem, start: problem.start + mark })) };
 }
 
+/**
+ * Where the key at the end of `segments` is written in a schema file's text, the mark counted, as
+ * `parseSchemaFile` reads it: a problem with a keyword is placed at its key. The file's start when
+ * the text does not hold it.
+ */
+export function placeAt(source: string, segments: readonly string[]): { start: number; length: number } {
+  const mark = source.charCodeAt(0) === 0xfeff ? 1 : 0;
+  let node: Node | undefined = parseTree(mark ? source.slice(1) : source, [], { allowTrailingComma: true, disallowComments: false });
+  let place: { start: number; length: number } = { start: 0, length: 1 };
+  for (const segment of segments) {
+    if (node?.type === "object") {
+      const property: Node | undefined = node.children?.find((child) => child.children?.[0]?.value === segment);
+      const key = property?.children?.[0];
+      if (!key) return place;
+      place = { start: key.offset + mark, length: key.length };
+      node = property.children?.[1];
+    } else if (node?.type === "array") {
+      node = node.children?.[Number(segment)];
+      if (!node) return place;
+      place = { start: node.offset + mark, length: node.length };
+    } else return place;
+  }
+  return place;
+}
+
 // ---- doc comments -------------------------------------------------------------------------------
 
 // The `/** */` comments of the files parsed, which the types write as JSDoc where a schema has no

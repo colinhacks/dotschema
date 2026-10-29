@@ -90,19 +90,24 @@ export interface SchemaIssue extends StandardSchemaV1.Issue {
 }
 
 /**
- * The default export of a `.schema.jsonc` module: `T` is the type the schema
- * describes, `S` the schema itself as a literal type. Nothing on it throws, except a Standard JSON
- * Schema target it cannot produce, as that spec requires.
+ * The default export of a `.schema.jsonc` module: `T` is the value `.validate()` gives, `S` the
+ * schema itself as a literal type, and `I` the values it accepts, which `.is()` narrows to: each
+ * property with a `default` optional, which `T` requires, and each key of an object that lists its
+ * keys, which `T` drops. Nothing on it throws, except a Standard JSON Schema target it cannot
+ * produce, as that spec requires.
  */
-export interface Schema<T, S = unknown> extends StandardSchemaV1<T, T>, StandardJSONSchemaV1<T, T> {
+export interface Schema<T, S = unknown, I = T> extends StandardSchemaV1<I, T>, StandardJSONSchemaV1<I, T> {
   /**
    * Checks the whole value and reports every way it fails (ajv with `allErrors`). Never throws: a value
    * the validator cannot check (nested deeper than the stack, a getter that throws) is one issue, `keyword: "error"`.
-   * On success, `value` is the value passed in, the same object, typed `T`: ajv changes nothing.
+   * Each `default` the value lacks is filled in and each `transform` applied before it is checked; on
+   * success, `value` drops each property that holds `undefined` and each key an open object does not
+   * list. It is the value passed in, the same object, where none of that changes it, and otherwise a
+   * copy, which shares every part left as it was: the value passed in is never changed.
    */
   validate(value: unknown): SchemaResult<T>;
-  /** Whether `value` is valid, as a type guard. Stops at the first failure (a second validator, without `allErrors`); `false` for a value it cannot check. Never throws. */
-  is(value: unknown): value is T;
+  /** Whether `value` is valid, as `.validate()` checks it, as a type guard. Stops at the first failure (a second validator, without `allErrors`); `false` for a value it cannot check. Never throws. */
+  is(value: unknown): value is I;
   /** The JSON Schema as written in the file. A `$ref` to another file stays a reference here. */
   readonly schema: S;
   /**
@@ -115,8 +120,8 @@ export interface Schema<T, S = unknown> extends StandardSchemaV1<T, T>, Standard
   readonly "~standard": {
     /** The same function as `.validate()`. */
     readonly validate: (value: unknown) => SchemaResult<T>;
-  } & StandardSchemaV1.Props<T, T> &
-    StandardJSONSchemaV1.Props<T, T>;
+  } & StandardSchemaV1.Props<I, T> &
+    StandardJSONSchemaV1.Props<I, T>;
 }
 
 /** Whether the project turns on `exactOptionalPropertyTypes`: without it, `{ a: undefined }` is assignable to `{ a?: never }`. */
@@ -125,8 +130,11 @@ type ExactOptional = { a: undefined } extends { a?: never } ? false : true;
 /** An intersection of object types as one object type, so a hover prints its properties: `& {}` leaves the mapped type itself, which TypeScript writes out, where an alias alone is printed by its name (`Flat<...>`). */
 type Flat<T> = { [Q in keyof T]: T[Q] } & {};
 
-/** A property `.partial()` makes optional: `| undefined` under `exactOptionalPropertyTypes`, as the emitter writes an optional property, since ajv passes `undefined` as absent. */
+/** A property of the input that `.partial()` makes optional: `| undefined` under `exactOptionalPropertyTypes`, as the emitter writes an optional property, since ajv passes `undefined` as absent; the output never holds it. */
 type Optional<V> = ExactOptional extends true ? V | undefined : V;
+
+/** The object type without the keys `P`, as `.omit()` gives it, inside `Flat`: `.pick()` and `.omit()` write theirs out, so that a hover prints the properties rather than the alias. */
+type Omitted<T, P> = { [Q in keyof T as Q extends P ? never : Q]: T[Q] };
 
 /**
  * A schema module, or one of its definitions, whose schema is a plain object (`type: "object"` with
@@ -137,15 +145,15 @@ type Optional<V> = ExactOptional extends true ? V | undefined : V;
  * `.required()` change `required` alone. Their validators were compiled with the module, and nothing
  * is compiled at run time. Nothing on it throws, as on `Schema`.
  */
-export interface ObjectSchema<T, S = unknown, K extends string = string> extends Schema<T, S> {
+export interface ObjectSchema<T, S = unknown, K extends string = string, I = T> extends Schema<T, S, I> {
   /** The schema with only these properties: `user.pick("name", "role")`. */
-  pick<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? Q : string extends Q ? Q : never]: T[Q] }, unknown, P>;
+  pick<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? Q : string extends Q ? Q : never]: T[Q] }, unknown, P, { [Q in keyof I as Q extends P ? Q : string extends Q ? Q : never]: I[Q] }>;
   /** The schema without these properties: `user.omit("email")`. */
-  omit<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] }, unknown, Exclude<K, P>>;
+  omit<P extends K>(...keys: P[]): ObjectSchema<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] }, unknown, Exclude<K, P>, { [Q in keyof I as Q extends P ? never : Q]: I[Q] }>;
   /** The schema with these properties optional, or every property with none named: `user.partial()`, `user.partial("role")`. */
-  partial<P extends K = K>(...keys: P[]): ObjectSchema<Flat<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] } & { [Q in keyof T as Q extends P ? Q : never]?: Optional<T[Q]> }>, unknown, K>;
+  partial<P extends K = K>(...keys: P[]): ObjectSchema<Flat<Omitted<T, P> & { [Q in keyof T as Q extends P ? Q : never]?: T[Q] }>, unknown, K, Flat<Omitted<I, P> & { [Q in keyof I as Q extends P ? Q : never]?: Optional<I[Q]> }>>;
   /** The schema with these properties required, or every property with none named: `user.required()`, `user.required("email")`. */
-  required<P extends K = K>(...keys: P[]): ObjectSchema<Flat<{ [Q in keyof T as Q extends P ? never : Q]: T[Q] } & { [Q in keyof T as Q extends P ? Q : never]-?: Exclude<T[Q], undefined> }>, unknown, K>;
+  required<P extends K = K>(...keys: P[]): ObjectSchema<Flat<Omitted<T, P> & { [Q in keyof T as Q extends P ? Q : never]-?: Exclude<T[Q], undefined> }>, unknown, K, Flat<Omitted<I, P> & { [Q in keyof I as Q extends P ? Q : never]-?: Exclude<I[Q], undefined> }>>;
   /** The keys `properties` and `required` name, as a schema of its own, `{ "enum": [...] }`: `user.keyof().is("name")`. */
   keyof(): Schema<K>;
 }

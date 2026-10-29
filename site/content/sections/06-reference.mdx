@@ -31,7 +31,8 @@ dotschema reads every keyword of draft-06, draft-07, 2019-09 and 2020-12, and th
 | `$dynamicRef`, `$recursiveRef` | The type it refers to, where it resolves as a `$ref` would, and otherwise `unknown` |
 | `description` | A doc comment |
 | `deprecated` | A `@deprecated` tag, which an editor strikes through |
-| `default`, `examples` | A `@default` tag and an `@example` tag for each, as JSON |
+| `default` | A `@default` tag, as JSON, and in `.output` a property that is not optional, since `.validate()` fills it in |
+| `examples` | An `@example` tag for each, as JSON |
 | `readOnly` | A `readonly` property |
 | `not` | `never` when it allows every value (`{}`, `true`), and otherwise nothing: the validator checks it |
 | `multipleOf`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `unevaluatedItems`, `minProperties`, `maxProperties`, `propertyNames`, `dependentRequired`, `dependentSchemas`, `dependencies` | Nothing: the validator checks it |

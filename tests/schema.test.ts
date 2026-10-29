@@ -48,19 +48,24 @@ test(".validate() reports every issue, each with ajv's message and keyword and i
   assert.deepEqual(user.validate(null).issues.map((i: any) => [i.path, i.keyword]), [[[], "type"]]);
 });
 
-test(".validate() gives back the value it was given, the same object, unchanged: ajv is set to change nothing", async () => {
-  const source = JSON.stringify({ type: "object", properties: { n: { type: "number", default: 1 }, s: { type: "string" } }, additionalProperties: false });
+test(".validate() gives back the value it was given, the same object, where it changes nothing, and a copy where it does, the value given as it was", async () => {
+  const source = JSON.stringify({ type: "object", properties: { n: { type: "number", default: 1 }, s: { type: "string" }, o: { type: "object", properties: { a: { type: "string" } } } }, additionalProperties: false });
   const { default: s } = await evaluate(schemaCode(source, PATH).code);
-  const value = { s: "1" };
+  const full = { n: 2, s: "1", o: { a: "x" } };
+  assert.equal(s.validate(full).value, full);
+  assert.deepEqual(Object.keys(s.validate(full)), ["value"]);
+  assert.equal(s["~standard"].validate(full).value, full);
+  // A default filled in: a copy, which shares what it did not change.
+  const value = { s: "1", o: { a: "x" } };
   const result = s.validate(value);
-  assert.equal(result.value, value);
-  assert.deepEqual(Object.keys(result), ["value"]);
-  // No default filled in, no "1" coerced, no extra property removed.
-  assert.deepEqual(value, { s: "1" });
+  assert.deepEqual(result, { value: { s: "1", o: { a: "x" }, n: 1 } });
+  assert.notEqual(result.value, value);
+  assert.equal(result.value.o, value.o);
+  assert.deepEqual(value, { s: "1", o: { a: "x" } });
+  // No "1" coerced, and a closed object's extra property refused, not removed.
   const extra = { s: 1, x: 2 };
   assert.equal(s.validate(extra).issues.length, 2);
   assert.deepEqual(extra, { s: 1, x: 2 });
-  assert.equal(s["~standard"].validate(value).value, value);
 });
 
 test("an issue's path: object keys as strings, unescaped, and array indexes as numbers, read from the value", async () => {
@@ -212,11 +217,13 @@ test("neither method throws where ajv does: .is() is false, and .validate() give
     revocable.proxy,
   ]);
   assert.deepEqual(messages, ["could not be checked: no a", "could not be checked: a string", "could not be checked: Cannot perform 'IsArray' on a proxy that has been revoked"]);
-  // A cycle the schema does not descend into is validated as any other value.
+  // A cycle the schema does not descend into is validated as any other value, and its key, which
+  // the open object does not list, dropped from the value it gives.
   const { default: s } = await evaluate(schemaCode(JSON.stringify(tree), PATH).code);
   const flat: any = { kids: [] };
   flat.self = flat;
-  assert.equal(s.validate(flat).value, flat);
+  assert.deepEqual(s.validate(flat).value, { kids: [] });
+  assert.equal(flat.self, flat);
 });
 
 test("ajv is set to check the schema as written: a property is the value's own, and multipleOf is decimal", async () => {
@@ -247,19 +254,20 @@ test("the types name the root for its file, export it as output and input too, a
   const { types, problems } = schemaTypes(SCHEMA, PATH);
   assert.deepEqual(problems, []);
   // user.schema.jsonc declares `User`, so a `$ref` to it from another file prints `User`.
-  // It is exported as `output`, and `input` is an alias of it, not a second re-export, which a hover
-  // could print for a reference to the root inside it.
-  assert.match(types, /\ninterface User \{\n  name: string;\n[^]*?\n\}\nexport type \{ User as output \};\nexport type input = User;\n/);
+  // It is exported as `output`; the values `.validate()` accepts, whose `tags` may hold `undefined`
+  // under exactOptionalPropertyTypes, are `UserInput`, exported as `input`.
+  assert.match(types, /\ninterface User \{\n  name: string;\n[^]*?\n\}\nexport type \{ User as output \};\n/);
   // The default import names the types too, as `user.output` and `user.input`.
-  assert.match(types, /\ndeclare namespace schema \{ export type \{ User as output \}; export type input = User; \}\nexport default schema;\n/);
+  assert.match(types, /\ndeclare namespace schema \{ export type \{ User as output, UserInput as input \}; \}\nexport default schema;\n/);
   assert.doesNotMatch(types, /\bType\b/);
   assert.match(types, /\ntype Json = \{ readonly \$schema: "https:\/\/json-schema.org\/draft\/2020-12\/schema";/);
   // Its arrays are mutable, so it passes where a JSON Schema type's are (`required?: string[]`).
   assert.match(types, /\ntype Json = \{[^\n]*; readonly required: \["name"\];/);
   // The schema as written is a type of its own, so an error or a hover prints `Json` in its place;
-  // the root's type is written out, so a hover over a value prints its properties. A plain object is
-  // an ObjectSchema, with .pick() and .omit() over the keys its properties and required name.
-  assert.match(types, /\ndeclare const schema: __DotschemaObjectSchema<\{\n  name: string;\n[^]*?\n\}, Json, "name" \| "tags">;\n/);
+  // the root's type is written out, and where it differs, its input's after the keys, so a hover over
+  // a value `.validate()` gives or `.is()` narrows prints its properties. A plain object is an
+  // ObjectSchema, with .pick() and .omit() over the keys its properties and required name.
+  assert.match(types, /\ndeclare const schema: __DotschemaObjectSchema<\{\n  name: string;\n[^]*?\n\}, Json, "name" \| "tags", \{\n  name: string;\n[^]*?\| undefined;\n\}>;\n/);
   assert.match(types, /\nimport type \{ ObjectSchema as __DotschemaObjectSchema \} from "dotschema";\n/);
 });
 
@@ -349,7 +357,7 @@ test("a __proto__ key in properties is checked, which ajv does not do itself, an
   }
   // An `if` that tests the key's value tests it, so the type narrows on it as on any listed property.
   const conditional = '{ "type": "object", "properties": { "__proto__": { "enum": ["a", "b"] } }, "required": ["__proto__"], "if": { "properties": { "__proto__": { "const": "a" } } }, "then": { "required": ["t"] } }';
-  assert.match(schemaTypes(conditional, PATH).types, /\ntype User = \{\n  __proto__: "a" \| "b";\n  \[key: string\]: unknown;\n\} & \(\(\{ __proto__: "a" \} & \{\n  t: unknown;/);
+  assert.match(schemaTypes(conditional, PATH).types, /\ntype UserInput = \{\n  __proto__: "a" \| "b";\n  \[key: string\]: unknown;\n\} & \(\(\{ __proto__: "a" \} & \{\n  t: unknown;/);
   const { default: c } = await evaluate(schemaCode(conditional, PATH).code);
   assert.deepEqual(['{ "__proto__": "b" }', '{ "__proto__": "a" }', '{ "__proto__": "a", "t": 1 }'].map((value) => c.is(JSON.parse(value))), [true, false, true]);
 });
@@ -411,13 +419,13 @@ test("a $ref to another file is followed: its type is imported from that file's 
   });
   const typed = schemaTypes(source, path);
   assert.deepEqual(typed.problems, []);
-  // The definition keeps the name its own module gives it; another file's root is imported as its `output`, named here for its file.
-  assert.match(typed.types, /^import type \{ Tag, output as Tag2 \} from "\.\/shared\/tag\.schema\.jsonc";\nimport type \{ output as Point \} from "\.\/point\.schema\.jsonc";$/m);
+  // The definition keeps the name its own module gives it; another file's root is imported as its `output`, named here for its file, and its `input` beside it.
+  assert.match(typed.types, /^import type \{ Tag, output as Tag2, TagInput, input as Tag2Input \} from "\.\/shared\/tag\.schema\.jsonc";\nimport type \{ output as Point, input as PointInput \} from "\.\/point\.schema\.jsonc";$/m);
   // A pointer that is not a definition is inlined from the other file, its own references imported.
-  assert.match(typed.types, /\ninterface User \{\n  tag: Tag;\n  group\?: Tag2 \| undefined;\n  label\?: Tag \| undefined;\n  at\?: Point \| undefined;\n\}/);
+  assert.match(typed.types, /\ninterface User \{\n  tag: Tag;\n  group\?: Tag2;\n  label\?: Tag;\n  at\?: Point;\n\}[^]*\ninterface UserInput \{\n  tag: TagInput;\n  group\?: Tag2Input \| undefined;\n  label\?: TagInput \| undefined;\n  at\?: PointInput \| undefined;\n\}/);
   const tag = join(dir, "shared/tag.schema.jsonc");
   const tagTypes = schemaTypes(readFileSync(tag, "utf8"), tag);
-  assert.match(tagTypes.types, /^import type \{ output as User \} from "\.\.\/user\.schema\.jsonc";$/m);
+  assert.match(tagTypes.types, /^import type \{ output as User, input as UserInput \} from "\.\.\/user\.schema\.jsonc";$/m);
 
   const { code, problems, watchFiles } = schemaCode(source, path);
   assert.deepEqual(problems, []);
@@ -461,8 +469,8 @@ test("a $ref to an anchor is the schema that declares it, in the file and in ano
   const { types, problems } = schemaTypes(source, path);
   assert.deepEqual(problems, []);
   // Another file's definition is imported by name, any other schema inlined; a `$dynamicAnchor` is an anchor to a `$ref`.
-  assert.match(types, /^import type \{ Id \} from "\.\/user\.schema\.jsonc";$/m);
-  assert.match(types, /\ninterface Probe \{\n  city\?: string \| undefined;\n  id\?: Id \| undefined;\n  node\?: \{\n    next\?: \{\n      next\?: unknown;\n    \} \| undefined;\n  \} \| undefined;\n  also\?: \{\n    next\?: unknown;\n  \} \| undefined;\n  flag\?: Flag \| undefined;\n\}/);
+  assert.match(types, /^import type \{ Id, IdInput \} from "\.\/user\.schema\.jsonc";$/m);
+  assert.match(types, /\ninterface ProbeInput \{\n  city\?: string \| undefined;\n  id\?: IdInput \| undefined;\n  node\?: \{\n    next\?: \{\n      next\?: unknown;\n    \} \| undefined;\n  \} \| undefined;\n  also\?: \{\n    next\?: unknown;\n  \} \| undefined;\n  flag\?: Flag \| undefined;\n\}/);
   const { code, problems: built } = schemaCode(source, path);
   assert.deepEqual(built, []);
   const { default: probe } = await evaluate(code);
@@ -477,7 +485,7 @@ test("a draft-07 anchor, a plain-name $id, is the schema that declares it", () =
   });
   const { types, problems } = schemaTypes(source, path);
   assert.deepEqual(problems, []);
-  assert.match(types, /\ninterface User \{\n  a\?: Name \| undefined;\n  b\?: number \| undefined;\n/);
+  assert.match(types, /\ninterface UserInput \{\n  a\?: Name \| undefined;\n  b\?: number \| undefined;\n/);
 });
 
 test("a $ref to nothing, to no anchor, or to a value that is not a schema is a problem at the $ref, in both texts, and its type is unknown", () => {
@@ -624,7 +632,7 @@ test("a keyword no draft defines is ignored in every draft: a vendor's, an unkno
     const draft = $schema ?? "no $schema";
     const typed = schemaTypes(source, PATH);
     assert.deepEqual(typed.problems, [], draft);
-    assert.match(typed.types, /\ninterface User \{\n  name: string;\n  tags\?: string\[\] \| undefined;\n\}/, draft);
+    assert.match(typed.types, /\ninterface UserInput \{\n  name: string;\n  tags\?: string\[\] \| undefined;\n\}/, draft);
     const { code, problems } = schemaCode(source, PATH);
     assert.deepEqual(problems, [], draft);
     const { default: s } = await evaluate(code);
@@ -900,7 +908,7 @@ test("a $ref names a schema resource by its $id, absolute or relative to the $id
   });
   const { types, problems } = schemaTypes(source, PATH);
   assert.deepEqual(problems, []);
-  assert.match(types, /\ninterface User \{\n  a\?: Item \| undefined;\n  b\?: number \| undefined;\n  c\?: number \| undefined;\n  d\?: number \| undefined;\n/);
+  assert.match(types, /\ninterface UserInput \{\n  a\?: ItemInput \| undefined;\n  b\?: number \| undefined;\n  c\?: number \| undefined;\n  d\?: number \| undefined;\n/);
   assert.match(types, /\nexport interface Item \{\n  n: number;\n/);
   const { code, problems: built } = schemaCode(source, PATH);
   assert.deepEqual(built, []);
@@ -916,7 +924,7 @@ test("a $ref names a schema resource by its $id, absolute or relative to the $id
     required: ["meta", "nodes"],
     definitions: { node: { $id: "http://localhost:1234/node", type: "object", properties: { value: { type: "number" }, subtree: { $ref: "tree" } }, required: ["value"] } },
   });
-  assert.match(schemaTypes(tree, PATH).types, /\ninterface User \{\n  meta: string;\n  nodes: Node\[\];\n[^]*\nexport interface Node \{\n  value: number;\n  subtree\?: User \| undefined;\n/);
+  assert.match(schemaTypes(tree, PATH).types, /\ninterface User \{\n  meta: string;\n  nodes: Node\[\];\n[^]*\nexport interface Node \{\n  value: number;\n  subtree\?: User;\n[^]*\nexport interface NodeInput \{\n  value: number;\n  subtree\?: UserInput \| undefined;\n/);
   const { default: t } = await evaluate(schemaCode(tree, PATH).code);
   assert.equal(t.is({ meta: "a", nodes: [{ value: 1, subtree: { meta: "b", nodes: [{ value: 2 }] } }] }), true);
   assert.equal(t.is({ meta: "a", nodes: [{ value: 1, subtree: { meta: "b", nodes: [{ value: "x" }] } }] }), false);
@@ -944,8 +952,8 @@ test("a $ref inside an $id that resolves to no schema of the files is a URL, whi
   });
   const typed = schemaTypes(user, path);
   assert.deepEqual(typed.problems, []);
-  assert.match(typed.types, /^import type \{ output as Tag \} from "\.\/shared\/tag\.schema\.jsonc";$/m);
-  assert.match(typed.types, /\n  tag\?: Tag \| undefined;\n/);
+  assert.match(typed.types, /^import type \{ output as Tag, input as TagInput \} from "\.\/shared\/tag\.schema\.jsonc";$/m);
+  assert.match(typed.types, /\n  tag\?: TagInput \| undefined;\n/);
   const { code, problems } = schemaCode(user, path);
   assert.deepEqual(problems, []);
   assert.ok(!code.includes(dir), "the module names no path");
@@ -960,7 +968,7 @@ test("a $ref to a schema resource in another file, by its $id, is that file's ty
   });
   const typed = schemaTypes(source, path);
   assert.deepEqual(typed.problems, []);
-  assert.match(typed.types, /^import type \{ Place, output as Shared \} from "\.\/shared\.schema\.jsonc";$/m);
+  assert.match(typed.types, /^import type \{ Place, output as Shared, PlaceInput, input as SharedInput \} from "\.\/shared\.schema\.jsonc";$/m);
   const { default: user } = await evaluate(schemaCode(source, path).code);
   assert.deepEqual([user.is({ place: { city: "Oslo" } }), user.is({ place: {} })], [true, false]);
 });
@@ -1079,7 +1087,7 @@ test("a schema outside any project that installs ajv still validates: ajv is dot
   const { types, problems } = schemaTypes(SCHEMA, path);
   assert.deepEqual(problems, []);
   // The file names the root, not the schema's title.
-  assert.match(types,/\ninterface A \{\n  name: string;\n  tags\?: \{\n    \[key: string\]: unknown;\n  \}\[\] \| undefined;\n\}/);
+  assert.match(types,/\ninterface AInput \{\n  name: string;\n  tags\?: \{\n    \[key: string\]: unknown;\n  \}\[\] \| undefined;\n\}/);
   const { code, problems: codeProblems } = schemaCode(SCHEMA, path);
   assert.deepEqual(codeProblems, []);
   assert.doesNotMatch(code, /^import /m);

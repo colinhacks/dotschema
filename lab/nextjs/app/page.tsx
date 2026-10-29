@@ -1,14 +1,15 @@
 // lab/basic's schemas, imported by a server component and, in Signup, by a client component, so
 // that the loader makes modules for both bundles. The types are dotschema's content mapper's.
-import user, { type output as User } from "../../basic/user.schema.jsonc";
+import user from "../../basic/user.schema.jsonc";
 import point from "../../basic/point.schema.jsonc";
 import team from "../../basic/team.schema.jsonc";
 import event from "../../basic/event.schema.jsonc";
 import { Signup } from "./signup";
 
-const ada: User = { name: "Ada", role: "admin" };
+// A value written by hand is the schema's input, whose tags `.validate()` fills in.
+const ada: user.input = { name: "Ada", role: "admin" };
 // @ts-expect-error a role the schema does not allow
-const bob: User = { name: "Bob", role: "owner" };
+const bob: user.input = { name: "Bob", role: "owner" };
 
 export default function Page() {
   const failed = user.validate({ name: "", role: "owner", email: "not an email" });

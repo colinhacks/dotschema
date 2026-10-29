@@ -57,7 +57,9 @@ test("each definition is a named export, its name the key in camelCase, never a 
   assert.match(types, /\nexport declare const _2fa2: __DotschemaSchema<2, Json\["\$defs"\]\["2fa"\]>;\nexport declare namespace _2fa2 \{ export type \{ _2fa as output \}; export type input = _2fa; \}/);
   // The root's types are `output` and `input`, so the validators of "input" and "output" take `input2` and `output2`.
   assert.match(types, /\nexport declare const input2: __DotschemaSchema<"i", Json\["\$defs"\]\["input"\]>;\nexport declare namespace input2 \{ export type \{ Input as output \}; export type input = Input; \}/);
-  assert.match(types, /\nexport type \{ Definitions as output \};\nexport type input = Definitions;\n/);
+  // The root is open, so the values `.validate()` accepts are typed apart, `DefinitionsInput`, which
+  // refers to `Address` itself, a definition whose input is its output.
+  assert.match(types, /\nexport type \{ Definitions as output \};\ninterface DefinitionsInput \{\n  home\?: Address \| undefined;\n[^]*?\n\}\nexport type \{ DefinitionsInput as input \};\n/);
   assert.match(types, /\nexport declare const myAddress2: __DotschemaSchema<number, Json\["\$defs"\]\["myAddress"\]>;/);
   assert.match(types, /\nexport declare const address: __DotschemaObjectSchema<\{\n  city: string;\n\}, Json\["\$defs"\]\["address"\], "city">;\nexport declare namespace address \{ export type \{ Address as output \}; export type input = Address; \}/);
   // Each validates as its definition does, on its own.

@@ -170,7 +170,7 @@ const fileTypeName = (path: string, taken: Set<string>): string => typeName(base
  * gives way. A definition's validator never takes `output` or `input`, the root's types' names, so a
  * definition whose key is `input` is `input2`.
  */
-function definitionNames(root: Value, path?: string): { rootName: string; names: Map<string, string>; definitions: [string, Value, string | undefined, Definition][]; taken: Set<string> } {
+function definitionNames(root: Value, path?: string): { rootName: string; inputRootName: string; names: Map<string, string>; inputNames: Map<string, string>; definitions: [string, Value, string | undefined, Definition][]; taken: Set<string> } {
   const taken = new Set([OUTPUT, INPUT, LITERAL_NAME, "__DotschemaSchema", "__DotschemaObjectSchema"]);
   const names = new Map<string, string>();
   // Each definition's name, its schema, the doc comment before its key, and its names in the module.
@@ -182,7 +182,7 @@ function definitionNames(root: Value, path?: string): { rootName: string; names:
       for (const [key, schema] of Object.entries(group)) {
         const name = typeName(key, taken);
         names.set(`${keyword}\0${key}`, name);
-        definitions.push([name, schema, docOfKey(group, key), { keyword, key, typeName: name, valueName: "", type: "", doc: "" }]);
+        definitions.push([name, schema, docOfKey(group, key), { keyword, key, typeName: name, inputTypeName: "", valueName: "", type: "", inputType: "", doc: "" }]);
       }
     }
   }
@@ -190,7 +190,15 @@ function definitionNames(root: Value, path?: string): { rootName: string; names:
   // Each definition's validator is named after the types, so it never takes a type's name.
   const values = new Set(taken);
   for (const [, , , definition] of definitions) definition.valueName = valueName(definition.key, values);
-  return { rootName, names, definitions, taken };
+  // The input types after every other name, so no name of a type or a validator changes with them:
+  // `UserInput` and `AddressInput`, exported as `input` and by that name (the root's, `input`, without a file).
+  const inputRootName = path === undefined ? INPUT : typeName(`${rootName}Input`, taken);
+  const inputNames = new Map<string, string>();
+  for (const [name, , , definition] of definitions) {
+    definition.inputTypeName = typeName(`${name}Input`, taken);
+    inputNames.set(`${definition.keyword}\0${definition.key}`, definition.inputTypeName);
+  }
+  return { rootName, inputRootName, names, inputNames, definitions, taken };
 }
 
 /** The root's definitions, each with the names its type and its validator take in the module, in the order the module declares them. */
@@ -204,19 +212,30 @@ export interface SchemaFiles {
   read(path: string): Value | undefined;
 }
 
-/** An entry of the root's `$defs` or `definitions`: its keyword and key, the names of its type and its validator, and its type written out. */
+/** An entry of the root's `$defs` or `definitions`: its keyword and key, the names of its types and its validator, and its types written out. */
 export interface Definition {
   keyword: "$defs" | "definitions";
   key: string;
   typeName: string;
+  /** The name of its input type, the values `.validate()` accepts, beside `typeName`, those it gives. */
+  inputTypeName: string;
   valueName: string;
   type: string;
+  inputType: string;
   /** Its doc comment, as the module writes it before its type: for its validator too. */
   doc: string;
 }
 
 /** A schema file whose pointers a reference can follow: the root's own, or another file's, whose names are imported. */
-type Document = { schema: Value; path: string | undefined; rootName: string; names: Map<string, string>; own: boolean };
+type Document = { schema: Value; path: string | undefined; rootName: string; names: Map<string, string>; inputNames: Map<string, string>; own: boolean };
+
+/**
+ * Which type the emitter writes: `output`, the value `.validate()` gives (output.ts), with each
+ * property that has a `default` required, an optional property without `undefined`, which the value
+ * never holds, and an object that lists its keys without an index signature for the others, which
+ * the value no longer has; `input`, every value the validator accepts, as `.is()` narrows to.
+ */
+export type TypeMode = "input" | "output";
 
 /**
  * The keywords that evaluate properties in place, beside `properties` and `patternProperties`: a
@@ -304,18 +323,31 @@ export type Draft = "draft-07" | "2019-09" | "2020-12";
  * in 2020-12 alone, a list of `items` and `additionalItems` before it, `unevaluatedProperties` from
  * 2019-09; without, every keyword is read.
  */
-export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Draft, options?: TypeOptions): string {
-  return schemaModuleTypes(root, files, draft, options).declarations;
+export function schemaDeclarations(root: Value, files?: SchemaFiles, draft?: Draft, options?: TypeOptions, mode: TypeMode = "input"): string {
+  return schemaModuleTypes(root, files, draft, options, mode).declarations;
 }
 
-/** The declarations, as `schemaDeclarations` writes them; the root's name; the root's type as text, which the module's default export takes so a hover prints its properties; and the root's doc comment, which the default export carries too. */
-export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft, options?: TypeOptions): { declarations: string; rootName: string; rootType: string; rootDoc: string; definitions: Definition[] } {
+/**
+ * The declarations; the root's name; the root's type as text, which the module's default export
+ * takes so a hover prints its properties; and the root's doc comment, which the default export
+ * carries too. Without `only`, as the module declares them, each type twice, as `.validate()` gives
+ * it and, under its input name, as it accepts it (`TypeMode`), the input declared as an alias where
+ * the two are written alike; with `only`, as `schemaDeclarations` writes them, in that mode alone,
+ * each under its own name.
+ */
+export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draft, options?: TypeOptions, only?: TypeMode): { declarations: string; rootName: string; inputRootName: string; rootType: string; rootInputType: string; rootDoc: string; definitions: Definition[] } {
   const prefixItems = draft === undefined || draft === "2020-12";
   const itemLists = draft === undefined || draft !== "2020-12";
   const unevaluated = draft === undefined || draft !== "draft-07";
   const exactOptional = options?.exactOptionalPropertyTypes !== false;
-  const { rootName, names, definitions, taken } = definitionNames(root, files?.path);
-  const main: Document = { schema: root, path: files?.path, rootName, names, own: true };
+  const { rootName, inputRootName, names, inputNames, definitions, taken } = definitionNames(root, files?.path);
+  const main: Document = { schema: root, path: files?.path, rootName, names, inputNames, own: true };
+  let mode: TypeMode = only ?? "output";
+  // Whether an input type is named for itself (`UserInput`), as the module declares it, or for the type.
+  const inputNamed = only === undefined;
+  // In the input's pass, which of this file's declarations type their input apart, by the key of
+  // `names` (`""` the root's): every one until it is known, none in the pass that finds them (below).
+  let apart: Set<string> | undefined;
   const documents = new Map<string, Document>();
   // The types imported from other files: specifier, then exported name, then the name used here.
   const imports = new Map<string, Map<string, string>>();
@@ -330,8 +362,8 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     if (!document) {
       const schema = files!.read(path);
       if (schema === undefined) return undefined;
-      const { rootName, names } = definitionNames(schema, path);
-      document = { schema, path, rootName, names, own: false };
+      const { rootName, names, inputNames } = definitionNames(schema, path);
+      document = { schema, path, rootName, names, inputNames, own: false };
       documents.set(path, document);
     }
     return document;
@@ -339,7 +371,7 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
 
   /** `exported`, a name `document`'s module declares, as a name in this module: itself, or the name it is imported under. */
   function nameIn(document: Document, exported: string): string {
-    if (document.own) return exported === OUTPUT ? rootName : exported;
+    if (document.own) return exported === OUTPUT ? rootName : exported === INPUT ? inputRootName : exported;
     const specifier = specifierOf(files!.path, document.path!);
     let byName = imports.get(specifier);
     if (!byName) imports.set(specifier, (byName = new Map()));
@@ -347,8 +379,9 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     if (local === undefined) {
       // Another file's root is imported as its `output`, the re-export of the root its module declares
       // and does not export, named here for the file: `./address.schema.jsonc` gives `Address`. A
-      // hover prints the root's own name, or `address.output` where the file imports that module.
-      local = typeName(exported === OUTPUT ? document.rootName : exported, taken);
+      // hover prints the root's own name, or `address.output` where the file imports that module; its
+      // `input` is named for the file too, `AddressInput`.
+      local = typeName(exported === OUTPUT ? document.rootName : exported === INPUT ? `${document.rootName}Input` : exported, taken);
       byName.set(exported, local);
     }
     return local;
@@ -414,8 +447,11 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     const at = locate(ref);
     if (!at) return "unknown";
     const { document, path } = at;
-    if (!inPlace && path.length === 0) return nameIn(document, OUTPUT);
-    const named = !inPlace && path.length === 2 ? document.names.get(`${path[0]}\0${path[1]}`) : undefined;
+    // Another file's input is always its own, since this module does not know whether it is typed apart.
+    const input = (key: string) => mode === "input" && inputNamed && (!document.own || apart === undefined || apart.has(key));
+    if (!inPlace && path.length === 0) return nameIn(document, input("") ? INPUT : OUTPUT);
+    const definition = path.length === 2 ? `${path[0]}\0${path[1]}` : undefined;
+    const named = !inPlace && definition !== undefined ? (input(definition) ? document.inputNames : document.names).get(definition) : undefined;
     if (named) return nameIn(document, named);
     // By where it points, so a pointer and an anchor to one schema stop each other's recursion.
     const key = JSON.stringify([document.path, ...path]);
@@ -428,6 +464,21 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     current = outer;
     inlining.delete(key);
     return type;
+  }
+
+  /** Whether a property's schema has a `default`, its own or, without one, that of its `$ref`'s target, in turn, as `.validate()` finds the one it fills in (output.ts). */
+  function hasDefault(schema: Value | undefined, depth = 0): boolean {
+    if (!isObj(schema)) return false;
+    if (Object.hasOwn(schema, "default")) return true;
+    if (typeof schema["$ref"] !== "string" || depth > 16) return false;
+    const at = locate(schema["$ref"]);
+    const target = at && pointTo(at.document.schema, at.path);
+    if (!at || target === undefined) return false;
+    const outer = current;
+    current = at.document;
+    const found = hasDefault(target, depth + 1);
+    current = outer;
+    return found;
   }
 
   function objectType(schema: Obj, indent: string, inPlace?: InPlace): string {
@@ -449,7 +500,10 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     const lines: string[] = [];
     const valueTypes: string[] = [];
     for (const [key, property] of Object.entries(properties)) {
-      const optional = !required.has(key);
+      // A property with a `default` is filled in where it is absent (output.ts): optional in the
+      // input, and in the output required.
+      const defaulted = hasDefault(property);
+      const optional = mode === "input" ? !required.has(key) || defaulted : !required.has(key) && !defaulted;
       // TypeScript gives every object the members of its `Object` interface (`toString`, `constructor`),
       // so `{}` is not assignable to `toString?: { length?: string }` (TS2322, through `toString.length`),
       // though the validator, which reads the value's own properties, accepts it: an optional property of
@@ -458,11 +512,14 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       valueTypes.push(type, ...(optional ? ["undefined"] : []));
       // An optional property may hold `undefined`, which the validator passes as absent. Its `?`
       // says so unless the project turns on `exactOptionalPropertyTypes`, so `| undefined` is written
-      // there, and where the project's options are not known. A property whose schema says
+      // there, and where the project's options are not known; not in the output, which drops such a
+      // property (the maintainer, 2026-10-29: "If the user has exact optional property types set to
+      // true, we should allow `| undefined` For the input type, but exclude it from the output
+      // type."). A property whose schema says
       // `readOnly: true` is `readonly`, which TypeScript does not hold against assignment either way,
       // so every value the validator accepts still is one.
       const readonly = isObj(property) && property["readOnly"] === true ? "readonly " : "";
-      lines.push(`${doc(property, inner, docOfKey(properties, key))}${inner}${readonly}${propertyName(key)}${optional ? "?" : ""}: ${optional && exactOptional ? union([type, "undefined"]) : type};`);
+      lines.push(`${doc(property, inner, docOfKey(properties, key))}${inner}${readonly}${propertyName(key)}${optional ? "?" : ""}: ${optional && exactOptional && mode === "input" ? union([type, "undefined"]) : type};`);
     }
     // A required key that `properties` does not list takes the type of the `patternProperties` whose
     // pattern matches it (all of them apply, so their union admits it), or of `additionalProperties`
@@ -486,7 +543,10 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       return lines.length ? `{\n${lines.join("\n")}\n${indent}}` : "{}";
     }
     const extra = patterns.map((pattern) => pattern.type);
-    if (!closed) extra.push(additionalType);
+    // The output of an object that lists its keys and says nothing of the others has none: they are
+    // dropped (output.ts). Its patterns' keys stay.
+    const stripped = mode === "output" && !Object.hasOwn(schema, "additionalProperties") && !(unevaluated && Object.hasOwn(schema, "unevaluatedProperties")) && (Object.keys(properties).length > 0 || required.size > 0);
+    if (!closed && !stripped) extra.push(additionalType);
     if (extra.length) lines.push(`${inner}[key: string]: ${union([...extra, ...valueTypes])};`);
     else if (!lines.length) lines.push(`${inner}[key: string]: never;`);
     return `{\n${lines.join("\n")}\n${indent}}`;
@@ -679,6 +739,14 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
    * of, in place.
    */
   function emit(schema: Value, indent: string, within?: ReadonlySet<JsonType>, closing?: Closing): string {
+    const type = emitSchema(schema, indent, within, closing);
+    // A string the schema transforms is checked once transformed (output.ts), so the input is any
+    // string: `" Admin "` passes `{ "enum": ["admin"], "transform": ["trim", "toLowerCase"] }`.
+    const transforms = mode === "input" && isObj(schema) && Array.isArray(schema["transform"]) && schema["transform"].length > 0;
+    return transforms && possibleTypes(schema).has("string") && (!within || within.has("string")) ? union([type, "string"]) : type;
+  }
+
+  function emitSchema(schema: Value, indent: string, within?: ReadonlySet<JsonType>, closing?: Closing): string {
     if (schema === true) return "unknown";
     if (schema === false) return "never";
     if (!isObj(schema)) return "unknown";
@@ -729,22 +797,55 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     const keyword = exported ? "export " : "";
     return objectLiteral(type) ? `${doc(schema, "", comment)}${keyword}interface ${name} ${type}` : `${doc(schema, "", comment)}${keyword}type ${name} = ${type};`;
   };
+  // Each type as `.validate()` gives it, then, for the module, as it accepts it.
   const rootType = emit(root, "");
+  for (const [, schema, comment, definition] of definitions) {
+    definition.type = emit(schema, "");
+    definition.doc = doc(schema, "", comment);
+  }
+  let rootInputType = rootType;
+  if (only === undefined) {
+    // A declaration's input is typed apart where, written with this file's own names, it is other
+    // text than the type, or where it refers to one that is; a reference to another file's type is
+    // to its input, so a declaration with one is always apart.
+    mode = "input";
+    apart = new Set();
+    const own: [key: string, name: string, type: string, schema: Value][] = [["", rootName, rootType, root], ...definitions.map(([name, schema, , definition]): [string, string, string, Value] => [`${definition.keyword}\0${definition.key}`, name, definition.type, schema])];
+    const found = new Set(own.filter(([, , type, schema]) => emit(schema, "") !== type).map(([key]) => key));
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const [key, , type] of own)
+        if (!found.has(key) && own.some(([other, name]) => found.has(other) && new RegExp(`\\b${name}\\b`).test(type))) {
+          found.add(key);
+          grew = true;
+        }
+    }
+    apart = found;
+    if (found.has("")) rootInputType = emit(root, "");
+    for (const [, schema, , definition] of definitions) definition.inputType = found.has(`${definition.keyword}\0${definition.key}`) ? emit(schema, "") : definition.type;
+  } else for (const [, , , definition] of definitions) definition.inputType = definition.type;
   // Named for the file, the root is exported only as `output`, by a re-export rather than
-  // `type output = User`, whose name a hover would print in place of `User`; and as `input`, an
-  // alias, not a second re-export, whose name a hover printed for a reference to the root inside it
-  // (`replies?: Given[]` where a file imports `input as Given` and `output as Member`, measured on
-  // 2026-10-29). The two are one type until codecs decode a value (DESIGN.md).
+  // `type output = User`, whose name a hover would print in place of `User`. Where the value
+  // `.validate()` accepts is typed as the one it gives, `input` is an alias of the root, not a second
+  // re-export, whose name a hover printed for a reference to the root inside it (`replies?: Given[]`
+  // where a file imports `input as Given` and `output as Member`, measured on 2026-10-29); where it
+  // is not, `UserInput` is declared and re-exported as `input`.
   const named = rootName !== OUTPUT;
-  const rootDeclaration = [declare(rootName, root, docOfRoot(root), rootType, !named), ...(named ? [`export type { ${rootName} as ${OUTPUT} };`, `export type ${INPUT} = ${rootName};`] : [])].join("\n");
+  const rootLines = [declare(rootName, root, docOfRoot(root), rootType, !named), ...(named ? [`export type { ${rootName} as ${OUTPUT} };`] : [])];
+  if (only === undefined) {
+    if (rootInputType !== rootType) {
+      rootLines.push(declare(inputRootName, root, docOfRoot(root), rootInputType, !named));
+      if (named) rootLines.push(`export type { ${inputRootName} as ${INPUT} };`);
+    } else rootLines.push(`export type ${INPUT} = ${rootName};`);
+  }
   const declarations = [
-    rootDeclaration,
+    rootLines.join("\n"),
     ...definitions.map(([name, schema, comment, definition]) => {
-      definition.type = emit(schema, "");
-      definition.doc = doc(schema, "", comment);
-      return declare(name, schema, comment, definition.type);
+      const lines = [declare(name, schema, comment, definition.type)];
+      if (only === undefined) lines.push(definition.inputType === definition.type ? `${definition.doc}export type ${definition.inputTypeName} = ${name};` : declare(definition.inputTypeName, schema, comment, definition.inputType));
+      return lines.join("\n");
     }),
   ].join("\n\n");
   const lines = [...imports].map(([specifier, byName]) => `import type { ${[...byName].map(([exported, local]) => (exported === local ? exported : `${exported} as ${local}`)).join(", ")} } from ${JSON.stringify(specifier)};`);
-  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, rootType, rootDoc: doc(root, "", docOfRoot(root)), definitions: definitions.map(([, , , definition]) => definition) };
+  return { declarations: lines.length ? `${lines.join("\n")}\n\n${declarations}` : declarations, rootName, inputRootName, rootType, rootInputType, rootDoc: doc(root, "", docOfRoot(root)), definitions: definitions.map(([, , , definition]) => definition) };
 }

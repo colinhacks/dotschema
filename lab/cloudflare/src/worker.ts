@@ -1,12 +1,13 @@
 // A Worker that validates with lab/basic's schemas and its own formats.schema.jsonc, in workerd, which
 // refuses `new Function`: the validators are compiled when the module is built, so the Worker runs
 // them as plain code, the formats' files with them.
-import user, { type output as User } from "../../basic/user.schema.jsonc";
+import user from "../../basic/user.schema.jsonc";
 import team from "../../basic/team.schema.jsonc";
 import event from "../../basic/event.schema.jsonc";
 import formats from "./formats.schema.jsonc";
 
-const ada: User = { name: "Ada", role: "admin" };
+// A value written by hand is the schema's input, whose tags `.validate()` fills in.
+const ada: user.input = { name: "Ada", role: "admin" };
 
 // A value each format takes, and one each refuses.
 const valid = {

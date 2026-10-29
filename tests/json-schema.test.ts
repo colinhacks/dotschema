@@ -61,6 +61,9 @@ function compileFor(target: JsonSchemaTarget, schema: unknown, strictSchema = tr
   // ajv-errors' `errorMessage`, which the conversion keeps as data, as it keeps any keyword no draft
   // defines, read here as a consumer with ajv-errors reads it; strict, ajv refuses it otherwise.
   require("../src/keywords/error-message.cjs")(ajv);
+  // dotschema's `transform`, which the conversion keeps as data too, declared so that strict mode
+  // takes it; no value checked here holds a string a transform changes.
+  ajv.addKeyword("transform");
   return ajv.compile(schema);
 }
 

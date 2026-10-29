@@ -20,11 +20,12 @@ import { fileURLToPath } from "node:url";
 import { CODES, type Problem } from "./core/problems.ts";
 import type { TypeOptions } from "./core/universal.ts";
 import { literal, toJs, type Value } from "./core/serialize.ts";
-import { parseSchemaFile } from "./parse.ts";
+import { parseSchemaFile, placeAt } from "./parse.ts";
 import { collect, dynamicRefProblems, eachSchema, fileOf, forAjv, fragmentOf, mapSchemas, pointer, pointTo, resolvedSchemas, resolveRef, specifierOf, staticReferences, withoutKeywords, type Files } from "./refs.ts";
 import { definitionsOf, INPUT, LITERAL_NAME, OUTPUT, schemaModuleTypes, type Draft } from "./schema-types.ts";
 import { jsonSchemas, type Entry, type JsonSchemaResult, type JsonSchemaTarget } from "./json-schema.ts";
 import { formatDefinitions, formatFile } from "./formats/index.ts";
+import { EVERY_PART, keyOf, outputPlan, outputRuntime, runtimeParts, type Parts, type Plan } from "./output.ts";
 
 const FAILED_TYPES = ["declare const schema: any;", `declare namespace schema { export type ${OUTPUT} = any; export type ${INPUT} = any; }`, "export default schema;", `export type ${OUTPUT} = any;`, `export type ${INPUT} = any;`, ""].join("\n");
 
@@ -828,10 +829,12 @@ const shapeCode = (shape: ObjectShape): string => {
 
 /**
  * The types a namespace gives a root or a definition declared as `name`: `output`, a re-export of the
- * declaration, so a hover prints a reference to it inside itself as `Comment.output`, and `input`, an
- * alias of it, which a hover does not print for that reference, as a second re-export could.
+ * declaration, so a hover prints a reference to it inside itself as `Comment.output`, and `input`, the
+ * values `.validate()` accepts: the declaration `inputName` where it is typed apart, re-exported, and
+ * otherwise an alias of `name`, which a hover does not print for that reference, as a second
+ * re-export of `name` could.
  */
-const typeMembers = (name: string): string => `export type { ${name} as ${OUTPUT} }; export type ${INPUT} = ${name};`;
+const typeMembers = (name: string, inputName?: string): string => (inputName ? `export type { ${name} as ${OUTPUT}, ${inputName} as ${INPUT} };` : `export type { ${name} as ${OUTPUT} }; export type ${INPUT} = ${name};`);
 
 /** A list of keys as a union of string literal types, `never` for none. */
 const keyUnion = (keys: readonly string[]): string => (keys.length ? keys.map((key) => JSON.stringify(key)).join(" | ") : "never");
@@ -843,6 +846,67 @@ const keyUnion = (keys: readonly string[]): string => (keys.length ? keys.map((k
  * Each definition is a validator too, exported under its value name with its own `.output` and
  * `.input`; a root or a definition that is a plain object is an `ObjectSchema`, with `.pick()` and `.omit()`.
  */
+/** Each file's id in ajv's copy of the files (`forAjv`), by path, which `getSchema` reaches a schema in it by. */
+function fileIds(files: Files, path: string): Map<string, string> {
+  const prepared = forAjv(files, path);
+  const ids = new Map([[path, String((prepared.root as Record<string, Value>)["$id"] ?? "").replace(/#$/, "")]]);
+  for (const other of prepared.others) ids.set(other.path, other.id);
+  return ids;
+}
+
+/** Where a problem with the keyword at `segments` in the file `at` is reported: at its key in the root's text, or at the reference that reaches another file. */
+const placeOf = (files: Files, path: string, source: string, at: string, segments: readonly string[]) => (at === path ? placeAt(source, segments) : files.places.get(at));
+
+/** What `.validate()` fills, transforms and strips for the module's entries (output.ts), and the problems of its `transform`s, each placed. */
+function planOf(files: Files, path: string, source: string, entries: ModuleEntry[]): { plan: Plan; problems: Problem[] } {
+  const plan = outputPlan(files, path, draftOf(files.schemas.get(path)!) ?? "draft-07", entries.map((entry) => entry.entry));
+  return { plan, problems: plan.problems.map(({ path: at, segments, message }) => problem(message, placeOf(files, path, source, at, segments))) };
+}
+
+/**
+ * A problem for each `default` that its own schema refuses, read as `.validate()` fills it in: with
+ * the transforms and the defaults inside it that the schema applies (`__pre` of output.ts, run on
+ * a copy), and checked by ajv against the schema that holds it, wherever in the files it is, the
+ * maintainer's wish of 2026-10-27: "We can also verify that the default value in question actually
+ * conforms to the type properly."
+ */
+function defaultProblems(ajv: Ajv, files: Files, path: string, source: string, plan: Plan): Problem[] {
+  const ids = fileIds(files, path);
+  const at = (file: string, segments: readonly string[]) => ajv.getSchema(`${ids.get(file)}#${fragmentOf(segments)}`) as ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string }[] | null };
+  const pre = new Function(`${outputRuntime(EVERY_PART)}\nreturn __pre;`)() as (nodes: unknown, tests: unknown, node: unknown, value: unknown) => unknown;
+  const problems: Problem[] = [];
+  let tests: unknown[] | undefined;
+  for (const [file, schema] of files.schemas) {
+    const found: string[][] = [];
+    mapSchemas(schema, (copy, segments) => {
+      if (Object.hasOwn(copy, "default")) found.push([...segments]);
+    });
+    for (const segments of found) {
+      const value = (pointTo(schema, segments) as Record<string, Value>)["default"]!;
+      let check: ReturnType<typeof at> | undefined;
+      try {
+        check = at(file, segments);
+      } catch {
+        continue;
+      }
+      if (!check) continue;
+      const node = plan.at.get(keyOf(file, segments));
+      tests ??= plan.tests.map((test) => at(test.path, test.segments));
+      let filled: unknown = value;
+      try {
+        filled = node === undefined ? value : pre(plan.nodes, tests, plan.nodes[node], structuredClone(value));
+        if (check(filled)) continue;
+      } catch (error) {
+        problems.push(problem(`The default ${JSON.stringify(value)} could not be checked: ${(error as Error).message}`, placeOf(files, path, source, file, [...segments, "default"])));
+        continue;
+      }
+      const reasons = [...new Set((check.errors ?? []).map((error) => `${error.instancePath ? `${error.instancePath} ` : ""}${error.message ?? "is not valid"}`))];
+      problems.push(problem(`The default ${JSON.stringify(value)} does not pass its own schema: ${reasons.join(", ")}.`, placeOf(files, path, source, file, [...segments, "default"])));
+    }
+  }
+  return problems;
+}
+
 export function schemaTypes(source: string, path: string, options?: TypeOptions): { types: string; problems: Problem[] } {
   const parsed = parseSchemaFile(source);
   if (!parsed.ok) return { types: FAILED_TYPES, problems: parsed.problems };
@@ -862,19 +926,25 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
       // Each definition's validator, as the build compiles it, so a definition ajv refuses fails here too.
       const failed = definitionProblem(loaded.ajv, compiled, entries);
       if (failed) problems.push(failed);
+      // A `transform` the module cannot apply, and a `default` its schema refuses, as the build reports them.
+      const planned = planOf(files, path, source, entries);
+      problems.push(...planned.problems);
+      if (!planned.problems.length && !failed) problems.push(...defaultProblems(loaded.ajv, files, path, source, planned.plan));
     }
   }
   // The types read each `$ref` as a pointer from its file's root, resolved against the `$id`s above it (refs.ts).
   const resolved = resolvedSchemas(files);
-  const { declarations, rootName, rootType, rootDoc, definitions } = schemaModuleTypes(resolved.get(path)!, { path, read: (other) => resolved.get(other) }, draft, options);
-  const typeOf = (entry: ModuleEntry, type: string, literalType: string) =>
-    entry.shape ? `__DotschemaObjectSchema<${type}, ${literalType}, ${keyUnion(entry.shape.keys)}>` : `__DotschemaSchema<${type}, ${literalType}>`;
+  const { declarations, rootName, inputRootName, rootType, rootInputType, rootDoc, definitions } = schemaModuleTypes(resolved.get(path)!, { path, read: (other) => resolved.get(other) }, draft, options);
+  // The input type after the type, where the two differ (`Schema<T, S, I = T>`), written out as the
+  // type is, so a hover over a value `.is()` narrows prints its properties too.
+  const typeOf = (entry: ModuleEntry, type: string, literalType: string, input: string | undefined) =>
+    entry.shape ? `__DotschemaObjectSchema<${type}, ${literalType}, ${keyUnion(entry.shape.keys)}${input ? `, ${input}` : ""}>` : `__DotschemaSchema<${type}, ${literalType}${input ? `, ${input}` : ""}>`;
   const [rootEntry, ...definitionEntries] = entries;
   const definitionLines = definitionEntries.map((entry) => {
     const definition = definitions.find((d) => d.keyword === entry.entry![0] && d.key === entry.entry![1])!;
     return [
-      `${definition.doc}export declare const ${definition.valueName}: ${typeOf(entry, definition.type, `${LITERAL_NAME}[${JSON.stringify(definition.keyword)}][${JSON.stringify(definition.key)}]`)};`,
-      `${definition.doc}export declare namespace ${definition.valueName} { ${typeMembers(definition.typeName)} }`,
+      `${definition.doc}export declare const ${definition.valueName}: ${typeOf(entry, definition.type, `${LITERAL_NAME}[${JSON.stringify(definition.keyword)}][${JSON.stringify(definition.key)}]`, definition.inputType === definition.type ? undefined : definition.inputType)};`,
+      `${definition.doc}export declare namespace ${definition.valueName} { ${typeMembers(definition.typeName, definition.inputType === definition.type ? undefined : definition.inputTypeName)} }`,
     ].join("\n");
   });
   return {
@@ -890,11 +960,11 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
       // The root's type written out rather than named, so a hover over a value `.validate()` or `.is()`
       // gives prints the schema's properties, and a `$ref` within them by its name (the maintainer, on
       // 2026-10-26: "People want to see the actual properties for visibility").
-      `${rootDoc}declare const schema: ${typeOf(rootEntry!, rootType, LITERAL_NAME)};`,
+      `${rootDoc}declare const schema: ${typeOf(rootEntry!, rootType, LITERAL_NAME, rootInputType === rootType ? undefined : rootInputType)};`,
       // A namespace of types alone, which merges with the const, so the default import names the
       // types too: `user.output` and `user.input` (the maintainer, on 2026-10-29: "it shoudl be
       // `Comment.output` and `Comment.input` like arktype. seems cleaner.").
-      `${rootDoc}declare namespace schema { ${typeMembers(rootName)} }`,
+      `${rootDoc}declare namespace schema { ${typeMembers(rootName, rootInputType === rootType ? undefined : inputRootName)} }`,
       "export default schema;",
       // Each definition's validator, named for its key in camelCase, with its types as `.output`
       // and `.input` (the maintainer's pick of 2026-10-26: "import { address } from
@@ -904,6 +974,22 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
     ].join("\n"),
     problems,
   };
+}
+
+/** The validators the run time chooses a member of an `anyOf` or `oneOf`, or `then` or `else`, with where neither a tag nor a test of one property can (output.ts), as standalone code. */
+function testsCode(ajv: Ajv, standalone: (ajv: Ajv, refs: unknown) => string, files: Files, path: string, plan: Plan): { source: string; returns: string } {
+  const ids = fileIds(files, path);
+  const exported: Record<string, string> = {};
+  const names = plan.tests.map((test, i) => {
+    let id = `${ids.get(test.path)}#${fragmentOf(test.segments)}`;
+    if (ajv.getSchema(id) === undefined) {
+      ajv.addSchema({ $id: `dotschema-test:${i}`, $ref: id });
+      id = `dotschema-test:${i}`;
+    }
+    exported[`t${i}`] = id;
+    return `module.exports.t${i}`;
+  });
+  return { source: standalone(ajv, exported), returns: `[${names.join(", ")}]` };
 }
 
 /** The problem with the first definition ajv cannot compile on its own, as the build would report it. */
@@ -1068,13 +1154,24 @@ const __requiring = (schema, required) => {
 };
 `;
 
-/** `.pick()`, `.omit()`, `.partial()`, `.required()` and `.keyof()`, on a plain object's value. */
-const PICK = `
-  if (shape) {
-    const documents = (edit) => Object.fromEntries(Object.entries(jsonSchemas).map(([target, entry]) => [target, entry.schema ? { schema: edit(entry.schema) } : entry]));
+/**
+ * `.pick()`, `.omit()`, `.partial()`, `.required()` and `.keyof()`, on a plain object's value; with
+ * `output`, each schema's node (output.ts) too, its properties and required keys those of the schema
+ * it gives, and with `pre`, its defaults, which the document of its output requires.
+ */
+const pick = (output: boolean, pre: boolean) => `
+  if (shape) {${
+    pre
+      ? `
+    const documents = (edit) => Object.fromEntries(Object.entries(jsonSchemas).map(([target, entry]) => [target, entry.schema ? { schema: edit(entry.schema, false), ...(entry.output ? { output: edit(entry.output, true) } : {}) } : entry]));
+    // The keys whose default \`.validate()\` fills in, which the output's document requires.
+    const defaulted = node && node.d ? node.d.map((d) => d[0]) : [];`
+      : `
+    const documents = (edit) => Object.fromEntries(Object.entries(jsonSchemas).map(([target, entry]) => [target, entry.schema ? { schema: edit(entry.schema) } : entry]));`
+  }
     const narrow = (keep) =>
-      __make(allFns, firstFns, __filtered(schema, keep), documents((document) => __filtered(document, keep)), { properties: shape.properties.filter(([key]) => keep(key)), required: shape.required.filter(keep), additional: shape.additional }, confirm);
-    const requiring = (required) => __make(allFns, firstFns, __requiring(schema, required), documents((document) => __requiring(document, required)), { ...shape, required }, confirm);
+      __make(allFns, firstFns, __filtered(schema, keep), documents((document) => __filtered(document, keep)), { properties: shape.properties.filter(([key]) => keep(key)), required: shape.required.filter(keep), additional: shape.additional }, confirm${output ? `, node && { ...node, p: node.p && node.p.filter((p) => keep(p[0])), r: node.r && node.r.filter(keep)${pre ? ", d: node.d && node.d.filter((d) => keep(d[0]))" : ""} }` : ""});
+    const requiring = (required) => __make(allFns, firstFns, __requiring(schema, required), documents(${pre ? "(document, output) => __requiring(document, output ? [...required, ...defaulted.filter((key) => !required.includes(key))] : required)" : "(document) => __requiring(document, required)"}), { ...shape, required }, confirm${output ? ", node && { ...node, r: required }" : ""});
     const properties = shape.properties.map(([key]) => key);
     made.pick = (...keys) => narrow((key) => keys.includes(key));
     made.omit = (...keys) => narrow((key) => !keys.includes(key));
@@ -1112,11 +1209,24 @@ const MESSAGES = `const __issue = (value, error) => {
 };`;
 
 /**
+ * In `__make`, for a module with a plan (output.ts): the entry's node, and where something in the
+ * module fills or transforms a value, the value as `.validate()` and `.is()` check it, its defaults
+ * filled and its strings transformed (`__pre`), where its node does either.
+ */
+const outputMake = (pre: boolean) => `
+  if (typeof node === "number") node = __nodes[node];${pre ? "\n  const __in = node && node.f ? (value) => __pre(__nodes, __tests, node, value) : (value) => value;" : ""}`;
+
+/**
  * The module's run time, beside its validators. `objects` adds the join and `.pick()` and `.omit()`,
  * which only a module whose root or a definition is a plain object uses, so another module carries
- * neither; `messages`, the reading of `errorMessage`'s errors, which only a module that writes it uses.
+ * neither; `messages`, the reading of `errorMessage`'s errors, which only a module that writes it uses;
+ * `parts`, the parts of the run time of the value `.validate()` gives that the module's plan uses,
+ * where it has one (output.ts).
  */
-const runtime = (objects: boolean, messages: boolean) => `
+const runtime = (objects: boolean, messages: boolean, parts: Parts | undefined) => {
+  const output = parts !== undefined;
+  const pre = parts?.pre ?? false;
+  return `
 // Standard Schema's path for an ajv error. ajv's instancePath is a JSON Pointer, which writes an
 // array index as it writes an object key, so each segment is read against the value it names: in
 // an array, a number. The key of a property that is missing, unexpected or misnamed, which ajv
@@ -1155,50 +1265,50 @@ const __thrown = (error) => {
     return "a value that cannot be read";
   }
 };
-${objects ? OBJECTS : ""}
+${objects ? OBJECTS : ""}${parts ? outputRuntime(parts) : ""}
 // A schema module's value, or one of its definitions': \`.validate()\` with ajv's allErrors validator,
 // \`.is()\` with the one that stops at the first failure, Standard Schema, and for a plain object
 // (a \`shape\`), \`.pick()\`, \`.omit()\`, \`.partial()\`, \`.required()\` and \`.keyof()\`, which give the
 // same for another schema made from the same functions. \`confirm\` is whether a pass of \`.is()\` is
 // confirmed (\`__confirm\`), which \`.keyof()\`'s check never needs. Nothing on it throws but Standard
 // JSON Schema's conversion to a target it has no schema for, as that spec asks.
-const __make = (allFns, firstFns, schema, jsonSchemas, shape, confirm = __confirm) => {
+const __make = (allFns, firstFns, schema, jsonSchemas, shape, confirm = __confirm${output ? ", node" : ""}) => {
   const all = ${objects ? "shape ? __join(allFns, shape, true) : " : ""}allFns;
-  const first = ${objects ? "shape ? __join(firstFns, shape, false) : " : ""}firstFns;
-  // Every issue, from the validator compiled with allErrors; the value itself on success. Nothing
-  // throws: what ajv throws is one issue at the root, with its message.
-  const validate = (value) => {
+  const first = ${objects ? "shape ? __join(firstFns, shape, false) : " : ""}firstFns;${output ? outputMake(pre) : ""}
+  // Every issue, from the validator compiled with allErrors; the value on success${output ? ", made the schema's output (__post)" : ""}.
+  // Nothing throws: what ajv throws is one issue at the root, with its message.
+  const validate = (value) => {${pre ? "\n    let input = value;" : ""}
     try {
-      if (all(value)) return { value };
+      ${pre ? "input = __in(value);\n      if (all(input)) return { value: node ? __post(__nodes, node, input) : input };" : output ? "if (all(value)) return { value: node ? __post(__nodes, node, value) : value };" : "if (all(value)) return { value };"}
     } catch (error) {
       return { issues: [{ message: "could not be checked: " + __thrown(error), path: [], keyword: "error" }] };
     }
-    return { issues: all.errors.map((error) => __issue(value, error)) };
+    return { issues: all.errors.map((error) => __issue(${pre ? "input" : "value"}, error)) };
   };
   // The validator compiled without allErrors, which returns at the first failure; a value it
   // cannot check is not known to be valid. Where ajv's first-failure code can pass a value the schema
   // refuses (\`contains\` beside a tuple, needsConfirmation in schema.ts), a pass is confirmed.
   const is = (value) => {
-    try {
-      return first(value) && (!confirm || all(value));
+    try {${pre ? "\n      const input = __in(value);\n      return first(input) && (!confirm || all(input));" : "\n      return first(value) && (!confirm || all(value));"}
     } catch {
       return false;
     }
   };
   // Standard JSON Schema v1: the schema in the target's draft, self-contained, computed when the module
-  // was built (json-schema.ts); a fresh copy each call, so a caller may change it.
-  const jsonSchema = (options) => {
+  // was built (json-schema.ts); a fresh copy each call, so a caller may change it.${pre ? "\n  // \\`output\\`, the document of the value \\`.validate()\\` gives, where a default makes it differ (json-schema.ts)." : ""}
+  const jsonSchema = ${pre ? "(output) => " : ""}(options) => {
     const target = options?.target;
     const entry = Object.hasOwn(jsonSchemas, target) ? jsonSchemas[target] : undefined;
     if (!entry) throw new TypeError(\`dotschema converts a schema to the "draft-07" and "draft-2020-12" targets, not \${JSON.stringify(target)}.\`);
     if (entry.error) throw new TypeError(entry.error);
-    return structuredClone(entry.schema);
+    return structuredClone(${pre ? "output && entry.output ? entry.output : entry.schema" : "entry.schema"});
   };
-  const made = { validate, is, schema, "~standard": { version: 1, vendor: "dotschema", validate, jsonSchema: { input: jsonSchema, output: jsonSchema } } };
-${objects ? PICK : ""}
+  const made = { validate, is, schema, "~standard": { version: 1, vendor: "dotschema", validate, jsonSchema: ${pre ? "{ input: jsonSchema(false), output: jsonSchema(true) }" : "{ input: jsonSchema, output: jsonSchema }"} } };
+${objects ? pick(output, pre) : ""}
   return made;
 };
 `;
+};
 
 /**
  * The module's JavaScript, with problems in place of a validator that cannot be built, which a
@@ -1218,6 +1328,9 @@ export function schemaCode(source: string, path: string, { discriminators = true
   // Two validators from the same files, formats and meta-schemas: every error for `.validate()`, the first for `.is()`.
   const standalones: { source: string; returns: string }[][] = [];
   let entries: ModuleEntry[] | undefined;
+  // What `.validate()` fills, transforms and strips (output.ts), and the validators it chooses with.
+  let planned: { plan: Plan; problems: Problem[] } | undefined;
+  let tests: { source: string; returns: string } | undefined;
   // Each oneOf a property tells apart gets ajv's discriminator, so that its issues are the matching
   // variant's; were ajv to refuse one, the validator is compiled as the schema is written.
   const tagged = discriminators ? withDiscriminators(files) : { files, count: 0 };
@@ -1232,6 +1345,12 @@ export function schemaCode(source: string, path: string, { discriminators = true
     }
     if ("problem" in compiled) return failed([compiled.problem], files.watched);
     entries ??= moduleEntries(files, path, loaded.ajv.RULES.all);
+    if (!planned) {
+      planned = planOf(files, path, source, entries);
+      if (planned.problems.length) return failed(planned.problems, files.watched);
+      const refused = defaultProblems(loaded.ajv, files, path, source, planned.plan);
+      if (refused.length) return failed(refused, files.watched);
+    }
     const standaloneModule = loaded.require("ajv/dist/standalone");
     const standalone = standaloneModule.default ?? standaloneModule;
     const wrappers = { n: 0 };
@@ -1244,6 +1363,8 @@ export function schemaCode(source: string, path: string, { discriminators = true
       }
     }
     standalones.push(codes);
+    // The validators are `.is()`'s kind, which stop at the first failure.
+    if (!allErrors && planned.plan.tests.length) tests = testsCode(loaded.ajv, standalone, files, path, planned.plan);
   }
   // The standalone code requires ajv's run-time helpers, which resolve from this module, a dependent
   // of ajv's, and reaches each format checked by a function through `__formats` (`usedFormats`).
@@ -1253,7 +1374,12 @@ export function schemaCode(source: string, path: string, { discriminators = true
   try {
     const shapeOf = (entry: ModuleEntry) => (entry.shape ? shapeCode(entry.shape) : "undefined");
     const [root, ...definitions] = entries!;
-    const formats = usedFormats(inline, [...all, ...first].map((code) => code.source));
+    const formats = usedFormats(inline, [...all, ...first, ...(tests ? [tests] : [])].map((code) => code.source));
+    const { plan } = planned!;
+    const output = plan.roots.some((root) => root !== null);
+    // Each entry's node by its index, after its shape (the default for `confirm` kept), so the call
+    // reads nothing a bundler takes for a side effect and is left out where nothing imports it.
+    const nodeOf = (i: number) => (output ? `, undefined, ${plan.roots[i] ?? "undefined"}` : "");
     body = [
       ...(formats ? [formats] : []),
       `const __validateAll = /* @__PURE__ */ ${inline.wrap(all[0]!.source, all[0]!.returns)};`,
@@ -1261,15 +1387,17 @@ export function schemaCode(source: string, path: string, { discriminators = true
       `const __schema = ${toJs(parsed.value)};`,
       `const __jsonSchemas = ${toJs(root!.docs as unknown as Value)};`,
       `const __confirm = ${needsConfirmation(files)};`,
-      runtime(entries!.some((entry) => entry.shape), writesMessages(files)),
-      `const schema = /* @__PURE__ */ __make(__validateAll, __validateFirst, __schema, __jsonSchemas, ${shapeOf(root!)});`,
+      ...(output ? [`const __nodes = ${toJs(plan.nodes as unknown as Value)};`] : []),
+      ...(plan.pre ? [`const __tests = ${tests ? `/* @__PURE__ */ ${inline.wrap(tests.source, tests.returns)}` : "[]"};`] : []),
+      runtime(entries!.some((entry) => entry.shape), writesMessages(files), output ? runtimeParts(plan) : undefined),
+      `const schema = /* @__PURE__ */ __make(__validateAll, __validateFirst, __schema, __jsonSchemas, ${shapeOf(root!)}${nodeOf(0)});`,
       "export default schema;",
       ...definitions.map((entry, i) =>
         [
           `export const ${entry.name} = /* @__PURE__ */ (() => {`,
           `const all = ${inline.wrap(all[i + 1]!.source, all[i + 1]!.returns)};`,
           `const first = ${inline.wrap(first[i + 1]!.source, first[i + 1]!.returns)};`,
-          `return __make(all, first, __schema[${JSON.stringify(entry.entry![0])}][${JSON.stringify(entry.entry![1])}], ${toJs(entry.docs as unknown as Value)}, ${shapeOf(entry)});`,
+          `return __make(all, first, __schema[${JSON.stringify(entry.entry![0])}][${JSON.stringify(entry.entry![1])}], ${toJs(entry.docs as unknown as Value)}, ${shapeOf(entry)}${nodeOf(i + 1)});`,
           "})();",
         ].join("\n"),
       ),

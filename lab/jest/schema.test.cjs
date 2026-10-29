@@ -6,7 +6,8 @@ const point = require("../basic/point.schema.jsonc").default;
 const team = require("../basic/team.schema.jsonc").default;
 
 test("lab/basic's schemas, required by a CommonJS test", () => {
-  expect(user.validate({ name: "Ada", role: "admin" })).toEqual({ value: { name: "Ada", role: "admin" } });
+  // The name trimmed, and the tags' default filled in.
+  expect(user.validate({ name: " Ada ", role: "admin" })).toEqual({ value: { name: "Ada", role: "admin", tags: [] } });
   expect(user.validate({ name: "", role: "owner" }).issues.map((issue) => issue.keyword)).toEqual(["minLength", "enum"]);
   expect(user["~standard"].vendor).toBe("dotschema");
   expect([address.is({ city: "Paris" }), address.is({ city: "" })]).toEqual([true, false]);
