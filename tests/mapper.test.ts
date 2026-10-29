@@ -42,7 +42,7 @@ test("the mapper answers the protocol as dotschema, reports options, places erro
     const ok = await mapper.call("transform", { fileName: `${ROOT}tests/fixtures/x.schema.jsonc`, content: '{ "type": "string" }', projectHandle: "p" });
     assert.equal(ok.result.extension, ".mts");
     assert.match(ok.result.text, /^import type \{ Schema as __DotschemaSchema \} from "dotschema";\n/);
-    assert.match(ok.result.text, /\ntype X = string;\nexport type \{ X as Type \};/);
+    assert.match(ok.result.text, /\ntype X = string;\nexport type \{ X as output \};\nexport type input = X;/);
     // "é" is two bytes in UTF-8: the error after it starts one byte later than its UTF-16 offset.
     const content = '{ "description": "é", "type": }';
     const bad = await mapper.call("transform", { fileName: `${ROOT}tests/fixtures/x.schema.jsonc`, content, projectHandle: "p" });

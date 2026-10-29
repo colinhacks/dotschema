@@ -45,6 +45,31 @@ if (user.is(input)) {
 }
 ```
 
+### `.output`
+
+The `.output` type is the value `.validate()` returns:
+
+```ts twoslash title="main.ts"
+declare const input: unknown;
+// ---cut---
+import user from "./user.schema.jsonc";
+
+const result = user.validate(input);
+if (!result.issues) {
+  const person: user.output = result.value;
+}
+```
+
+### `.input`
+
+The `.input` type is the value the schema accepts, the same type as `.output`:
+
+```ts twoslash title="main.ts"
+import user from "./user.schema.jsonc";
+
+const ada: user.input = { name: "Ada", role: "admin" };
+```
+
 ### `.pick()`
 
 The `.pick()` method gives the schema with only the properties named:

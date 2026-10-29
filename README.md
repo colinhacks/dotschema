@@ -101,7 +101,7 @@ Your editor types schema imports through the TypeScript 7.1 language server, wit
 
 The rest is on [dotschema.dev](https://dotschema.dev):
 
-- [Usage](https://dotschema.dev/#usage): `.validate()`, `.is()`, `.pick()`, `.omit()`, `.partial()`, `.required()` and `.keyof()`, definitions, and Standard Schema
+- [Usage](https://dotschema.dev/#usage): `.validate()`, `.is()`, the types `.output` and `.input`, `.pick()`, `.omit()`, `.partial()`, `.required()` and `.keyof()`, definitions, and Standard Schema
 - [Inference](https://dotschema.dev/#inference): the type each shape of schema gives, a `$ref` to another file, and every [format](https://dotschema.dev/#formats) the validator checks
 - [Doc comments](https://dotschema.dev/#doc-comments): a schema's comments, `description` and tags on the type
 - [Errors](https://dotschema.dev/#errors): an invalid schema as a type error, and a message of the schema's own

@@ -3,7 +3,7 @@
 // whichever order the host was given them in.
 import settings from "./settings.jsonc";
 import data from "./data.json5";
-import user, { type Type as User } from "./user.schema.jsonc";
+import user, { type output as User } from "./user.schema.jsonc";
 
 // Exact equality of two types, not mere assignability.
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;

@@ -1,19 +1,19 @@
 // Every import below is typed by dotschema's content mapper (`tsc --runExternalCode`) and loaded by
 // its preload (`node --import dotschema/register main.ts`) or its esbuild plugin.
 import type { SchemaResult, StandardJSONSchemaV1, StandardSchemaV1 } from "dotschema";
-import user, { address, type Type as User } from "./user.schema.jsonc";
-import point, { type Type as Point } from "./point.schema.jsonc";
-import team, { type Type as Team } from "./team.schema.jsonc";
-import event, { type Type as Event } from "./event.schema.jsonc";
+import user, { address, type output as User } from "./user.schema.jsonc";
+import point, { type output as Point } from "./point.schema.jsonc";
+import team, { type output as Team } from "./team.schema.jsonc";
+import event, { type output as Event } from "./event.schema.jsonc";
 
 // Exact equality of two types, not mere assignability.
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 const expect = <T extends true>() => {};
 
-expect<Equal<User, { name: string; email?: string; role: "admin" | "member"; tags?: string[]; address?: address.Type }>>();
-// Each definition is a validator of its own, named for its key, with its type as `.Type`.
-expect<Equal<address.Type, { street?: string; city: string }>>();
-expect<Equal<ReturnType<typeof address.validate>, SchemaResult<address.Type>>>();
+expect<Equal<User, { name: string; email?: string; role: "admin" | "member"; tags?: string[]; address?: address.output }>>();
+// Each definition is a validator of its own, named for its key, with its types as `.output` and `.input`.
+expect<Equal<address.output, { street?: string; city: string }>>();
+expect<Equal<ReturnType<typeof address.validate>, SchemaResult<address.output>>>();
 // `.pick()` and `.omit()` give a schema of some of the properties, typed with their own optionality.
 const summary = user.pick("name", "role");
 expect<Equal<StandardSchemaV1.InferOutput<typeof summary>, { name: string; role: "admin" | "member" }>>();
@@ -25,16 +25,21 @@ expect<Equal<StandardSchemaV1.InferOutput<ReturnType<typeof address.omit<"street
 const anywhere = address.partial();
 expect<Equal<StandardSchemaV1.InferOutput<typeof anywhere>, { street?: string; city?: string }>>();
 const located = user.required("address");
-expect<Equal<StandardSchemaV1.InferOutput<typeof located>["address"], address.Type>>();
+expect<Equal<StandardSchemaV1.InferOutput<typeof located>["address"], address.output>>();
 const field = user.keyof();
 expect<Equal<StandardSchemaV1.InferOutput<typeof field>, "name" | "email" | "role" | "tags" | "address">>();
 // @ts-expect-error a key the schema's properties do not name
 user.pick("nickname");
 // @ts-expect-error an event is a oneOf, whose properties picking would not filter: it has no pick
 event.pick;
-// The default import names the type too.
-expect<Equal<user.Type, User>>();
-expect<Equal<team.Type, Team>>();
+// The default import names the types too: `.output`, the value `.validate()` returns, and `.input`,
+// the value it accepts, today the same type.
+expect<Equal<user.output, User>>();
+expect<Equal<team.output, Team>>();
+expect<Equal<user.input, User>>();
+expect<Equal<address.input, address.output>>();
+// @ts-expect-error `.Type` is gone, with no alias left behind
+type Gone = user.Type;
 expect<Equal<ReturnType<typeof user.validate>, SchemaResult<User>>>();
 // `.is()` is a type guard: the value it accepts is a User where it returns true.
 const someone: unknown = { name: "Ada", role: "admin" };

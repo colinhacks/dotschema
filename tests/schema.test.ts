@@ -243,13 +243,16 @@ test("ajv is set to check the schema as written: a property is the value's own, 
   assert.deepEqual(await verdicts({ multipleOf: 0.123456789 }, [0.370370367, 1e308, 1.7976931348623157e308]), [true, false, false]);
 });
 
-test("the types name the root for its file, export it as Type too, and write its properties out in the default export's type", () => {
+test("the types name the root for its file, export it as output and input too, and write its properties out in the default export's type", () => {
   const { types, problems } = schemaTypes(SCHEMA, PATH);
   assert.deepEqual(problems, []);
   // user.schema.jsonc declares `User`, so a `$ref` to it from another file prints `User`.
-  assert.match(types, /\ninterface User \{\n  name: string;\n[^]*?\n\}\nexport type \{ User as Type \};\n/);
-  // The default import names the type too, as `user.Type`.
-  assert.match(types, /\ndeclare namespace schema \{ export type \{ User as Type \}; \}\nexport default schema;\n/);
+  // It is exported as `output`, and `input` is an alias of it, not a second re-export, which a hover
+  // could print for a reference to the root inside it.
+  assert.match(types, /\ninterface User \{\n  name: string;\n[^]*?\n\}\nexport type \{ User as output \};\nexport type input = User;\n/);
+  // The default import names the types too, as `user.output` and `user.input`.
+  assert.match(types, /\ndeclare namespace schema \{ export type \{ User as output \}; export type input = User; \}\nexport default schema;\n/);
+  assert.doesNotMatch(types, /\bType\b/);
   assert.match(types, /\ntype Json = \{ readonly \$schema: "https:\/\/json-schema.org\/draft\/2020-12\/schema";/);
   // Its arrays are mutable, so it passes where a JSON Schema type's are (`required?: string[]`).
   assert.match(types, /\ntype Json = \{[^\n]*; readonly required: \["name"\];/);
@@ -408,13 +411,13 @@ test("a $ref to another file is followed: its type is imported from that file's 
   });
   const typed = schemaTypes(source, path);
   assert.deepEqual(typed.problems, []);
-  // The definition keeps the name its own module gives it; another file's root is imported as its `Type`, named here for its file.
-  assert.match(typed.types, /^import type \{ Tag, Type as Tag2 \} from "\.\/shared\/tag\.schema\.jsonc";\nimport type \{ Type as Point \} from "\.\/point\.schema\.jsonc";$/m);
+  // The definition keeps the name its own module gives it; another file's root is imported as its `output`, named here for its file.
+  assert.match(typed.types, /^import type \{ Tag, output as Tag2 \} from "\.\/shared\/tag\.schema\.jsonc";\nimport type \{ output as Point \} from "\.\/point\.schema\.jsonc";$/m);
   // A pointer that is not a definition is inlined from the other file, its own references imported.
   assert.match(typed.types, /\ninterface User \{\n  tag: Tag;\n  group\?: Tag2 \| undefined;\n  label\?: Tag \| undefined;\n  at\?: Point \| undefined;\n\}/);
   const tag = join(dir, "shared/tag.schema.jsonc");
   const tagTypes = schemaTypes(readFileSync(tag, "utf8"), tag);
-  assert.match(tagTypes.types, /^import type \{ Type as User \} from "\.\.\/user\.schema\.jsonc";$/m);
+  assert.match(tagTypes.types, /^import type \{ output as User \} from "\.\.\/user\.schema\.jsonc";$/m);
 
   const { code, problems, watchFiles } = schemaCode(source, path);
   assert.deepEqual(problems, []);
@@ -941,7 +944,7 @@ test("a $ref inside an $id that resolves to no schema of the files is a URL, whi
   });
   const typed = schemaTypes(user, path);
   assert.deepEqual(typed.problems, []);
-  assert.match(typed.types, /^import type \{ Type as Tag \} from "\.\/shared\/tag\.schema\.jsonc";$/m);
+  assert.match(typed.types, /^import type \{ output as Tag \} from "\.\/shared\/tag\.schema\.jsonc";$/m);
   assert.match(typed.types, /\n  tag\?: Tag \| undefined;\n/);
   const { code, problems } = schemaCode(user, path);
   assert.deepEqual(problems, []);
@@ -957,7 +960,7 @@ test("a $ref to a schema resource in another file, by its $id, is that file's ty
   });
   const typed = schemaTypes(source, path);
   assert.deepEqual(typed.problems, []);
-  assert.match(typed.types, /^import type \{ Place, Type as Shared \} from "\.\/shared\.schema\.jsonc";$/m);
+  assert.match(typed.types, /^import type \{ Place, output as Shared \} from "\.\/shared\.schema\.jsonc";$/m);
   const { default: user } = await evaluate(schemaCode(source, path).code);
   assert.deepEqual([user.is({ place: { city: "Oslo" } }), user.is({ place: {} })], [true, false]);
 });

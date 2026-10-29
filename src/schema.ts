@@ -1,7 +1,7 @@
 // The module a `.schema.jsonc` file becomes: the TypeScript type the schema
 // describes, and a validator compiled from the schema when the module is built.
 //
-//   import user, { type Type as User } from "./user.schema.jsonc";
+//   import user, { type output as User } from "./user.schema.jsonc";
 //   user.validate(input);       // { value } or { issues }, every issue; never throws
 //   user.is(input);             // input is User, stopping at the first failure
 //   user["~standard"];          // Standard Schema v1, for any library that accepts one
@@ -22,11 +22,11 @@ import type { TypeOptions } from "./core/universal.ts";
 import { literal, toJs, type Value } from "./core/serialize.ts";
 import { parseSchemaFile } from "./parse.ts";
 import { collect, dynamicRefProblems, eachSchema, fileOf, forAjv, fragmentOf, mapSchemas, pointer, pointTo, resolvedSchemas, resolveRef, specifierOf, staticReferences, withoutKeywords, type Files } from "./refs.ts";
-import { definitionsOf, LITERAL_NAME, schemaModuleTypes, type Draft } from "./schema-types.ts";
+import { definitionsOf, INPUT, LITERAL_NAME, OUTPUT, schemaModuleTypes, type Draft } from "./schema-types.ts";
 import { jsonSchemas, type Entry, type JsonSchemaResult, type JsonSchemaTarget } from "./json-schema.ts";
 import { formatDefinitions, formatFile } from "./formats/index.ts";
 
-const FAILED_TYPES = ["declare const schema: any;", "declare namespace schema { export type Type = any; }", "export default schema;", "export type Type = any;", ""].join("\n");
+const FAILED_TYPES = ["declare const schema: any;", `declare namespace schema { export type ${OUTPUT} = any; export type ${INPUT} = any; }`, "export default schema;", `export type ${OUTPUT} = any;`, `export type ${INPUT} = any;`, ""].join("\n");
 
 const problem = (message: string, place: { start: number; length: number } = { start: 0, length: 1 }): Problem => ({ message, ...place, code: CODES.schema });
 
@@ -826,6 +826,13 @@ const shapeCode = (shape: ObjectShape): string => {
 
 // ---- types --------------------------------------------------------------------------------------
 
+/**
+ * The types a namespace gives a root or a definition declared as `name`: `output`, a re-export of the
+ * declaration, so a hover prints a reference to it inside itself as `Comment.output`, and `input`, an
+ * alias of it, which a hover does not print for that reference, as a second re-export could.
+ */
+const typeMembers = (name: string): string => `export type { ${name} as ${OUTPUT} }; export type ${INPUT} = ${name};`;
+
 /** A list of keys as a union of string literal types, `never` for none. */
 const keyUnion = (keys: readonly string[]): string => (keys.length ? keys.map((key) => JSON.stringify(key)).join(" | ") : "never");
 
@@ -833,8 +840,8 @@ const keyUnion = (keys: readonly string[]): string => (keys.length ? keys.map((k
  * The module's types. They import the `Schema` type from `dotschema`, the package the project
  * installed, which the type check resolves from the schema's directory. A `$ref` to another schema
  * file is a type imported from that file's module, which TypeScript sends through the mapper in turn.
- * Each definition is a validator too, exported under its value name with its own `.Type`; a root or
- * a definition that is a plain object is an `ObjectSchema`, with `.pick()` and `.omit()`.
+ * Each definition is a validator too, exported under its value name with its own `.output` and
+ * `.input`; a root or a definition that is a plain object is an `ObjectSchema`, with `.pick()` and `.omit()`.
  */
 export function schemaTypes(source: string, path: string, options?: TypeOptions): { types: string; problems: Problem[] } {
   const parsed = parseSchemaFile(source);
@@ -867,7 +874,7 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
     const definition = definitions.find((d) => d.keyword === entry.entry![0] && d.key === entry.entry![1])!;
     return [
       `${definition.doc}export declare const ${definition.valueName}: ${typeOf(entry, definition.type, `${LITERAL_NAME}[${JSON.stringify(definition.keyword)}][${JSON.stringify(definition.key)}]`)};`,
-      `${definition.doc}export declare namespace ${definition.valueName} { export type { ${definition.typeName} as Type }; }`,
+      `${definition.doc}export declare namespace ${definition.valueName} { ${typeMembers(definition.typeName)} }`,
     ].join("\n");
   });
   return {
@@ -885,13 +892,13 @@ export function schemaTypes(source: string, path: string, options?: TypeOptions)
       // 2026-10-26: "People want to see the actual properties for visibility").
       `${rootDoc}declare const schema: ${typeOf(rootEntry!, rootType, LITERAL_NAME)};`,
       // A namespace of types alone, which merges with the const, so the default import names the
-      // type too: `user.Type` (the maintainer, on 2026-10-26: "I think the default import should have
-      // a `.Type` property on it. That should be the recommended way to access it.").
-      `${rootDoc}declare namespace schema { export type { ${rootName} as Type }; }`,
+      // types too: `user.output` and `user.input` (the maintainer, on 2026-10-29: "it shoudl be
+      // `Comment.output` and `Comment.input` like arktype. seems cleaner.").
+      `${rootDoc}declare namespace schema { ${typeMembers(rootName)} }`,
       "export default schema;",
-      // Each definition's validator, named for its key in camelCase, with its type as `.Type` (the
-      // maintainer's pick of 2026-10-26: "import { address } from "./user.schema.jsonc", with
-      // address.validate() and address.is()").
+      // Each definition's validator, named for its key in camelCase, with its types as `.output`
+      // and `.input` (the maintainer's pick of 2026-10-26: "import { address } from
+      // "./user.schema.jsonc", with address.validate() and address.is()").
       ...definitionLines,
       "",
     ].join("\n"),

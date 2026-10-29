@@ -43,7 +43,7 @@ import { pageFiles } from './page-files.ts';
 //   section (components/inferred.tsx): its children become two labelled rows, the block as the
 //   Schema, without its title bar (the block's `title` still names the file it is, and is taken off
 //   only once every block has seen it), and as the Type the declarations of the module dotschema
-//   gives that file, without the module's imports, its re-export as `Type`, the schema's own text
+//   gives that file, without the module's imports, its exports as `output` and `input`, the schema's own text
 //   and the values, the root first as its bare type (`string | number`, `{ ... }`), named only
 //   where the types refer to it or it has a doc comment, and each definition it uses declared by
 //   its name. A schema with a problem, or a type wider than a code line may be, fails the build.
@@ -85,17 +85,18 @@ const jsx = (name: string, attributes: [string, string][], children: Node[]): No
 
 /**
  * The declarations a schema's module gives its root and its definitions, as a card's Type row shows
- * them: the text before the schema's own (`type Json`), without the imports, the re-export as
- * `Type`, or `export` before a definition's declaration, and the root as its bare type (`bare`).
+ * them: the text before the schema's own (`type Json`), without the imports, the exports as
+ * `output` and `input`, or `export` before a definition's declaration, and the root as its bare
+ * type (`bare`).
  */
 function declarations(types: string): string {
   const end = types.search(/^\/\*\* The JSON Schema as written|^type Json = /m);
   const lines = (end < 0 ? types : types.slice(0, end)).split('\n');
-  // The module names its root for the file and exports it as `Type` (`export type { Id as Type };`),
-  // or names it `Type` itself when the file is named so.
-  const root = lines.map((line) => /^export type \{ (\w+) as Type \};$/.exec(line)?.[1]).find(Boolean) ?? 'Type';
+  // The module names its root for the file, exports it as `output` (`export type { Id as output };`)
+  // and declares `input` an alias of it (`export type input = Id;`).
+  const root = lines.map((line) => /^export type \{ (\w+) as output \};$/.exec(line)?.[1]).find(Boolean) ?? 'output';
   const text = lines
-    .filter((line) => !/^import type /.test(line) && !/^export type \{ \w+ as Type \};$/.test(line))
+    .filter((line) => !/^import type /.test(line) && !/^export type \{ \w+ as output \};$/.test(line) && !/^export type input = \w+;$/.test(line))
     .join('\n')
     .replace(/^export (?=interface |type )/gm, '')
     .replace(/\n{3,}/g, '\n\n')

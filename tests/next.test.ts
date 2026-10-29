@@ -92,12 +92,12 @@ test("the type check runs the content mapper after the project's own hook, and f
   });
 
   // Without --runExternalCode, the schema import would be an error: TS2307.
-  const good = app(`import type { Type as User } from "./user.schema.jsonc";\nexport const ada: User = { name: "Ada" };\n`);
+  const good = app(`import type { output as User } from "./user.schema.jsonc";\nexport const ada: User = { name: "Ada" };\n`);
   await hook({ projectDir: good, distDir: join(good, ".next") });
   assert.deepEqual(order, ["project"]);
   assert.equal(printed.mock.callCount(), 0);
 
-  const bad = app(`import type { Type as User } from "./user.schema.jsonc";\nexport const ada: User = { name: 1 };\n`);
+  const bad = app(`import type { output as User } from "./user.schema.jsonc";\nexport const ada: User = { name: 1 };\n`);
   await assert.rejects(hook({ projectDir: bad, distDir: join(bad, ".next") }), /Failed to type check/);
   const output = printed.mock.calls.map((call) => String(call.arguments[0])).join("\n");
   assert.match(output, /main\.ts\(2,28\): error TS2322: Type 'number' is not assignable to type 'string'\./);
@@ -106,7 +106,7 @@ test("the type check runs the content mapper after the project's own hook, and f
 
 test("on a first build the type check runs next typegen, which writes next-env.d.ts", async (t) => {
   t.mock.method(console, "log", () => {});
-  const root = app(`import type { Type as User } from "./user.schema.jsonc";\nexport const ada: User = { name: "Ada" };\n`);
+  const root = app(`import type { output as User } from "./user.schema.jsonc";\nexport const ada: User = { name: "Ada" };\n`);
   const next = join(root, "node_modules", "next");
   mkdirSync(join(next, "dist", "bin"), { recursive: true });
   writeFileSync(join(next, "package.json"), JSON.stringify({ name: "next", bin: { next: "./dist/bin/next" } }));
