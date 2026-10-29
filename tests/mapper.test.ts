@@ -32,7 +32,7 @@ function client(cwd = ROOT) {
   };
 }
 
-test("the mapper answers the protocol as dotschema, reports options, places errors in UTF-8 bytes and names its suffixes for any other file", async () => {
+test("the mapper answers the protocol as dotschema, reports options, places errors in UTF-8 bytes and names its suffix for any other file", async () => {
   const mapper = client();
   try {
     const init = await mapper.call("initialize", { protocolVersion: 1 });
@@ -50,16 +50,16 @@ test("the mapper answers the protocol as dotschema, reports options, places erro
     assert.equal(bad.result.diagnostics[0].start, Buffer.byteLength(content.slice(0, content.indexOf("}"))));
     // A syntax error at the end of the text, truncated or empty, stays within it: TypeScript refuses a
     // response whose diagnostic runs past the end (TS18069), so one at the end is empty.
-    for (const [suffix, text] of [["jsonc", '{ "type": "é",\n'], ["json5", "{ type: 'é',\n"], ["jsonc", ""], ["json5", ""]] as const) {
-      const cut = await mapper.call("transform", { fileName: `${ROOT}tests/fixtures/x.schema.${suffix}`, content: text, projectHandle: "p" });
-      assert.ok(cut.result.diagnostics.length > 0, `${suffix} ${JSON.stringify(text)}`);
+    for (const text of ['{ "type": "é",\n', ""]) {
+      const cut = await mapper.call("transform", { fileName: `${ROOT}tests/fixtures/x.schema.jsonc`, content: text, projectHandle: "p" });
+      assert.ok(cut.result.diagnostics.length > 0, JSON.stringify(text));
       for (const diagnostic of cut.result.diagnostics) {
         assert.equal(diagnostic.code, 1);
-        assert.deepEqual([diagnostic.start, diagnostic.length], [Buffer.byteLength(text), 0], `${suffix} ${JSON.stringify(text)}: ${diagnostic.messageText}`);
+        assert.deepEqual([diagnostic.start, diagnostic.length], [Buffer.byteLength(text), 0], `${JSON.stringify(text)}: ${diagnostic.messageText}`);
       }
     }
     const other = await mapper.call("transform", { fileName: `${ROOT}x.jsonc`, content: "{}", projectHandle: "p" });
-    assert.equal(other.result.diagnostics[0].messageText, `dotschema reads .schema.jsonc and .schema.json5 files; ${ROOT}x.jsonc is none of them. Remove its extension from dotschema's contentMappers entry.`);
+    assert.equal(other.result.diagnostics[0].messageText, `dotschema reads .schema.jsonc files; ${ROOT}x.jsonc is not one. Remove its extension from dotschema's contentMappers entry.`);
     assert.equal(other.result.diagnostics[0].code, 3);
   } finally {
     mapper.close();

@@ -1,14 +1,13 @@
 // dotschema beside a real Motherload checkout, run when MOTHERLOAD_DIR names one (with its
 // dependencies installed) and skipped otherwise: a project whose `.jsonc` and `.json5` files are
-// Motherload's and whose `.schema.jsonc` and `.schema.json5` files are dotschema's
-// (tests/fixtures/motherload), type-checked through both mappers, run under both preloads in each
-// order, bundled with both esbuild plugins, both webpack loaders (webpack and Rspack) and both Vite
-// plugins (Vite, Rollup and Rolldown) in each order, and tested with both Jest transformers; and
-// Motherload's withMotherload composed with withDotschema in each order. The project is a copy
-// outside the repository whose node_modules links `motherload` to the checkout and `dotschema` to
-// this repository, so each package's sources resolve their own dependencies. The bundlers are
-// lab/bundlers' and Jest is lab/jest's, and the tests that need them are skipped where those labs
-// are not installed.
+// Motherload's and whose `.schema.jsonc` file is dotschema's (tests/fixtures/motherload),
+// type-checked through both mappers, run under both preloads in each order, bundled with both
+// esbuild plugins, both webpack loaders (webpack and Rspack) and both Vite plugins (Vite, Rollup and
+// Rolldown) in each order, and tested with both Jest transformers; and Motherload's withMotherload
+// composed with withDotschema in each order. The project is a copy outside the repository whose
+// node_modules links `motherload` to the checkout and `dotschema` to this repository, so each
+// package's sources resolve their own dependencies. The bundlers are lab/bundlers' and Jest is
+// lab/jest's, and the tests that need them are skipped where those labs are not installed.
 //
 //   MOTHERLOAD_DIR=~/Documents/motherload nub run test
 import { test } from "node:test";
@@ -30,7 +29,7 @@ const skipBundlers = skip || (!existsSync(join(BUNDLERS, "node_modules")) && "la
 const skipJest = skip || (!existsSync(JEST) && "lab/jest is not installed: run `nub install` in lab/jest");
 const fromBundlers = async (name: string) => import(pathToFileURL(createRequire(join(BUNDLERS, "package.json")).resolve(name)).href);
 
-const EXPECTED = '{"fontSize":14,"hex":16,"vendors":["dotschema","dotschema"],"valid":true,"invalid":false,"point":[true,false]}';
+const EXPECTED = '{"fontSize":14,"hex":16,"vendor":"dotschema","valid":true,"invalid":false}';
 
 /** A copy of tests/fixtures/motherload outside the repository, with both packages linked into its node_modules; removed after `body`. */
 async function project(body: (dir: string) => void | Promise<void>): Promise<void> {
@@ -65,7 +64,7 @@ test("beside Motherload: both mappers type the project, and both preloads and bo
       rmSync(join(dir, "dist"), { recursive: true, force: true });
       const built = run(process.execPath, ["build-esbuild.ts", order], dir);
       assert.equal(built.status, 0, built.out);
-      assert.match(built.out, /errors=0 inputs=5 node_modules=0/, order);
+      assert.match(built.out, /errors=0 inputs=4 node_modules=0/, order);
       const ran = run(process.execPath, ["dist/main.mjs"], dir);
       assert.equal(ran.status, 0, ran.out);
       assert.equal(ran.out.trim(), EXPECTED, `esbuild ${order}`);
@@ -77,7 +76,7 @@ for (const name of ["webpack", "Rspack"] as const) {
     project(async (dir) => {
       const bundler = name === "Rspack" ? (await fromBundlers("@rspack/core")).rspack : (await fromBundlers("webpack")).default;
       const motherload = { test: /\.(jsonc|json5)$/, use: "motherload/webpack" };
-      const dotschema = { test: /\.schema\.(jsonc|json5)$/, use: "dotschema/webpack" };
+      const dotschema = { test: /\.schema\.jsonc$/, use: "dotschema/webpack" };
       for (const [order, rules] of [["motherload first", [motherload, dotschema]], ["dotschema first", [dotschema, motherload]]] as const) {
         const output = join(dir, "dist", order.replace(" ", "-"));
         const config = { mode: "none", context: dir, entry: "./main.js", target: "node", output: { path: output, filename: "main.cjs" }, module: { rules } };
@@ -129,7 +128,7 @@ test("beside Motherload, in Next.js: withMotherload and withDotschema compose in
   const project = { reactStrictMode: true, turbopack: { rules: { "*.svg": { loaders: ["@svgr/webpack"], as: "*.js" } } } };
   for (const [order, config] of [["withMotherload(withDotschema())", withMotherload(withDotschema(project))], ["withDotschema(withMotherload())", withDotschema(withMotherload(project))]] as [string, Built][]) {
     const keys = Object.keys(config.turbopack.rules);
-    const ours = keys.indexOf("*.schema.{jsonc,json5}");
+    const ours = keys.indexOf("*.schema.jsonc");
     const theirs = keys.findIndex((key) => config.turbopack.rules[key]!.loaders.includes("motherload/turbopack"));
     assert.ok(ours !== -1 && theirs !== -1 && ours < theirs, `${order}: ${keys.join(", ")}`);
     const uses = config.webpack({ module: { rules: [] } }, { isServer: false }).module.rules.map((rule) => rule.use).sort();

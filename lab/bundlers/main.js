@@ -3,7 +3,7 @@
 // bundler needs a loader for TypeScript; lab/basic's main.ts checks the types. It prints what
 // lab/basic/main.ts prints.
 import user, { address } from "../basic/user.schema.jsonc";
-import point from "../basic/point.schema.json5";
+import point from "../basic/point.schema.jsonc";
 import team from "../basic/team.schema.jsonc";
 import event from "../basic/event.schema.jsonc";
 

@@ -24,7 +24,7 @@ const D2019 = "https://json-schema.org/draft/2019-09/schema";
 const D2020 = "https://json-schema.org/draft/2020-12/schema";
 
 const fromSource = (source: string, path: string) => {
-  const parsed = parseSchemaFile(source, path);
+  const parsed = parseSchemaFile(source);
   assert.ok(parsed.ok);
   return jsonSchemas(filesOf(source, path, parsed.value), path, draftOf(parsed.value)!);
 };
@@ -232,9 +232,9 @@ test("a plain-name $id is an $anchor, and a reference to an anchor becomes a poi
 
 test("every other file is folded under the root's container, by its base name, de-duplicated, without its $id", () => {
   const dir = project({
-    "team.schema.jsonc": { definitions: { user: { type: "string" } }, properties: { a: { $ref: "./user.schema.jsonc" }, b: { $ref: "more/user.schema.json5#/properties/x" }, c: { $ref: "#/definitions/user" } } },
+    "team.schema.jsonc": { definitions: { user: { type: "string" } }, properties: { a: { $ref: "./user.schema.jsonc" }, b: { $ref: "more/user.schema.jsonc#/properties/x" }, c: { $ref: "#/definitions/user" } } },
     "user.schema.jsonc": { $id: "https://example.com/user", $schema: D07, type: "object", properties: { back: { $ref: "./team.schema.jsonc" } } },
-    "more/user.schema.json5": "{ properties: { x: { type: 'string' } } }",
+    "more/user.schema.jsonc": { properties: { x: { type: "string" } } },
   });
   const results = fromFile(join(dir, "team.schema.jsonc"));
   assert.deepEqual(schemaOf(results["draft-2020-12"]), {
@@ -447,5 +447,5 @@ test("equivalence: lab/basic's schemas, team's references to user and shared/pla
     [{ at: "2026-10-20T10:00:00Z", kind: "click", x: 1, y: 2 }, { at: "2026-10-20T10:00:00Z", kind: "visit", url: "https://example.com" }],
     [{ at: "today", kind: "click", x: 1, y: 2 }, { at: "2026-10-20T10:00:00Z", kind: "click", x: 1 }, { at: "2026-10-20T10:00:00Z", kind: "visit", url: "not a uri" }, { at: "2026-10-20T10:00:00Z", kind: "other" }],
   );
-  await equivalentFile(lab("point.schema.json5"), [{ x: 1, y: 2 }, { x: 1, y: 2, label: "sixteen chars.." }], [{ x: 1 }, { x: 1.5, y: 2 }, { x: 1, y: 2, label: "x".repeat(17) }, { x: 1, y: 2, z: 3 }]);
+  await equivalentFile(lab("point.schema.jsonc"), [{ x: 1, y: 2 }, { x: 1, y: 2, label: "sixteen chars.." }], [{ x: 1 }, { x: 1.5, y: 2 }, { x: 1, y: 2, label: "x".repeat(17) }, { x: 1, y: 2, z: 3 }]);
 });

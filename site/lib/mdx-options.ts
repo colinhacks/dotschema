@@ -20,7 +20,7 @@ export async function mdxOptions(environment: Environment) {
   const options = await docsMdxOptions(environment, {
     remarkPlugins: [remarkSchemas],
     twoslash: dotschemaTwoslash(),
-    langs: ['json', 'jsonc', 'json5', 'sh', 'toml'],
+    langs: ['json', 'jsonc', 'sh', 'toml'],
   });
   return withThemes(options, await codeThemes());
 }

@@ -6,6 +6,6 @@ export default {
   target: "node",
   output: { path: `${import.meta.dirname}/dist/webpack`, filename: "main.cjs" },
   module: {
-    rules: [{ test: /\.schema\.(jsonc|json5)$/, use: "dotschema/webpack" }],
+    rules: [{ test: /\.schema\.jsonc$/, use: "dotschema/webpack" }],
   },
 };

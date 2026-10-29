@@ -69,7 +69,7 @@ function objectLiteral(type: string): boolean {
   return false;
 }
 
-/** A value as JSON on one line, for a doc comment; JSON5's `Infinity` and `NaN` as JSON5 writes them. */
+/** A value as JSON on one line, for a doc comment. */
 function jsonOf(value: Value): string {
   if (Array.isArray(value)) return `[${value.map(jsonOf).join(", ")}]`;
   if (isObj(value)) {

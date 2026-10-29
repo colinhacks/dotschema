@@ -17,8 +17,8 @@ type Obj = { readonly [key: string]: Value };
 
 const isObj = (value: Value | undefined): value is Obj => typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
 
-/** The suffixes of the files a `$ref` may name: the schema loader's own. */
-export const SCHEMA_SUFFIXES = [".schema.jsonc", ".schema.json5"] as const;
+/** The suffix of the files a `$ref` may name: the schema loader's own. */
+export const SCHEMA_SUFFIX = ".schema.jsonc";
 
 // The keywords whose values are schemas, lists of schemas, or maps of them. Every other keyword's
 // value (`const`, `enum`, `default`, `examples`, an unknown keyword) is data and is never searched.
@@ -537,8 +537,8 @@ export function collect(rootPath: string, root: Value, rootSource: string, draft
           if (failed.has(target.path)) return;
           let schemaThere = schemas.get(target.path);
           if (schemaThere === undefined) {
-            if (!SCHEMA_SUFFIXES.some((suffix) => target.path.endsWith(suffix))) {
-              report(`The $ref "${ref}" names a file that is not a schema: a $ref to another file names a .schema.jsonc or .schema.json5 file.`);
+            if (!target.path.endsWith(SCHEMA_SUFFIX)) {
+              report(`The $ref "${ref}" names a file that is not a schema: a $ref to another file names a .schema.jsonc file.`);
               failed.add(target.path);
               return;
             }
@@ -551,7 +551,7 @@ export function collect(rootPath: string, root: Value, rootSource: string, draft
               failed.add(target.path);
               return;
             }
-            const parsed = parseSchemaFile(text, target.path);
+            const parsed = parseSchemaFile(text);
             if (!parsed.ok) {
               report(`The $ref "${ref}" names a file that does not parse: ${parsed.problems[0]!.message}`);
               failed.add(target.path);

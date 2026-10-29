@@ -33,16 +33,16 @@ test("withDotschema adds the loader for Turbopack, before the project's own rule
   });
   assert.equal(config.reactStrictMode, true);
   assert.equal(config.turbopack.root, "/app");
-  // Turbopack runs the first rule that matches, and a schema file also ends in .jsonc or .json5.
+  // Turbopack runs the first rule that matches, and a schema file also ends in .jsonc.
   assert.deepEqual(Object.entries(config.turbopack.rules), [
-    ["*.schema.{jsonc,json5}", { loaders: ["dotschema/turbopack"], as: "*.js" }],
+    ["*.schema.jsonc", { loaders: ["dotschema/turbopack"], as: "*.js" }],
     ["*.{jsonc,json5}", { loaders: ["motherload/turbopack"], as: "*.js" }],
   ]);
   for (const isServer of [true, false]) {
     const [rule] = config.webpack({ module: { rules: [] } }, { isServer }).module.rules as { test: RegExp; use: string }[];
     assert.equal(rule!.use, "dotschema/webpack");
-    for (const file of ["a.schema.jsonc", "a.schema.json5", "shared/b.schema.jsonc"]) assert.ok(rule!.test.test(file), file);
-    for (const file of ["a.jsonc", "a.json5", "a.schema.json", "a.schema.jsonc.bak"]) assert.ok(!rule!.test.test(file), file);
+    for (const file of ["a.schema.jsonc", "shared/b.schema.jsonc"]) assert.ok(rule!.test.test(file), file);
+    for (const file of ["a.jsonc", "a.json5", "a.schema.json5", "a.schema.json", "a.schema.jsonc.bak"]) assert.ok(!rule!.test.test(file), file);
   }
   assert.deepEqual(seen, ["server", "client"]);
 });

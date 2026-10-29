@@ -13,7 +13,7 @@ export type CodePalette = {
   string: string;
   /** Numbers, `true`, `false`, `null` and `undefined`. */
   number: string;
-  /** A JSON or JSON5 object's key. */
+  /** A JSON or JSONC object's key. */
   key: string;
   /** JSON's braces, brackets, colons and commas. */
   punctuation: string;
@@ -99,18 +99,17 @@ const roles: Record<'github-light' | 'github-dark', Record<string, Role>> = {
 
 /**
  * The rules added after GitHub's, by TextMate scope, each more specific than the GitHub rule it
- * overrides: a key of JSON and JSONC (`support.type.property-name.json`, `.json.comments`) and of
- * JSON5 (`string.key.json5`); numbers and `true`, `false` and `null` in every language; JSON's
- * punctuation. A quoted JSON5 key is `string.quoted.json5` in Shiki's grammar, a string.
+ * overrides: a key of JSON and JSONC (`support.type.property-name.json`, `.json.comments`); numbers
+ * and `true`, `false` and `null` in every language; JSON's punctuation.
  */
 function schemaRules(palette: CodePalette): Theme['settings'] {
   return [
     {
-      scope: ['support.type.property-name', 'string.key.json5'],
+      scope: ['support.type.property-name'],
       settings: { foreground: palette.key },
     },
     {
-      scope: ['constant.numeric', 'constant.dec.numeric', 'constant.hex.numeric', 'constant.language'],
+      scope: ['constant.numeric', 'constant.language'],
       settings: { foreground: palette.number },
     },
     {

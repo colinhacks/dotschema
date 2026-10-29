@@ -20,7 +20,7 @@
     ]
   },
   "contentMappers": [
-    { "package": "dotschema", "extensions": [".schema.jsonc", ".schema.json5"] }
+    { "package": "dotschema", "extensions": [".schema.jsonc"] }
   ],
   "include": [
     "next-env.d.ts",

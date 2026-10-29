@@ -133,7 +133,7 @@ function declarationName(file: string): string {
 /** A block's file name: its `title`, or its `tab` in a group of code tabs (Fumadocs' remarkCodeTab moves `tab` into `data`). */
 const titleOf = (node: Code) => /title="([^"]+)"/.exec(node.meta ?? '')?.[1] ?? node.data?.tab;
 
-const SCHEMA = /\.schema\.(?:jsonc|json5)$/;
+const SCHEMA = /\.schema\.jsonc$/;
 const isErrors = (node: Code) => /(?:^|\s)errors(?:\s|$)/.test(node.meta ?? '');
 /** The file a bundle block analyses (`bundle="main.ts"`), if the block is one. */
 const bundleOf = (node: Code) => /(?:^|\s)bundle="([^"]+)"/.exec(node.meta ?? '')?.[1];
@@ -173,7 +173,7 @@ const trimmedLines = (text: string) => text.split('\n').map((line) => line.trimE
 const isSchema = (node: Code) => SCHEMA.test(titleOf(node) ?? '') && !isErrors(node);
 
 // `import user from "./user.schema.jsonc"`, `import { address } from "./shared/place.schema.jsonc"`.
-const IMPORT = /\bfrom\s+["']\.\/([^"']+\.schema\.(?:jsonc|json5))["']/g;
+const IMPORT = /\bfrom\s+["']\.\/([^"']+\.schema\.jsonc)["']/g;
 
 /** A file of the page as Fumadocs has it when this plugin runs: MDX parsed, then code tabs grouped. */
 function parse(file: string): Node {

@@ -20,7 +20,7 @@ type Module = { is(value: unknown): boolean; validate(value: unknown): { value?:
 
 /** How many oneOfs of a schema get ajv's discriminator in the copy the validator is compiled from. */
 function discriminators(source: string, path = PATH): number {
-  const parsed = parseSchemaFile(source, path);
+  const parsed = parseSchemaFile(source);
   assert.ok(parsed.ok);
   return withDiscriminators(filesOf(source, path, parsed.value)).count;
 }

@@ -1,7 +1,7 @@
 // lab/basic's schemas, imported by a server component and, in Signup, by a client component, so
 // that the loader makes modules for both bundles. The types are dotschema's content mapper's.
 import user, { type Type as User } from "../../basic/user.schema.jsonc";
-import point from "../../basic/point.schema.json5";
+import point from "../../basic/point.schema.jsonc";
 import team from "../../basic/team.schema.jsonc";
 import event from "../../basic/event.schema.jsonc";
 import { Signup } from "./signup";

@@ -35,9 +35,9 @@ type NextConfig = object & {
 
 // The loader's extensions, written out rather than read from the loader, which would load the
 // parsers and ajv into next.config.ts; a test holds the list to the loader's.
-export const EXTENSIONS = ["schema.jsonc", "schema.json5"];
-const GLOB = "*.schema.{jsonc,json5}";
-const TEST = /\.schema\.(?:jsonc|json5)$/;
+export const EXTENSIONS = ["schema.jsonc"];
+const GLOB = "*.schema.jsonc";
+const TEST = /\.schema\.jsonc$/;
 
 export function withDotschema<Config extends NextConfig>(config: Config = {} as Config): Config {
   const { typescript, turbopack, webpack, compiler } = config;
@@ -48,7 +48,7 @@ export function withDotschema<Config extends NextConfig>(config: Config = {} as 
     turbopack: {
       ...turbopack,
       // Turbopack runs only the first rule that matches a file, in the object's order, and a schema
-      // file also ends in .jsonc or .json5, whose rules (Motherload's `withMotherload`, which adds
+      // file also ends in .jsonc, whose rules (Motherload's `withMotherload`, which adds
       // its own after the project's) would read it as data. So dotschema's rule goes first, before
       // the project's own and whichever wrapper ran before this one (DESIGN.md, "Next.js").
       rules: { [GLOB]: { loaders: ["dotschema/turbopack"], as: "*.js" }, ...turbopack?.rules },

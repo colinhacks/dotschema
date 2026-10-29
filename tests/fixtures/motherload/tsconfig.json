@@ -2,7 +2,7 @@
   "compilerOptions": { "target": "esnext", "module": "nodenext", "lib": ["esnext"], "types": ["node"], "strict": true, "noEmit": true, "skipLibCheck": true },
   "contentMappers": [
     { "package": "motherload", "extensions": [".jsonc", ".json5"] },
-    { "package": "dotschema", "extensions": [".schema.jsonc", ".schema.json5"] }
+    { "package": "dotschema", "extensions": [".schema.jsonc"] }
   ],
   "include": ["main.ts"]
 }

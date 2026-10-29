@@ -1,7 +1,7 @@
 // ESM: Jest's own linker (--experimental-vm-modules) loads each schema through dotschema/jest, and
 // Vitest through dotschema/vite.
 import user, { address } from "../basic/user.schema.jsonc";
-import point from "../basic/point.schema.json5";
+import point from "../basic/point.schema.jsonc";
 import event from "../basic/event.schema.jsonc";
 
 test("lab/basic's schemas, imported by an ES module test", () => {

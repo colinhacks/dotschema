@@ -2,7 +2,7 @@
 // its preload (`node --import dotschema/register main.ts`) or its esbuild plugin.
 import type { SchemaResult, StandardJSONSchemaV1, StandardSchemaV1 } from "dotschema";
 import user, { address, type Type as User } from "./user.schema.jsonc";
-import point, { type Type as Point } from "./point.schema.json5";
+import point, { type Type as Point } from "./point.schema.jsonc";
 import team, { type Type as Team } from "./team.schema.jsonc";
 import event, { type Type as Event } from "./event.schema.jsonc";
 
@@ -43,7 +43,7 @@ if (user.is(someone)) expect<Equal<typeof someone, User>>();
 user.parse;
 // @ts-expect-error a failed result has no value, as in Standard Schema: its issues are checked first
 user.validate(someone).value;
-// A schema written in JSON5 is the same module.
+// A closed object has no index signature, and the schema's numbers are literal types.
 expect<Equal<Point, { x: number; y: number; label?: string }>>();
 expect<Equal<typeof point.schema.properties.label.maxLength, 16>>();
 // The schema as written has mutable arrays, so it passes where a JSON Schema type's are, as

@@ -90,7 +90,7 @@ export interface SchemaIssue extends StandardSchemaV1.Issue {
 }
 
 /**
- * The default export of a `.schema.jsonc` or `.schema.json5` module: `T` is the type the schema
+ * The default export of a `.schema.jsonc` module: `T` is the type the schema
  * describes, `S` the schema itself as a literal type. Nothing on it throws, except a Standard JSON
  * Schema target it cannot produce, as that spec requires.
  */

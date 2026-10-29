@@ -55,7 +55,7 @@ function write(dir: string, files: File[]) {
 }
 
 // The schema files a module's types import: `import type { … } from "./user.schema.jsonc"`.
-const IMPORTS = /^import type [^;]*? from "(\.{1,2}\/[^"]+\.schema\.(?:jsonc|json5))";$/gm;
+const IMPORTS = /^import type [^;]*? from "(\.{1,2}\/[^"]+\.schema\.jsonc)";$/gm;
 
 const projects = [];
 for (const project of request.projects ?? []) {

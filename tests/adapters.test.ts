@@ -34,9 +34,9 @@ test("esbuild leaves a query to other plugins", async () => {
   await assert.rejects(build({ entryPoints: [join(dir, "raw.ts")], bundle: true, write: false, plugins: [toEsbuildPlugin(plugin)], logLevel: "silent" }), /No loader is configured for "\.jsonc" files/);
 });
 
-test("the loader's filter takes both schema suffixes and nothing else", () => {
-  for (const name of ["a.schema.jsonc", "a.schema.json5"]) assert.ok(plugin.filter.test(name), name);
-  for (const name of ["a.jsonc", "a.json5", "a.schema.json", "a.schema.jsonc.bak"]) assert.ok(!plugin.filter.test(name), name);
+test("the loader's filter takes the schema suffix and nothing else", () => {
+  for (const name of ["a.schema.jsonc", "shared/b.schema.jsonc"]) assert.ok(plugin.filter.test(name), name);
+  for (const name of ["a.jsonc", "a.json5", "a.schema.json5", "a.schema.json", "a.schema.jsonc.bak"]) assert.ok(!plugin.filter.test(name), name);
 });
 
 test("esbuild watches the files a schema refers to, and still does when one is missing", () => {

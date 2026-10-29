@@ -1,0 +1,5 @@
+// A syntax error inside the file: two commas in a row.
+{
+  "type": "object",
+  "properties": { "name": { "type": "string" } },,
+}

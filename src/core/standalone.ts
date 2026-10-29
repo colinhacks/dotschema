@@ -13,7 +13,7 @@ const FAILED_TYPES = "declare const data: any;\nexport default data;\n";
 
 export function standalone(plugin: LoaderPlugin): LoaderPlugin {
   const unknown = (path: string): Problem => ({
-    message: `${plugin.name} reads ${list(plugin.extensions)} files; ${path} is none of them. Remove its extension from ${plugin.name}'s contentMappers entry.`,
+    message: `${plugin.name} reads ${list(plugin.extensions)} files; ${path} is ${plugin.extensions.length < 2 ? "not one" : "none of them"}. Remove its extension from ${plugin.name}'s contentMappers entry.`,
     start: 0,
     length: 1,
     code: CODES.unknownFormat,

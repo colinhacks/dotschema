@@ -2,7 +2,7 @@
 const user = require("../basic/user.schema.jsonc").default;
 // A definition's validator is a named export, which the CommonJS module carries as a property.
 const { address } = require("../basic/user.schema.jsonc");
-const point = require("../basic/point.schema.json5").default;
+const point = require("../basic/point.schema.jsonc").default;
 const team = require("../basic/team.schema.jsonc").default;
 
 test("lab/basic's schemas, required by a CommonJS test", () => {

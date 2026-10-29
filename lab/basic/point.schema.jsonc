@@ -1,0 +1,12 @@
+// A point: two integers and a label of at most 16 characters, and nothing else.
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "x": { "type": "integer" },
+    "y": { "type": "integer" },
+    "label": { "type": "string", "maxLength": 16 },
+  },
+  "required": ["x", "y"],
+  "additionalProperties": false,
+}

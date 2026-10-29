@@ -34,17 +34,17 @@ test("the package is private in the repository, points at its sources, and depen
   // A mapper package does not resolve through self-reference, so the repository links itself.
   assert.equal(pkg.devDependencies.dotschema, "link:.");
   // The formats are dotschema's own (src/formats/), so ajv-formats is a development dependency, for the test that compares them.
-  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["ajv", "json5", "jsonc-parser"]);
+  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["ajv", "jsonc-parser"]);
   // Each a caret range on the oldest version that passes the checks (DESIGN.md, "Packaging").
   for (const [dep, range] of Object.entries(pkg.dependencies)) assert.match(range as string, /^\^[1-9]\d*\.\d+\.\d+$/, dep);
 });
 
-test("dotschema claims its two suffixes, and a longer suffix than a .jsonc or .json5 loader's", () => {
-  assert.deepEqual(SCHEMA.extensions, [".schema.jsonc", ".schema.json5"]);
+test("dotschema claims its one suffix, longer than a .jsonc loader's, and leaves every .json5 file to a .json5 loader", () => {
+  assert.deepEqual(SCHEMA.extensions, [".schema.jsonc"]);
   const json5 = { ...standin.standin, name: "stand-in-json5", extensions: [".json5"], filter: /\.json5$/ };
   for (const loaders of [[standin.standin, json5, SCHEMA], [SCHEMA, json5, standin.standin]]) {
     assert.equal(ownerOf(loaders, "/a/user.schema.jsonc"), SCHEMA);
-    assert.equal(ownerOf(loaders, "/a/user.schema.json5"), SCHEMA);
+    assert.equal(ownerOf(loaders, "/a/user.schema.json5"), json5);
     assert.equal(ownerOf(loaders, "/a/app.jsonc"), standin.standin);
     assert.equal(ownerOf(loaders, "/a/app.json5"), json5);
     assert.equal(ownerOf(loaders, "/a/user.schema.json"), undefined);
@@ -144,7 +144,7 @@ for (const name of ["webpack", "Rspack"] as const) {
   test(`${name}: dotschema's loader and the stand-in's each make their own files' modules, whichever rule comes first`, { skip: bundlersInstalled !== true && bundlersInstalled }, async () => {
     const bundler = name === "Rspack" ? (await fromBundlers("@rspack/core")).rspack : (await fromBundlers("webpack")).default;
     const dir = mkdtempSync(join(tmpdir(), "dotschema-interop-"));
-    const ours = { test: /\.schema\.(jsonc|json5)$/, use: "dotschema/webpack" };
+    const ours = { test: /\.schema\.jsonc$/, use: "dotschema/webpack" };
     const theirs = { test: /\.jsonc$/, use: join(FIXTURE, "standin-webpack.ts") };
     try {
       for (const [i, rules] of [[ours, theirs], [theirs, ours]].entries()) {
@@ -201,7 +201,7 @@ test("Next.js: withDotschema and a Motherload-shaped wrapper compose in either o
     const config = wrap({ turbopack: { rules: { "*.svg": { loaders: ["@svgr/webpack"], as: "*.js" } } } }, checked) as unknown as Built;
     // Turbopack runs only the first rule that matches a file: dotschema's has to precede the .jsonc rule.
     const keys = Object.keys(config.turbopack.rules);
-    assert.ok(keys.indexOf("*.schema.{jsonc,json5}") < keys.indexOf("*.{jsonc,json5}"), `${order}: ${keys.join(", ")}`);
+    assert.ok(keys.indexOf("*.schema.jsonc") < keys.indexOf("*.{jsonc,json5}"), `${order}: ${keys.join(", ")}`);
     assert.ok(keys.includes("*.svg"), order);
     // webpack runs every rule that matches, and each loader passes on what the other outranks it on.
     const uses = config.webpack({ module: { rules: [] } }, { isServer: true }).module.rules.map((rule) => rule.use);

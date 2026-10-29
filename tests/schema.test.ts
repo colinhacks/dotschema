@@ -272,38 +272,27 @@ test("a schema is JSONC: comments and trailing commas are read in both texts", a
   assert.equal(user.is({ name: "Ada", extra: 1 }), false);
 });
 
-test("a .schema.json5 schema is JSON5 in both texts, and the suffix names the dialect", async () => {
-  const path = join(ROOT, "tests/fixtures/user.schema.json5");
-  const source = "// a user\n{\n  type: 'object',\n  properties: { name: { type: 'string', maxLength: 0x4 }, },\n  required: ['name'],\n  additionalProperties: false,\n}\n";
-  const typed = schemaTypes(source, path);
-  assert.deepEqual(typed.problems, []);
-  assert.match(typed.types, /\ninterface User \{\n  name: string;\n\}/);
-  const { code, problems } = schemaCode(source, path);
-  assert.deepEqual(problems, []);
-  const { default: user } = await evaluate(code);
-  assert.equal(user.is({ name: "Ada" }), true);
-  assert.equal(user.is({ name: "Grace" }), false);
-  assert.equal(user.is({ name: "Ada", extra: 1 }), false);
-  // The same text in a .schema.jsonc file is JSON with comments, where an unquoted key is an error.
-  assert.equal(schemaTypes(source, PATH).problems[0]!.code, CODES.syntax);
-  const broken = schemaCode("{\n  type: 'object',,\n}", path).problems;
-  assert.equal(broken[0]!.code, CODES.syntax);
-  assert.equal(broken[0]!.start, 19);
+test("a schema file is JSON with comments: JSON5's unquoted key is a syntax error, placed at the key", () => {
+  const source = "// a user\n{\n  type: 'object',\n  required: ['name'],\n}\n";
+  const [problem] = schemaTypes(source, PATH).problems;
+  assert.equal(problem!.code, CODES.syntax);
+  assert.equal(problem!.start, source.indexOf("type"));
+  assert.equal(schemaCode(source, PATH).problems[0]!.code, CODES.syntax);
 });
 
-test("a /** */ comment before a property's key is its doc comment in the module's types, in both dialects, and the schema stays as written", async () => {
+test("a /** */ comment before a property's key is its doc comment in the module's types, and the schema stays as written", async () => {
   const dir = mkdtempSync(join(tmpdir(), "dotschema-docs-"));
-  writeFileSync(join(dir, "place.schema.json5"), "{\n  $schema: 'https://json-schema.org/draft/2020-12/schema',\n  type: 'object',\n  properties: {\n    /** The city, as its residents spell it. */\n    city: { type: 'string' },\n  },\n}\n");
+  writeFileSync(join(dir, "place.schema.jsonc"), '{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n  "type": "object",\n  "properties": {\n    /** The city, as its residents spell it. */\n    "city": { "type": "string" },\n  },\n}\n');
   const path = join(dir, "user.schema.jsonc");
-  const source = '{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n  "type": "object",\n  "properties": {\n    /** The user\'s full name. */\n    "name": { "type": "string", "nullable": true },\n    "home": { "$ref": "./place.schema.json5#/properties/city" },\n    "office": { "$ref": "./place.schema.json5" }\n  },\n  "required": ["name"]\n}';
+  const source = '{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n  "type": "object",\n  "properties": {\n    /** The user\'s full name. */\n    "name": { "type": "string", "nullable": true },\n    "home": { "$ref": "./place.schema.jsonc#/properties/city" },\n    "office": { "$ref": "./place.schema.jsonc" }\n  },\n  "required": ["name"]\n}';
   writeFileSync(path, source);
   const { types, problems } = schemaTypes(source, path);
   assert.deepEqual(problems, []);
   // On the root's declaration and in the default export's type, where a hover over a value finds it.
   assert.match(types, /\ninterface User \{\n  \/\*\* The user's full name\. \*\/\n  name: string;\n/);
   assert.match(types, /\ndeclare const schema: __DotschemaObjectSchema<\{\n  \/\*\* The user's full name\. \*\/\n  name: string;\n/);
-  // A JSON5 file's own comments, in its module.
-  assert.match(schemaTypes(readFileSync(join(dir, "place.schema.json5"), "utf8"), join(dir, "place.schema.json5")).types, /\n  \/\*\* The city, as its residents spell it\. \*\/\n  city\?: string \| undefined;\n/);
+  // The other file's own comments, in its module.
+  assert.match(schemaTypes(readFileSync(join(dir, "place.schema.jsonc"), "utf8"), join(dir, "place.schema.jsonc")).types, /\n  \/\*\* The city, as its residents spell it\. \*\/\n  city\?: string \| undefined;\n/);
   // The comment is no keyword: the schema the module exports holds none.
   const { code } = schemaCode(source, path);
   const { default: user } = await evaluate(code);
@@ -319,25 +308,21 @@ test("a deprecated root or definition is deprecated in every declaration of its 
   for (const declaration of ["export type Old = string;", "export declare const old: ", "export declare namespace old {"]) assert.ok(types.includes(`\n/** @deprecated */\n${declaration}`), declaration);
 });
 
-// The floors of the parsers' ranges (DESIGN.md, "Packaging"): json5 before 2.2.2 made a `__proto__`
-// key the object's prototype (CVE-2022-46175), and jsonc-parser before 3.1.0 read U+2028 as a line
-// break and U+00A0 as white space, so a file read otherwise under an older copy in the same range.
-test("a __proto__ key is a property in both dialects: the type's, the schema's, and required by the validator", async () => {
-  for (const [path, source] of [
-    [PATH, '{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "required": ["__proto__"] }'],
-    [join(ROOT, "tests/fixtures/user.schema.json5"), "{ type: 'object', properties: { __proto__: { type: 'string' } }, required: ['__proto__'] }"],
-  ] as const) {
-    const typed = schemaTypes(source, path);
-    assert.deepEqual(typed.problems, []);
-    assert.match(typed.types, /__proto__: string;/, path);
-    const { code, problems } = schemaCode(source, path);
-    assert.deepEqual(problems, []);
-    const { default: s } = await evaluate(code);
-    assert.deepEqual(Object.keys(s.schema.properties), ["__proto__"], path);
-    assert.equal(s.is(JSON.parse('{ "__proto__": "x" }')), true, path);
-    assert.equal(s.is(JSON.parse('{ "__proto__": 1 }')), false, path);
-    assert.equal(s.is({}), false, path);
-  }
+// The floor of the parser's range (DESIGN.md, "Packaging"): jsonc-parser before 3.1.0 read U+2028
+// as a line break and U+00A0 as white space, so a file read otherwise under an older copy in the
+// same range.
+test("a __proto__ key is a property: the type's, the schema's, and required by the validator", async () => {
+  const source = '{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "required": ["__proto__"] }';
+  const typed = schemaTypes(source, PATH);
+  assert.deepEqual(typed.problems, []);
+  assert.match(typed.types, /__proto__: string;/);
+  const { code, problems } = schemaCode(source, PATH);
+  assert.deepEqual(problems, []);
+  const { default: s } = await evaluate(code);
+  assert.deepEqual(Object.keys(s.schema.properties), ["__proto__"]);
+  assert.equal(s.is(JSON.parse('{ "__proto__": "x" }')), true);
+  assert.equal(s.is(JSON.parse('{ "__proto__": 1 }')), false);
+  assert.equal(s.is({}), false);
 });
 
 test("a __proto__ key in properties is checked, which ajv does not do itself, and typed as any other property", async () => {
@@ -366,27 +351,25 @@ test("a __proto__ key in properties is checked, which ajv does not do itself, an
   assert.deepEqual(['{ "__proto__": "b" }', '{ "__proto__": "a" }', '{ "__proto__": "a", "t": 1 }'].map((value) => c.is(JSON.parse(value))), [true, false, true]);
 });
 
-test("a byte order mark at the start of a file is read past in both dialects, under the preload and in an esbuild bundle, and a problem's place counts it", async () => {
+test("a byte order mark at the start of a file is read past, under the preload and in an esbuild bundle, and a problem's place counts it", async () => {
   // The type check's host strips the mark; the preload and esbuild hand the file over as read.
   const dir = mkdtempSync(join(tmpdir(), "dotschema-bom-"));
   writeFileSync(join(dir, "a.schema.jsonc"), '\ufeff{ "type": "object", "properties": { "n": { "type": "string" } }, "required": ["n"] }\n');
-  writeFileSync(join(dir, "b.schema.json5"), "\ufeff{ type: 'object', properties: { n: { type: 'string' } }, required: ['n'] }\n");
-  writeFileSync(join(dir, "main.ts"), 'import a from "./a.schema.jsonc";\nimport b from "./b.schema.json5";\nconsole.log(JSON.stringify([a.is({ n: "x" }), a.is({}), b.is({ n: "x" }), b.is({})]));\n');
+  writeFileSync(join(dir, "main.ts"), 'import a from "./a.schema.jsonc";\nconsole.log(JSON.stringify([a.is({ n: "x" }), a.is({})]));\n');
   const preloaded = run(process.execPath, ["--import", join(ROOT, "src/register.ts"), "main.ts"], dir);
-  assert.equal(preloaded.out.trim(), "[true,false,true,false]", preloaded.out);
+  assert.equal(preloaded.out.trim(), "[true,false]", preloaded.out);
   const { build } = await import("esbuild");
   const { default: dotschema } = await import("../src/esbuild.ts");
   const bundled = await build({ entryPoints: [join(dir, "main.ts")], outfile: join(dir, "main.mjs"), bundle: true, format: "esm", platform: "node", plugins: [dotschema()], logLevel: "silent" });
   assert.deepEqual(bundled.errors, []);
-  assert.equal(run(process.execPath, ["main.mjs"], dir).out.trim(), "[true,false,true,false]");
+  assert.equal(run(process.execPath, ["main.mjs"], dir).out.trim(), "[true,false]");
   // A syntax error after the mark is placed in the text as the host gave it.
-  for (const [path, source] of [[PATH, '{ "type": "object",, }'], [join(ROOT, "tests/fixtures/user.schema.json5"), "{ type: 'object',, }"]] as const) {
-    const [plain] = schemaTypes(source, path).problems;
-    const [marked] = schemaTypes(`\ufeff${source}`, path).problems;
-    assert.equal(plain!.code, CODES.syntax, path);
-    assert.equal(marked!.start, plain!.start + 1, path);
-    assert.equal(`\ufeff${source}`.slice(marked!.start, marked!.start + 1), ",", path);
-  }
+  const source = '{ "type": "object",, }';
+  const [plain] = schemaTypes(source, PATH).problems;
+  const [marked] = schemaTypes(`\ufeff${source}`, PATH).problems;
+  assert.equal(plain!.code, CODES.syntax);
+  assert.equal(marked!.start, plain!.start + 1);
+  assert.equal(`\ufeff${source}`.slice(marked!.start, marked!.start + 1), ",");
 });
 
 test("a .schema.jsonc file has JSON's white space: U+2028 in a comment is part of it, and U+00A0 between tokens is a syntax error", () => {
@@ -396,7 +379,7 @@ test("a .schema.jsonc file has JSON's white space: U+2028 in a comment is part o
   assert.equal(problem!.start, 1);
 });
 
-/** A directory of schema files, each written as JSON (JSON5 for `.schema.json5`), with the root's path and text. */
+/** A directory of schema files, each written as JSON, with the root's path and text. */
 function project(files: Record<string, unknown>, root = "user.schema.jsonc") {
   const dir = mkdtempSync(join(tmpdir(), "dotschema-refs-"));
   for (const [name, schema] of Object.entries(files)) {
@@ -414,19 +397,19 @@ test("a $ref to another file is followed: its type is imported from that file's 
         tag: { $ref: "./shared/tag.schema.jsonc#/$defs/tag" },
         group: { $ref: "shared/tag.schema.jsonc" },
         label: { $ref: "./shared/tag.schema.jsonc#/properties/name" },
-        at: { $ref: "./point.schema.json5" },
+        at: { $ref: "./point.schema.jsonc" },
       },
       required: ["tag"],
       additionalProperties: false,
     },
     // It refers back to the root: a cycle through two files.
     "shared/tag.schema.jsonc": { $defs: { tag: { type: "string", minLength: 2 } }, type: "object", properties: { name: { $ref: "#/$defs/tag" }, parent: { $ref: "../user.schema.jsonc" } }, required: ["name"], additionalProperties: false },
-    "point.schema.json5": { type: "object", properties: { x: { type: "integer" } }, required: ["x"] },
+    "point.schema.jsonc": { type: "object", properties: { x: { type: "integer" } }, required: ["x"] },
   });
   const typed = schemaTypes(source, path);
   assert.deepEqual(typed.problems, []);
   // The definition keeps the name its own module gives it; another file's root is imported as its `Type`, named here for its file.
-  assert.match(typed.types, /^import type \{ Tag, Type as Tag2 \} from "\.\/shared\/tag\.schema\.jsonc";\nimport type \{ Type as Point \} from "\.\/point\.schema\.json5";$/m);
+  assert.match(typed.types, /^import type \{ Tag, Type as Tag2 \} from "\.\/shared\/tag\.schema\.jsonc";\nimport type \{ Type as Point \} from "\.\/point\.schema\.jsonc";$/m);
   // A pointer that is not a definition is inlined from the other file, its own references imported.
   assert.match(typed.types, /\ninterface User \{\n  tag: Tag;\n  group\?: Tag2 \| undefined;\n  label\?: Tag \| undefined;\n  at\?: Point \| undefined;\n\}/);
   const tag = join(dir, "shared/tag.schema.jsonc");
@@ -435,7 +418,7 @@ test("a $ref to another file is followed: its type is imported from that file's 
 
   const { code, problems, watchFiles } = schemaCode(source, path);
   assert.deepEqual(problems, []);
-  assert.deepEqual(watchFiles.sort(), [join(dir, "point.schema.json5"), tag]);
+  assert.deepEqual(watchFiles.sort(), [join(dir, "point.schema.jsonc"), tag]);
   // ajv's standalone code embeds each schema's id; none is a path on the machine that built it.
   assert.ok(!code.includes(dir), "the module names no path");
   assert.doesNotMatch(code, /^import /m);
@@ -555,7 +538,7 @@ test("a $ref that cannot be followed is a problem at the $ref, in both texts, an
     problems.map((p) => [p.message, p.start, p.length, p.code]),
     [
       ['The $ref "./missing.schema.jsonc" names a file that does not exist.', at("./missing.schema.jsonc"), 22, CODES.schema],
-      ['The $ref "./data.json" names a file that is not a schema: a $ref to another file names a .schema.jsonc or .schema.json5 file.', at("./data.json"), 11, CODES.schema],
+      ['The $ref "./data.json" names a file that is not a schema: a $ref to another file names a .schema.jsonc file.', at("./data.json"), 11, CODES.schema],
       ['The $ref "./tag.schema.jsonc#/$defs/nope" points to nothing: ./tag.schema.jsonc has no #/$defs/nope.', at("./tag.schema.jsonc#/$defs/nope"), 30, CODES.schema],
       ['The $ref "./old.schema.jsonc" names a schema whose $schema is "http://json-schema.org/draft-07/schema#", and this schema\'s is "https://json-schema.org/draft/2020-12/schema": a schema and the files it refers to are compiled in one draft.', at("./old.schema.jsonc"), 18, CODES.schema],
       // A problem in a file reached through another is placed at the root's reference to that file.

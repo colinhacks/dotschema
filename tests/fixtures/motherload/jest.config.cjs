@@ -2,7 +2,7 @@
 module.exports = {
   testMatch: ["<rootDir>/schema.test.cjs"],
   transform: {
-    "\\.schema\\.(jsonc|json5)$": "dotschema/jest",
+    "\\.schema\\.jsonc$": "dotschema/jest",
     "\\.(jsonc|json5)$": "motherload/jest",
   },
 };

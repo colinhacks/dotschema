@@ -40,8 +40,6 @@ Add dotschema to `tsconfig.json` as a content mapper:
 }
 ```
 
-<Callout title="JSON5">A schema can also be a `.schema.json5` file: add `.schema.json5` to `extensions`, and `json5` to a webpack, Rspack or Jest pattern, as in `\.schema\.(jsonc|json5)$`.</Callout>
-
 Then type-check with `--runExternalCode`, which lets `tsc` run content mappers:
 
 ```jsonc title="package.json"

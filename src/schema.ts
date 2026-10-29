@@ -1,4 +1,4 @@
-// The module a `.schema.jsonc` or `.schema.json5` file becomes: the TypeScript type the schema
+// The module a `.schema.jsonc` file becomes: the TypeScript type the schema
 // describes, and a validator compiled from the schema when the module is built.
 //
 //   import user, { type Type as User } from "./user.schema.jsonc";
@@ -640,9 +640,9 @@ export function containsProblems(files: Files, rootPath: string, rootSource: str
       const { unhandled } = containsOf(files, path, segments);
       if (!unhandled) return;
       const where = path === rootPath ? "" : `${specifierOf(rootPath, path)}: `;
-      // The key, quoted or bare (JSON5), where it is first written; the file's start if it cannot be found.
-      const key = /(["']?)unevaluatedItems\1\s*:/.exec(rootSource);
-      const place = path !== rootPath ? files.places.get(path)! : key ? { start: key.index + key[1]!.length, length: "unevaluatedItems".length } : { start: 0, length: 1 };
+      // The key where it is first written; the file's start if it cannot be found.
+      const key = /"unevaluatedItems"\s*:/.exec(rootSource);
+      const place = path !== rootPath ? files.places.get(path)! : key ? { start: key.index + 1, length: "unevaluatedItems".length } : { start: 0, length: 1 };
       const intoIt = unhandled.length > segments.length && unhandled[segments.length] === "unevaluatedItems" && segments.every((segment, i) => unhandled[i] === segment);
       const why = intoIt ? `a $ref points into it (#${fragmentOf(unhandled)}), which that rewrite moves. Point the $ref at a definition in "$defs" instead.` : `the "contains" at #${fragmentOf(unhandled)} is not. Move that "contains" beside the "unevaluatedItems", or into its "allOf".`;
       const message = `${where}ajv takes every item as evaluated for the "unevaluatedItems" at #${fragmentOf(segments)} once a "contains" is beside it, where 2020-12 counts only the items "contains" matched; dotschema counts those for a "contains" beside the "unevaluatedItems" or in its "allOf", and ${why}`;
@@ -822,7 +822,7 @@ const keyUnion = (keys: readonly string[]): string => (keys.length ? keys.map((k
  * a definition that is a plain object is an `ObjectSchema`, with `.pick()` and `.omit()`.
  */
 export function schemaTypes(source: string, path: string, options?: TypeOptions): { types: string; problems: Problem[] } {
-  const parsed = parseSchemaFile(source, path);
+  const parsed = parseSchemaFile(source);
   if (!parsed.ok) return { types: FAILED_TYPES, problems: parsed.problems };
   const schema = parsed.value;
   const draft = draftOf(schema);
@@ -1171,7 +1171,7 @@ ${objects ? PICK : ""}
  */
 export function schemaCode(source: string, path: string, { discriminators = true } = {}): { code: string; problems: Problem[]; watchFiles: string[] } {
   const failed = (problems: Problem[], watchFiles: string[] = []) => ({ code: "export default undefined;\n", problems, watchFiles });
-  const parsed = parseSchemaFile(source, path);
+  const parsed = parseSchemaFile(source);
   if (!parsed.ok) return failed(parsed.problems);
   const files = filesOf(source, path, parsed.value);
   if (files.problems.length) return failed(files.problems, files.watched);

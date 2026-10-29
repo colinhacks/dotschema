@@ -70,9 +70,6 @@ Add dotschema to `tsconfig.json` as a content mapper:
 }
 ```
 
-> [!NOTE]
-> A schema can also be written in JSON5, as a `.schema.json5` file: add `.schema.json5` to the `extensions` list.
-
 Then type-check with `--runExternalCode`, which lets `tsc` run content mappers:
 
 ```jsonc

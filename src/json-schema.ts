@@ -13,7 +13,7 @@
 // is, never a schema that validates otherwise than dotschema's validator does.
 import { basename } from "node:path";
 import type { Value } from "./core/serialize.ts";
-import { fragmentOf, pointer, resolveRef, SCHEMA_SUFFIXES, specifierOf, type Files } from "./refs.ts";
+import { fragmentOf, pointer, resolveRef, SCHEMA_SUFFIX, specifierOf, type Files } from "./refs.ts";
 import type { Draft } from "./schema-types.ts";
 
 export type JsonSchemaTarget = "draft-07" | "draft-2020-12";
@@ -33,6 +33,13 @@ type Obj = { readonly [key: string]: Value };
 type Out = Record<string, Value>;
 
 const isObj = (value: Value | undefined): value is Obj => typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
+
+/** A schema file's name without its suffix, or `schema` where nothing is left. */
+const stem = (path: string): string => {
+  const name = basename(path);
+  return (name.endsWith(SCHEMA_SUFFIX) ? name.slice(0, -SCHEMA_SUFFIX.length) : name) || "schema";
+};
+
 const has = (schema: Obj, key: string) => Object.hasOwn(schema, key);
 const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
@@ -130,16 +137,14 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
   // With an entry, the rest of the root file is a unit of its own, named for the file, before the others.
   let rootName = "";
   if (entry) {
-    const suffix = SCHEMA_SUFFIXES.find((s) => rootPath.endsWith(s)) ?? "";
-    const base = basename(rootPath).slice(0, basename(rootPath).length - suffix.length) || "schema";
+    const base = stem(rootPath);
     rootName = base;
     for (let n = 2; taken.has(rootName); n++) rootName = `${base}${n}`;
     taken.add(rootName);
   }
   for (const path of files.schemas.keys()) {
     if (path === rootPath) continue;
-    const suffix = SCHEMA_SUFFIXES.find((s) => path.endsWith(s)) ?? "";
-    const base = basename(path).slice(0, basename(path).length - suffix.length) || "schema";
+    const base = stem(path);
     let name = base;
     for (let n = 2; taken.has(name); n++) name = `${base}${n}`;
     taken.add(name);

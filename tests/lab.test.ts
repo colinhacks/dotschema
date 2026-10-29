@@ -31,15 +31,13 @@ test("a broken schema file is a diagnostic at its place in the file", () => {
   const { status, out } = run(TSC, ["-p", "tests/fixtures/errors/tsconfig.json", "--noEmit", "--runExternalCode"]);
   assert.equal(status, 2);
   assert.match(out, /broken\.schema\.jsonc\(1,1\): error dotschema4: The schema is not valid/);
-  assert.match(out, /broken\.schema\.json5\(3,44\): error dotschema1: invalid character ','/);
+  assert.match(out, /syntax\.schema\.jsonc\(4,50\): error dotschema1: Property Name Expected/);
   // A $ref to a file that is not there is placed at the reference.
   assert.match(out, /broken-ref\.schema\.jsonc\(4,35\): error dotschema4: The \$ref "\.\/missing\.schema\.jsonc" names a file that does not exist\./);
-  // A syntax error at the very end of a file, truncated or empty, in either dialect, is placed there:
+  // A syntax error at the very end of a file, truncated or empty, is placed there:
   // until 2026-10-26 its span ran a byte past the end, and TypeScript refused the module (TS18069).
   assert.match(out, /truncated\.schema\.jsonc\(3,1\): error dotschema1: Close Brace Expected/);
-  assert.match(out, /truncated\.schema\.json5\(3,1\): error dotschema1: invalid end of input at 3:1/);
   assert.match(out, /empty\.schema\.jsonc\(1,1\): error dotschema1: Value Expected/);
-  assert.match(out, /empty\.schema\.json5\(1,1\): error dotschema1: invalid end of input at 1:1/);
   assert.doesNotMatch(out, /TS18069/);
 });
 
@@ -72,7 +70,7 @@ test("a library that re-exports a schema module emits its declarations: the sche
 // What lab/basic/main.ts prints, piece by piece.
 // user.schema.jsonc's validate: the value, then every issue with its path and keyword; `~standard.validate` the same function, a missing property's key ending the path; the vendor; an array index a number, through team.schema.jsonc's $ref.
 const VALIDATE = '"valid":"Ada","invalid":"name: must NOT have fewer than 1 characters; email: must match format \\"email\\"; role: must be equal to one of the allowed values","keywords":["minLength","format","enum"],"standard":[true,["role"]],"vendor":"dotschema","memberPath":["members",1,"name"]';
-// point.schema.json5: an integer, and a label of at most 0x10 characters.
+// point.schema.jsonc: an integer, and a label of at most 16 characters.
 const POINTS = '"points":[true,false,false]';
 // team.schema.jsonc: valid, then failing user.schema.jsonc's and shared/place.schema.jsonc's rules through its $refs.
 const TEAM = '"team":[true,false,false]';

@@ -1,12 +1,9 @@
-// The two dialects a schema is written in, each read with its positions kept so that a syntax error
-// is placed in the file: JSON with comments for `.schema.jsonc`, read with Microsoft's
-// jsonc-parser, and JSON5 for `.schema.json5`, read with json5, the JSON5 project's own parser.
-// Motherload's `.jsonc` and `.json5` loaders read them the same way (`parseJsoncFile` in
-// packages/jsonc/src/loader.ts and `parseJson5File` in packages/json5/src/loader.ts at d21b5ac).
-// Each also keeps its `/** */` comments, which the types write as JSDoc (`docOfKey`).
-import JSON5 from "json5";
+// The dialect a schema is written in, JSON with comments, read with Microsoft's jsonc-parser with
+// its positions kept so that a syntax error is placed in the file. Motherload's `.jsonc` loader
+// reads it the same way (`parseJsoncFile` in packages/jsonc/src/loader.ts at d21b5ac). Its
+// `/** */` comments are kept too, which the types write as JSDoc (`docOfKey`).
 import { parseTree, printParseErrorCode, type Node, type ParseError } from "jsonc-parser";
-import { CODES, fail, offsetOf, type Parsed } from "./core/problems.ts";
+import { CODES, type Parsed } from "./core/problems.ts";
 import type { Value } from "./core/serialize.ts";
 
 /** jsonc-parser's own `parse` assigns keys, which turns a `"__proto__"` key into a prototype; building from the tree defines them. */
@@ -36,28 +33,16 @@ export function parseJsoncFile(source: string): Parsed {
   return { ok: true, value: withDocs(tree ? fromTree(tree) : null, source) };
 }
 
-/** JSON5: also unquoted keys, single quotes, hex numbers and `Infinity`. json5 defines a `"__proto__"` key as a property. */
-export function parseJson5File(source: string): Parsed {
-  try {
-    return { ok: true, value: withDocs(JSON5.parse(source) as Value, source) };
-  } catch (error) {
-    const e = error as SyntaxError & { lineNumber?: number; columnNumber?: number };
-    if (typeof e.lineNumber === "number") return fail(e.message.replace(/^JSON5: /, ""), offsetOf(source, e.lineNumber, e.columnNumber ?? 1), 1);
-    throw error;
-  }
-}
-
 /**
- * A schema is read in the dialect its suffix names: JSON5 for `.schema.json5`, JSON with comments
- * for `.schema.jsonc`. A byte order mark at the start, which an editor may save, is read past in
- * both: the type check's host strips it before the mapper sees the text, while the preload and the
- * bundlers hand over the file as read, where jsonc-parser refuses it and json5 skips it. A problem's
+ * A schema file, read as JSON with comments. A byte order mark at the start, which an editor may
+ * save, is read past: the type check's host strips it before the mapper sees the text, while the
+ * preload and the bundlers hand over the file as read, where jsonc-parser refuses it. A problem's
  * place stays the text's own, the mark counted.
  */
-export function parseSchemaFile(source: string, path: string): Parsed {
+export function parseSchemaFile(source: string): Parsed {
   const mark = source.charCodeAt(0) === 0xfeff ? 1 : 0;
   const text = mark ? source.slice(1) : source;
-  const parsed = path.endsWith(".schema.json5") ? parseJson5File(text) : parseJsoncFile(text);
+  const parsed = parseJsoncFile(text);
   return parsed.ok || !mark ? parsed : { ok: false, problems: parsed.problems.map((problem) => ({ ...problem, start: problem.start + mark })) };
 }
 
@@ -102,12 +87,10 @@ export function docText(comment: string): string | undefined {
   return lines.length ? lines.join("\n") : undefined;
 }
 
-/** A key as written in either dialect, quoted or bare, as the parsed value names it. */
+/** A key as written, a JSON string, as the parsed value names it. */
 function keyOf(raw: string): string | undefined {
   try {
-    if (raw.startsWith('"') || raw.startsWith("'")) return JSON5.parse(raw) as string;
-    // A bare JSON5 key may hold escapes (`\u0061`), which json5 decodes.
-    return Object.keys(JSON5.parse(`{${raw}:0}`) as object)[0];
+    return raw.startsWith('"') ? (JSON.parse(raw) as string) : undefined;
   } catch {
     return undefined;
   }
@@ -117,8 +100,7 @@ function keyOf(raw: string): string | undefined {
  * The `/**` comments of a file that parsed, each with the key it is written directly before (no
  * token between them; another comment may be), as the keys from the root to the object that holds
  * it (an array's items by index), or before the root. When two are, the last is the key's, as
- * TypeScript shows the last; the empty plain comment, `/**` closed at once, is not one. One scanner
- * reads both dialects: JSON with comments is JSON5's syntax less some of its forms, and the source
+ * TypeScript shows the last; the empty plain comment, `/**` closed at once, is not one. The source
  * has parsed, so only strings, comments and punctuation need telling apart.
  */
 function scanDocs(source: string): { root: string | undefined; keys: { path: (string | number)[]; key: string; doc: string }[] } {
@@ -147,7 +129,7 @@ function scanDocs(source: string): { root: string | undefined; keys: { path: (st
       continue;
     }
     let token: string;
-    if (c === '"' || c === "'") {
+    if (c === '"') {
       let j = i + 1;
       while (j < source.length && source[j] !== c) j += source[j] === "\\" ? 2 : 1;
       token = source.slice(i, j + 1);
@@ -157,7 +139,7 @@ function scanDocs(source: string): { root: string | undefined; keys: { path: (st
       i++;
     } else {
       let j = i + 1;
-      while (j < source.length && !/[\s{}[\]:,"'/]/.test(source[j]!)) j++;
+      while (j < source.length && !/[\s{}[\]:,"/]/.test(source[j]!)) j++;
       token = source.slice(i, j);
       i = j;
     }
