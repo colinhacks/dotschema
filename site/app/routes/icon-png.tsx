@@ -4,18 +4,18 @@
 // icon), /apple-icon.png (180px) and the manifest's /icon-192.png and /icon-512.png. One module for
 // the four routes (app/routes.ts), each telling it apart by its path. Drawn by @vercel/og's
 // ImageResponse (Satori), as the link preview is.
-import { markColor, markSvgIn } from '@/lib/mark';
+import { markColor, markSvgIn, markTile } from '@/lib/mark';
 
 const svgImage = `data:image/svg+xml;base64,${Buffer.from(markSvgIn(markColor.paper)).toString('base64')}`;
 
 async function png(size: number, favicon: boolean): Promise<Uint8Array<ArrayBuffer>> {
   const { ImageResponse } = await import('@vercel/og');
   // A home screen's tile keeps its mark to 62% of it, inside the safe zone a launcher's mask keeps;
-  // a favicon, which nothing masks, takes 78%, so it reads at 16px.
-  const inner = Math.round(size * (favicon ? 0.78 : 0.62));
+  // a favicon, which nothing masks, takes 78%, so it reads at 16px (`markTile`).
+  const inner = Math.round(size * (favicon ? markTile.favicon : markTile.homeScreen));
   const image = new ImageResponse(
     (
-      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: markColor.background, borderRadius: favicon ? Math.round(size * 0.18) : 0 }}>
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: markColor.background, borderRadius: favicon ? Math.round(size * markTile.corner) : 0 }}>
         <img src={svgImage} width={inner} height={inner} />
       </div>
     ),

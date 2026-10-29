@@ -55,3 +55,22 @@ export function markSvg(drawing: Mark = mark): string {
 export function markSvgIn(paint: string, drawing: Mark = mark): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${drawing.svg(paint)}</svg>\n`;
 }
+
+/**
+ * The tiles' proportions (app/routes/icon-png.tsx): the mark's share of a home screen's tile, inside
+ * the safe zone a launcher's mask keeps, and of a favicon's, which nothing masks, so it reads at
+ * 16px; and the favicon's rounded corner.
+ */
+export const markTile = { homeScreen: 0.62, favicon: 0.78, corner: 0.18 };
+
+/**
+ * The favicon's tile as an SVG document: the dark page's ink on its ground, as `/favicon.ico` draws
+ * it. The repository keeps this as `assets/icon.svg` for a tool that looks for a project's icon in
+ * its checkout, where the icons the site draws at build time are not: Frizz's project rail found none
+ * and drew a monogram. tests/icon.test.ts fails when the file is not this text.
+ */
+export function markTileSvg(drawing: Mark = mark): string {
+  const units = (fraction: number) => Number((32 * fraction).toFixed(2));
+  const inset = units((1 - markTile.favicon) / 2);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="${units(markTile.corner)}" fill="${markColor.background}"/><g transform="translate(${inset} ${inset}) scale(${markTile.favicon})">${drawing.svg(markColor.paper)}</g></svg>\n`;
+}
