@@ -31,3 +31,31 @@ $ tsc --noEmit --runExternalCode
 
 Found 1 error in team.schema.jsonc[90m:6[0m
 ```
+
+The `errorMessage` keyword, [ajv-errors'](https://ajv.js.org/packages/ajv-errors.html), gives an issue a message of the schema's own:
+
+```jsonc title="signup.schema.jsonc"
+{
+  "type": "object",
+  "properties": {
+    "age": {
+      "type": "integer",
+      "minimum": 13,
+      "errorMessage": "must be 13 or older"
+    }
+  }
+}
+```
+
+The issue keeps its path and the keyword that failed:
+
+```ts twoslash title="main.ts"
+import signup from "./signup.schema.jsonc";
+
+signup.validate({ age: 9 });
+// { issues: [{
+//   message: "must be 13 or older",
+//   path: ["age"],
+//   keyword: "minimum",
+// }] }
+```

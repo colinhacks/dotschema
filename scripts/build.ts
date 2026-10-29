@@ -60,6 +60,8 @@ mkdirSync(to, { recursive: true });
 cpSync(tsc, join(to, "src"), { recursive: true });
 // The format files (src/formats/index.ts), plain JavaScript a module inlines, which tsc does not copy.
 for (const file of readdirSync(join(root, "src", "formats"))) if (file.endsWith(".cjs")) cpSync(join(root, "src", "formats", file), join(to, "src", "formats", file));
+// The same for ajv-errors' keyword (src/keywords/), which schema.ts requires.
+cpSync(join(root, "src", "keywords"), join(to, "src", "keywords"), { recursive: true });
 writeFileSync(join(to, "package.json"), JSON.stringify(built, null, 2) + "\n");
 cpSync(join(root, "README.md"), join(to, "README.md"));
 cpSync(join(root, "LICENSE"), join(to, "LICENSE"));

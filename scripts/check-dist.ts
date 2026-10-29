@@ -93,7 +93,7 @@ function check(name: string, dir: string, commands: [string, string[], string][]
 }
 
 // What lab/basic prints, as tests/lab.test.ts checks it in the repository.
-const VALIDATE = '"valid":"Ada","invalid":"name: must NOT have fewer than 1 characters; email: must match format \\"email\\"; role: must be equal to one of the allowed values","keywords":["minLength","format","enum"],"standard":[true,["role"]],"vendor":"dotschema","memberPath":["members",1,"name"]';
+const VALIDATE = '"valid":"Ada","invalid":"name: must NOT have fewer than 1 characters; email: must match format \\"email\\"; role: must be admin or member","keywords":["minLength","format","enum"],"standard":[true,["role"]],"vendor":"dotschema","memberPath":["members",1,"name"]';
 const TEAM = '"team":[true,false,false]';
 const EVENTS = '"events":[true,true,false,false,false],"described":"3,4","clickX":5';
 const preload = (expected: string): [string, string[], string] => [process.execPath, ["--import", "dotschema/register", "main.ts"], expected];

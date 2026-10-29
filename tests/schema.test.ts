@@ -607,7 +607,6 @@ test("a keyword no draft defines is ignored in every draft: a vendor's, an unkno
   const unknown = {
     "x-foo": 1,
     tsType: "Foo",
-    errorMessage: "must be a user",
     markdownDescription: "**user**",
     discriminator: { propertyName: "kind" },
     "x-ref": { $ref: "./missing.schema.jsonc" },
@@ -628,6 +627,62 @@ test("a keyword no draft defines is ignored in every draft: a vendor's, an unkno
     const { default: s } = await evaluate(code);
     assert.deepEqual([s.is({ name: "a", tags: ["x"] }), s.is({}), s.is({ name: 1 }), s.is({ name: "a", other: 1 })], [true, false, false, false], draft);
   }
+});
+
+test("an errorMessage, ajv-errors' keyword, is .validate()'s message in every draft, with the path and keyword of the error it replaces; .is() and the types are as without it", async () => {
+  const messages = {
+    type: "object",
+    properties: {
+      age: { type: "integer", minimum: 13, errorMessage: { type: "must be a whole number", minimum: "must be 13, not ${0}" } },
+      name: { type: "string", errorMessage: "must be a name" },
+    },
+    required: ["name", "role"],
+    errorMessage: { required: { role: "needs a role" } },
+  };
+  const { errorMessage, ...plain } = { ...messages, properties: { age: { type: "integer", minimum: 13 }, name: { type: "string" } } };
+  for (const $schema of [undefined, "http://json-schema.org/draft-06/schema#", "https://json-schema.org/draft/2019-09/schema", "https://json-schema.org/draft/2020-12/schema"]) {
+    const draft = $schema ?? "no $schema";
+    const source = JSON.stringify($schema ? { $schema, ...messages } : messages);
+    const { code, problems } = schemaCode(source, PATH);
+    assert.deepEqual(problems, [], draft);
+    assert.doesNotMatch(code, /^import /m, draft);
+    assert.doesNotMatch(code, /[^_\w]require\(/, draft);
+    const { default: s } = await evaluate(code);
+    // A message for a property's `required`, which ajv-errors reports at the object, ends its path with the key.
+    assert.deepEqual(s.validate({ name: 1, age: 9 }), {
+      issues: [
+        { message: "must be 13, not 9", path: ["age"], keyword: "minimum" },
+        { message: "must be a name", path: ["name"], keyword: "type" },
+        { message: "needs a role", path: ["role"], keyword: "required" },
+      ],
+    }, draft);
+    assert.deepEqual(s.validate({ name: "Ada", role: 1, age: 13.5 }).issues, [{ message: "must be a whole number", path: ["age"], keyword: "type" }], draft);
+    assert.deepEqual([s.is({ name: "Ada", role: 1 }), s.is({ name: "Ada", role: 1, age: 9 }), s.is({ role: 1 })], [true, false, false], draft);
+    const type = (text: string) => schemaTypes(text, PATH).types.match(/\ninterface User \{\n[^]*?\n\}\n/)![0];
+    assert.equal(type(source), type(JSON.stringify($schema ? { $schema, ...plain } : plain)), draft);
+  }
+  // A message for the whole object stands for every error in it, at the object, with the first one's keyword.
+  const whole = JSON.stringify({ type: "object", properties: { a: { type: "object", properties: { b: { type: "string" } } }, c: { type: "number" } }, errorMessage: "must be a thing" });
+  const { default: thing } = await evaluate(schemaCode(whole, PATH).code);
+  assert.deepEqual(thing.validate({ a: { b: 1 }, c: "x" }).issues, [{ message: "must be a thing", path: [], keyword: "type" }]);
+  assert.deepEqual(thing.validate(5).issues, [{ message: "must be a thing", path: [], keyword: "type" }]);
+  // Standard JSON Schema keeps the keyword, which another validator ignores as a keyword it does not know.
+  assert.equal(thing["~standard"].jsonSchema.input({ target: "draft-07" }).errorMessage, "must be a thing");
+  // A value its meta-schema refuses is a problem in both texts.
+  const invalid = JSON.stringify({ type: "string", errorMessage: 5 });
+  for (const { problems } of [schemaTypes(invalid, PATH), schemaCode(invalid, PATH)]) assert.match(problems[0]!.message, /keyword "errorMessage" value is invalid/);
+  // A module whose schemas have no message carries none of this.
+  assert.doesNotMatch(schemaCode(SCHEMA, PATH).code, /errorMessage/);
+});
+
+test("an errorMessage on a property keeps .pick() and the other object methods, with the message, and one on the object leaves them out", async () => {
+  const { default: inner } = await evaluate(schemaCode(JSON.stringify({ type: "object", properties: { a: { type: "string", errorMessage: "a is text" }, b: { type: "number" } }, required: ["b"] }), PATH).code);
+  assert.deepEqual(inner.pick("a").validate({ a: 1 }).issues, [{ message: "a is text", path: ["a"], keyword: "type" }]);
+  assert.deepEqual(inner.partial().validate({ a: 1 }).issues, [{ message: "a is text", path: ["a"], keyword: "type" }]);
+  // The object's own message is in the function ajv compiled for the whole object, which the join does not run.
+  const { default: outer } = await evaluate(schemaCode(JSON.stringify({ type: "object", properties: { a: { type: "string" } }, required: ["a"], errorMessage: { required: "needs a" } }), PATH).code);
+  assert.deepEqual(Object.keys(outer), ["validate", "is", "schema", "~standard"]);
+  assert.deepEqual(outer.validate({}).issues, [{ message: "needs a", path: ["a"], keyword: "required" }]);
 });
 
 test("a keyword ajv reads that the schema's draft does not define is ignored: $async, nullable, id, and another draft's", async () => {

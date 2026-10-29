@@ -58,6 +58,9 @@ function compileFor(target: JsonSchemaTarget, schema: unknown, strictSchema = tr
   withFormats(ajv);
   // ajv resolves `$anchor` in every draft without declaring it a keyword, which strict mode then refuses.
   if (!ajv.getKeyword("$anchor")) ajv.addKeyword("$anchor");
+  // ajv-errors' `errorMessage`, which the conversion keeps as data, as it keeps any keyword no draft
+  // defines, read here as a consumer with ajv-errors reads it; strict, ajv refuses it otherwise.
+  require("../src/keywords/error-message.cjs")(ajv);
   return ajv.compile(schema);
 }
 

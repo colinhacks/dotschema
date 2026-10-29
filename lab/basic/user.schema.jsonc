@@ -6,7 +6,8 @@
     "name": { "type": "string", "minLength": 1 },
     /** Where the app sends the user's mail. */
     "email": { "type": "string", "format": "email" },
-    "role": { "enum": ["admin", "member"] },
+    // A message of the schema's own, in place of ajv's; the issue's keyword is still `enum`.
+    "role": { "enum": ["admin", "member"], "errorMessage": "must be admin or member" },
     "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
     "address": { "$ref": "#/definitions/address" }
   },

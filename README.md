@@ -104,7 +104,7 @@ The rest is on [dotschema.dev](https://dotschema.dev):
 - [Usage](https://dotschema.dev/#usage): `.validate()`, `.is()`, `.pick()`, `.omit()`, `.partial()`, `.required()` and `.keyof()`, definitions, and Standard Schema
 - [Inference](https://dotschema.dev/#inference): the type each shape of schema gives, a `$ref` to another file, and every [format](https://dotschema.dev/#formats) the validator checks
 - [Doc comments](https://dotschema.dev/#doc-comments): a schema's comments, `description` and tags on the type
-- [Errors](https://dotschema.dev/#errors): an invalid schema as a type error
+- [Errors](https://dotschema.dev/#errors): an invalid schema as a type error, and a message of the schema's own
 - [Reference](https://dotschema.dev/#reference): what [every keyword](https://dotschema.dev/#keywords) does to the type, and the drafts
 - [FAQ](https://dotschema.dev/#faq)
 

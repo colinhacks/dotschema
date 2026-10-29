@@ -68,8 +68,8 @@ test("a library that re-exports a schema module emits its declarations: the sche
 });
 
 // What lab/basic/main.ts prints, piece by piece.
-// user.schema.jsonc's validate: the value, then every issue with its path and keyword; `~standard.validate` the same function, a missing property's key ending the path; the vendor; an array index a number, through team.schema.jsonc's $ref.
-const VALIDATE = '"valid":"Ada","invalid":"name: must NOT have fewer than 1 characters; email: must match format \\"email\\"; role: must be equal to one of the allowed values","keywords":["minLength","format","enum"],"standard":[true,["role"]],"vendor":"dotschema","memberPath":["members",1,"name"]';
+// user.schema.jsonc's validate: the value, then every issue with its path and keyword, role's with the schema's own message; `~standard.validate` the same function, a missing property's key ending the path; the vendor; an array index a number, through team.schema.jsonc's $ref.
+const VALIDATE = '"valid":"Ada","invalid":"name: must NOT have fewer than 1 characters; email: must match format \\"email\\"; role: must be admin or member","keywords":["minLength","format","enum"],"standard":[true,["role"]],"vendor":"dotschema","memberPath":["members",1,"name"]';
 // point.schema.jsonc: an integer, and a label of at most 16 characters.
 const POINTS = '"points":[true,false,false]';
 // team.schema.jsonc: valid, then failing user.schema.jsonc's and shared/place.schema.jsonc's rules through its $refs.
@@ -306,7 +306,7 @@ test("lab/jest: Vitest's watch mode makes a schema again when a file it refers t
 const CLOUDFLARE = `${ROOT}lab/cloudflare`;
 const WORKER = {
   get: { vendor: "dotschema", valid: true, issues: ["name: minLength", "email: format", "role: enum"], team: [true, false], events: [true, false], formats: [true, ["token", "data", "network", "card", "at", "id", "mood", "digest", "host", "mail", "link"]] },
-  post: [400, { issues: [{ message: "must NOT have fewer than 1 characters", path: ["name"], keyword: "minLength" }, { message: "must be equal to one of the allowed values", path: ["role"], keyword: "enum" }] }],
+  post: [400, { issues: [{ message: "must NOT have fewer than 1 characters", path: ["name"], keyword: "minLength" }, { message: "must be admin or member", path: ["role"], keyword: "enum" }] }],
 };
 
 test("lab/cloudflare type-checks through the content mapper", { skip: installed("cloudflare") }, () => {

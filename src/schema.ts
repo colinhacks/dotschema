@@ -318,9 +318,14 @@ function loadAjv(path: string, schema: Value, files: Files, standalone: boolean,
   // a multiple, which keeps every quotient below 1e8 exact and still refuses 0.015 for 0.01.
   const ajv = new AjvClass({ allErrors, strict: false, logger: false, ownProperties: true, multipleOfPrecision: 7, ...(discriminator ? { discriminator: true } : {}), ...(standalone ? { code: { source: true } } : {}) });
   // ajv's default class knows draft-07's meta-schema alone; draft-06's is added for a schema, or a
-  // file it refers to, that declares it (ajv's documentation, "JSON Schema draft-06").
+  // file it refers to, that declares it (ajv's documentation, "JSON Schema draft-06"). ajv-errors'
+  // `errorMessage`, a copy written with this ajv's codegen (src/keywords/), where a file writes it: a
+  // message of the schema's own in place of ajv's, which needs allErrors, so `.is()`'s validator
+  // ignores the keyword. Each compiles a meta-schema here, which a process that disallows code
+  // generation from strings refuses.
   try {
     if (entry.entry === "ajv") ajv.addMetaSchema(require("ajv/dist/refs/json-schema-draft-06.json"));
+    if (allErrors && writesMessages(files)) require("./keywords/error-message.cjs")(ajv);
   } catch (error) {
     if (disallowedCodegen(error)) return { error: codegenProblem(path) };
     throw error;
@@ -389,6 +394,16 @@ export function needsConfirmation(files: Files): boolean {
   for (const schema of files.schemas.values())
     eachSchema(schema, (sub) => {
       if (sub["contains"] !== undefined && (Array.isArray(sub["prefixItems"]) || Array.isArray(sub["items"]))) found = true;
+    });
+  return found;
+}
+
+/** Whether some schema the validator is compiled from writes `errorMessage`, whose errors the module reads (`MESSAGES`). */
+function writesMessages(files: Files): boolean {
+  let found = false;
+  for (const schema of files.schemas.values())
+    eachSchema(schema, (sub) => {
+      if (sub["errorMessage"] !== undefined) found = true;
     });
   return found;
 }
@@ -1073,10 +1088,28 @@ const PICK = `
 `;
 
 /**
- * The module's run time, beside its validators. `objects` adds the join and `.pick()` and `.omit()`,
- * which only a module whose root or a definition is a plain object uses, so another module carries neither.
+ * `__issue` for a module whose schemas write `errorMessage` (src/keywords/): ajv-errors reports a
+ * message as one error with the errors it replaces in `params.errors`, never another message's, so
+ * the issue takes the message, and the keyword of the first error it replaces; its path is the place
+ * the message was written for, ended by the key every error it replaces names, when they name one
+ * (a `required` message for a property, which ajv-errors reports at the object).
  */
-const runtime = (objects: boolean) => `
+const MESSAGES = `const __issue = (value, error) => {
+  let at = error;
+  if (error.keyword === "errorMessage") {
+    const replaced = error.params.errors;
+    const place = (e) => JSON.stringify(__path(undefined, e));
+    at = replaced.every((e) => e.instancePath === error.instancePath && place(e) === place(replaced[0])) ? replaced[0] : { instancePath: error.instancePath, keyword: replaced[0].keyword };
+  }
+  return { message: error.message ?? "is not valid", path: __path(value, at), keyword: at.keyword === "discriminator" ? "oneOf" : at.keyword };
+};`;
+
+/**
+ * The module's run time, beside its validators. `objects` adds the join and `.pick()` and `.omit()`,
+ * which only a module whose root or a definition is a plain object uses, so another module carries
+ * neither; `messages`, the reading of `errorMessage`'s errors, which only a module that writes it uses.
+ */
+const runtime = (objects: boolean, messages: boolean) => `
 // Standard Schema's path for an ajv error. ajv's instancePath is a JSON Pointer, which writes an
 // array index as it writes an object key, so each segment is read against the value it names: in
 // an array, a number. The key of a property that is missing, unexpected or misnamed, which ajv
@@ -1105,7 +1138,7 @@ const __path = (value, error) => {
 };
 // The discriminator dotschema adds for a oneOf whose variants a property tells apart (withDiscriminators
 // in schema.ts) is not in the schema as written, so its failure is reported as the oneOf's.
-const __issue = (value, error) => ({ message: error.message ?? "is not valid", path: __path(value, error), keyword: error.keyword === "discriminator" ? "oneOf" : error.keyword });
+${messages ? MESSAGES : `const __issue = (value, error) => ({ message: error.message ?? "is not valid", path: __path(value, error), keyword: error.keyword === "discriminator" ? "oneOf" : error.keyword });`}
 // What ajv threw, as text, for a value it could not check: a value nested deeper than the stack, one
 // that refers to itself where the schema recurses, a getter or proxy that throws.
 const __thrown = (error) => {
@@ -1221,7 +1254,7 @@ export function schemaCode(source: string, path: string, { discriminators = true
       `const __schema = ${toJs(parsed.value)};`,
       `const __jsonSchemas = ${toJs(root!.docs as unknown as Value)};`,
       `const __confirm = ${needsConfirmation(files)};`,
-      runtime(entries!.some((entry) => entry.shape)),
+      runtime(entries!.some((entry) => entry.shape), writesMessages(files)),
       `const schema = /* @__PURE__ */ __make(__validateAll, __validateFirst, __schema, __jsonSchemas, ${shapeOf(root!)});`,
       "export default schema;",
       ...definitions.map((entry, i) =>
