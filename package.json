@@ -1,6 +1,6 @@
 {
   "name": "dotschema",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "Import JSON Schemas into TypeScript. Fully typed, scary fast.",
   "license": "MIT",
