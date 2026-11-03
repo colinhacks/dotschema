@@ -232,8 +232,9 @@ type Document = { schema: Value; path: string | undefined; rootName: string; nam
 /**
  * Which type the emitter writes: `output`, the value `.validate()` gives (output.ts), with each
  * property that has a `default` required, an optional property without `undefined`, which the value
- * never holds, and an object that lists its keys without an index signature for the others, which
- * the value no longer has; `input`, every value the validator accepts, as `.is()` narrows to.
+ * never holds, and an object that lists its keys with patterns for the others typed by those
+ * patterns alone, as the value no longer holds a key none matches; `input`, every value the
+ * validator accepts, as `.is()` narrows to.
  */
 export type TypeMode = "input" | "output";
 
@@ -485,11 +486,12 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     const inner = `${indent}  `;
     const properties = isObj(schema["properties"]) ? schema["properties"] : {};
     const required = new Set(strings(schema["required"]));
-    // Keys outside `properties`: an index signature, unless `additionalProperties` is false. With
-    // nothing beside it that can evaluate a key, `unevaluatedProperties` is `additionalProperties`
-    // by another name; with something, the object is closed in place (`closingOf`), and has no
-    // index signature of its own but the one its closing gives the object itself. Its type covers
-    // the named properties too, as TypeScript requires.
+    // Keys outside `properties`: an index signature, unless `additionalProperties` is false, or the
+    // object lists its keys and says nothing of the others (below). With nothing beside it that can
+    // evaluate a key, `unevaluatedProperties` is `additionalProperties` by another name; with
+    // something, the object is closed in place (`closingOf`), and has no index signature of its own
+    // but the one its closing gives the object itself. Its type covers the named properties too, as
+    // TypeScript requires.
     const ownUnevaluated = unevaluated && !EVALUATING.some((k) => Object.hasOwn(schema, k)) ? schema["unevaluatedProperties"] : undefined;
     const additional = schema["additionalProperties"] ?? ownUnevaluated;
     const closed = additional === false;
@@ -543,10 +545,17 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
       return lines.length ? `{\n${lines.join("\n")}\n${indent}}` : "{}";
     }
     const extra = patterns.map((pattern) => pattern.type);
-    // The output of an object that lists its keys and says nothing of the others has none: they are
-    // dropped (output.ts). Its patterns' keys stay.
-    const stripped = mode === "output" && !Object.hasOwn(schema, "additionalProperties") && !(unevaluated && Object.hasOwn(schema, "unevaluatedProperties")) && (Object.keys(properties).length > 0 || required.size > 0);
-    if (!closed && !stripped) extra.push(additionalType);
+    // An object that lists its keys and says nothing of the others has no index signature for them.
+    // The output does not hold them, since they are dropped (output.ts), though its patterns' keys
+    // stay. The input may, and a TypeScript object type already admits a value with keys it does not
+    // declare, so `[key: string]: unknown` would add nothing but the reading of every key as
+    // `unknown`, and would refuse a value of an interface or a class that declares no index
+    // signature (the maintainer, 2026-11-03: "Are you sure that omitting additional properties
+    // should be adding the index signature? I find that kind of strange."). With patterns the object
+    // has an index signature anyway, which in the input is `unknown`, as a key no pattern matches may
+    // hold anything.
+    const unlisted = !Object.hasOwn(schema, "additionalProperties") && !(unevaluated && Object.hasOwn(schema, "unevaluatedProperties")) && (Object.keys(properties).length > 0 || required.size > 0) && (mode === "output" || !patterns.length);
+    if (!closed && !unlisted) extra.push(additionalType);
     if (extra.length) lines.push(`${inner}[key: string]: ${union([...extra, ...valueTypes])};`);
     else if (!lines.length) lines.push(`${inner}[key: string]: never;`);
     return `{\n${lines.join("\n")}\n${indent}}`;

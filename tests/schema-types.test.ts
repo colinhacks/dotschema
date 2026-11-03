@@ -27,7 +27,10 @@ test("an optional key is `| undefined` only under exactOptionalPropertyTypes, or
 });
 
 test("keys outside `properties` are an index signature that covers the named ones", () => {
-  assert.equal(emit({ type: "object", properties: { a: { type: "number" } } }), "export interface output {\n  a?: number | undefined;\n  [key: string]: unknown;\n}");
+  assert.equal(emit({ type: "object", properties: { a: { type: "number" } } }), "export interface output {\n  a?: number | undefined;\n}");
+  // An object that lists no key is a record, and so is one with patterns and nothing said of the other keys, which hold anything.
+  assert.equal(emit({ type: "object" }), "export interface output {\n  [key: string]: unknown;\n}");
+  assert.equal(emit({ type: "object", properties: { a: { type: "number" } }, patternProperties: { "^x-": { type: "string" } } }), "export interface output {\n  a?: number | undefined;\n  [key: string]: unknown;\n}");
   assert.equal(emit({ type: "object", properties: { a: { type: "number" } }, additionalProperties: { type: "string" } }), "export interface output {\n  a?: number | undefined;\n  [key: string]: string | number | undefined;\n}");
   assert.equal(emit({ type: "object", patternProperties: { "^x-": { type: "number" } }, additionalProperties: false }), "export interface output {\n  [key: string]: number;\n}");
   assert.equal(emit({ type: "object", properties: { a: { type: "null" } }, unevaluatedProperties: false }), "export interface output {\n  a?: null | undefined;\n}");
@@ -50,7 +53,7 @@ test("const, enum, combinators, and the keywords that only narrow", () => {
   assert.equal(emit({ enum: ["a", 1, true, null] }), 'export type output = "a" | 1 | true | null;');
   assert.equal(emit({ const: { a: [1] } }), "export interface output { readonly a: readonly [1] }");
   assert.equal(emit({ anyOf: [{ type: "string" }, { oneOf: [{ type: "number" }, { type: "null" }] }] }), "export type output = string | number | null;");
-  assert.equal(emit({ type: "object", required: ["a"], allOf: [{ properties: { a: { type: "string" } } }] }), "export type output = {\n  a: unknown;\n  [key: string]: unknown;\n} & {\n  a?: string | undefined;\n  [key: string]: unknown;\n};");
+  assert.equal(emit({ type: "object", required: ["a"], allOf: [{ properties: { a: { type: "string" } } }] }), "export type output = {\n  a: unknown;\n} & {\n  a?: string | undefined;\n};");
   assert.equal(emit({ type: "string", not: { const: "" }, if: { minLength: 2 }, then: { pattern: "^a" } }), "export type output = string;");
   assert.equal(emit({ anyOf: [{ type: "string" }, true] }), "export type output = unknown;");
   assert.equal(emit({ type: "string", allOf: [false] }), "export type output = never;");
@@ -59,8 +62,8 @@ test("const, enum, combinators, and the keywords that only narrow", () => {
   assert.equal(emit({ properties: { a: { type: "string" } }, additionalProperties: false }), "export type output = {\n  a?: string | undefined;\n} | unknown[] | string | number | boolean | null;");
   assert.equal(emit({ items: { type: "string" } }), "export type output = string[] | {\n  [key: string]: unknown;\n} | string | number | boolean | null;");
   // A member of `allOf`, `anyOf` or `oneOf` is read within its schema's own types, and `$ref`, `const` and `enum` tell them too.
-  assert.equal(emit({ type: "object", allOf: [{ properties: { a: { type: "string" } } }] }), "export type output = {\n  [key: string]: unknown;\n} & {\n  a?: string | undefined;\n  [key: string]: unknown;\n};");
-  assert.equal(emit({ $ref: "#/$defs/a", properties: { b: { type: "number" } }, $defs: { a: { type: "object" } } }).split("\n\n")[0], "export type output = A & {\n  b?: number | undefined;\n  [key: string]: unknown;\n};");
+  assert.equal(emit({ type: "object", allOf: [{ properties: { a: { type: "string" } } }] }), "export type output = {\n  [key: string]: unknown;\n} & {\n  a?: string | undefined;\n};");
+  assert.equal(emit({ $ref: "#/$defs/a", properties: { b: { type: "number" } }, $defs: { a: { type: "object" } } }).split("\n\n")[0], "export type output = A & {\n  b?: number | undefined;\n};");
   assert.equal(emit({ anyOf: [{ type: "string" }, { const: 1 }], properties: { a: {} } }), "export type output = string | 1;");
   assert.equal(emit({ type: "string", allOf: [{ properties: { a: {} } }] }), "export type output = string;");
   // OpenAPI 3.0's `nullable` is no JSON Schema keyword: not read, and taken out of what ajv compiles.
@@ -72,7 +75,7 @@ test("a `not` whose schema accepts every value, and an empty enum, are never; ev
   assert.equal(emit({ not: {} }), "export type output = never;");
   assert.equal(emit({ not: true }), "export type output = never;");
   assert.equal(emit({ not: { title: "Anything", $comment: "c" } }), "export type output = never;");
-  assert.equal(emit({ type: "object", properties: { a: { not: {} }, b: { type: "string" } } }), "export interface output {\n  a?: undefined;\n  b?: string | undefined;\n  [key: string]: unknown;\n}");
+  assert.equal(emit({ type: "object", properties: { a: { not: {} }, b: { type: "string" } } }), "export interface output {\n  a?: undefined;\n  b?: string | undefined;\n}");
   assert.equal(emit({ anyOf: [{ type: "string" }, { not: {} }] }), "export type output = string;");
   assert.equal(emit({ not: { type: "string" } }), "export type output = unknown;");
   assert.equal(emit({ not: false }), "export type output = unknown;");
@@ -94,7 +97,7 @@ test("an optional property named for a member of TypeScript's Object admits that
   const schema = { type: "object", properties: { toString: { type: "object", properties: { length: { type: "string" } } }, constructor: { type: "number" }, valueOf: { type: "string" } }, required: ["valueOf"] };
   assert.equal(
     emit(schema),
-    'export interface output {\n  toString?: {\n    length?: string | undefined;\n    [key: string]: unknown;\n  } | globalThis.Object["toString"] | undefined;\n  constructor?: number | globalThis.Object["constructor"] | undefined;\n  valueOf: string;\n  [key: string]: unknown;\n}',
+    'export interface output {\n  toString?: {\n    length?: string | undefined;\n  } | globalThis.Object["toString"] | undefined;\n  constructor?: number | globalThis.Object["constructor"] | undefined;\n  valueOf: string;\n}',
   );
   const counts = await agrees([
     {
@@ -112,9 +115,9 @@ test("with a draft, a keyword is read only in the drafts that have it, as ajv re
   assert.equal(schemaDeclarations(tuple as never, undefined, "2020-12"), "export type output = [string?, ...unknown[]];");
   assert.equal(schemaDeclarations(tuple as never, undefined, "2019-09"), "export type output = [number?];");
   assert.equal(schemaDeclarations(tuple as never, undefined, "draft-07"), "export type output = [number?];");
-  const closed = { type: "object", properties: { a: { type: "string" } }, unevaluatedProperties: false };
-  assert.equal(schemaDeclarations(closed as never, undefined, "2019-09"), "export interface output {\n  a?: string | undefined;\n}");
-  assert.equal(schemaDeclarations(closed as never, undefined, "draft-07"), "export interface output {\n  a?: string | undefined;\n  [key: string]: unknown;\n}");
+  const rest = { type: "object", properties: { a: { type: "string" } }, unevaluatedProperties: { type: "number" } };
+  assert.equal(schemaDeclarations(rest as never, undefined, "2019-09"), "export interface output {\n  a?: string | undefined;\n  [key: string]: number | string | undefined;\n}");
+  assert.equal(schemaDeclarations(rest as never, undefined, "draft-07"), "export interface output {\n  a?: string | undefined;\n}");
   // Without `type`, only a keyword the draft reads makes an array.
   assert.equal(schemaDeclarations({ type: "array", prefixItems: [{ type: "string" }] }, undefined, "2020-12"), "export type output = [string?, ...unknown[]];");
   assert.equal(schemaDeclarations({ prefixItems: [{ type: "string" }] }, undefined, "2020-12"), "export type output = [string?, ...unknown[]] | {\n  [key: string]: unknown;\n} | string | number | boolean | null;");
@@ -156,7 +159,7 @@ test("`#` is the root; another pointer is inlined, unless it leads back into its
 test("an anchor is the schema that declares it: a definition by its name, anything else inlined, and finite when it recurses", () => {
   assert.equal(
     emit({ type: "object", properties: { a: { $ref: "#tag" }, b: { $ref: "#inner" }, c: { type: "object", properties: { d: { $anchor: "inner", type: "number" } } }, e: { $anchor: "self", type: "array", items: { $ref: "#self" } } }, additionalProperties: false, $defs: { tag: { $anchor: "tag", type: "string" } } }),
-    "export interface output {\n  a?: Tag | undefined;\n  b?: number | undefined;\n  c?: {\n    d?: number | undefined;\n    [key: string]: unknown;\n  } | undefined;\n  e?: unknown[][] | undefined;\n}\n\nexport type Tag = string;",
+    "export interface output {\n  a?: Tag | undefined;\n  b?: number | undefined;\n  c?: {\n    d?: number | undefined;\n  } | undefined;\n  e?: unknown[][] | undefined;\n}\n\nexport type Tag = string;",
   );
 });
 
@@ -242,7 +245,13 @@ test("every emitted declaration type-checks", () => {
 /**
  * Each sample the validator accepts is assigned to the schema's type, and `use`, TypeScript run
  * against `output`, must type-check: the type admits every value the validator accepts. A sample is
- * JSON, or JavaScript source text in `sources` for a value JSON cannot write (`undefined`).
+ * JSON, or JavaScript source text in `sources` for a value JSON cannot write (`undefined`). The
+ * type admits it as TypeScript's assignability has it, short of its two checks for a likely mistake,
+ * which refuse an undeclared key of an open object as of a closed one: a sample is assigned through
+ * a call, `admit()`, which keeps its literals' types and is no object literal for the excess-property
+ * check to read, and to `Admitted<output>`, each object member of which is intersected with `object`,
+ * which is not weak, so a value that shares no key with an object whose keys are all optional meets
+ * no weak-type check (TS2559) either, while a primitive is still refused there.
  * `compilerOptions` are added to tsc's. Returns how many samples of each schema were accepted, so a
  * test can tell its samples are not all refused.
  */
@@ -258,7 +267,7 @@ async function agrees(cases: { schema: Record<string, unknown>; samples: unknown
     const accepted = texts.filter((text) => validator.is(new Function(`return (${text});`)()));
     counts.push(accepted.length);
     const types = schemaDeclarations(schema as never, undefined, drafts[schema["$schema"] as string] ?? "draft-07");
-    writeFileSync(join(dir, `s${i}.ts`), [types, ...accepted.map((text, j) => `export const accepted${j}: output = ${text};`), use, ""].join("\n"));
+    writeFileSync(join(dir, `s${i}.ts`), [types, "declare function admit<T>(value: T): T;", "type Admitted<T> = T extends object ? T & object : T;", ...accepted.map((text, j) => `export const accepted${j}: Admitted<output> = admit(${text});`), use, ""].join("\n"));
   }
   writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, target: "esnext", module: "nodenext", types: [], ...compilerOptions }, include: ["*.ts"] }));
   const { status, out } = run(TSC, ["-p", join(dir, "tsconfig.json")]);
@@ -278,7 +287,7 @@ test("if/then/else on a required property's listed values is a union TypeScript 
   };
   assert.equal(
     emit(schema),
-    'export type output = {\n  kind: "click" | "visit";\n  at: string;\n  [key: string]: unknown;\n} & (({ kind: "click" } & {\n  x: number;\n  [key: string]: unknown;\n}) | ({ kind: "visit" } & {\n  url: string;\n  [key: string]: unknown;\n}));',
+    'export type output = {\n  kind: "click" | "visit";\n  at: string;\n} & (({ kind: "click" } & {\n  x: number;\n}) | ({ kind: "visit" } & {\n  url: string;\n}));',
   );
   // `allOf` members that hold a conditional each, an `enum` test, a `$ref` to the values, and a value no test names.
   const chain = {
@@ -291,11 +300,11 @@ test("if/then/else on a required property's listed values is a union TypeScript 
     ],
     $defs: { kind: { enum: ["click", "visit", "leave", "idle"] } },
   };
-  assert.match(emit(chain), /\| \(\{ kind: "leave" \} & \{\n  url: string;\n  \[key: string\]: unknown;\n\}\) \| \{ kind: "idle" \}\);/);
+  assert.match(emit(chain), /\| \(\{ kind: "leave" \} & \{\n  url: string;\n\}\) \| \{ kind: "idle" \}\);/);
   // A `then: false` leaves its value out; a test with `type` beside its values passes only those of that type.
   assert.equal(
     emit({ type: "object", properties: { n: { enum: [1, "1", 2] } }, required: ["n"], if: { properties: { n: { type: "string", enum: ["1", 2] } } }, then: false }),
-    'export type output = {\n  n: 1 | "1" | 2;\n  [key: string]: unknown;\n} & ({ n: 1 } | { n: 2 });',
+    'export type output = {\n  n: 1 | "1" | 2;\n} & ({ n: 1 } | { n: 2 });',
   );
 });
 
@@ -438,7 +447,7 @@ test("a required key that `properties` does not list takes the type of the patte
   assert.equal(emit({ type: "object", required: ["a", "x1"], patternProperties: { "^x": { type: "number" } }, additionalProperties: false }), "export interface output {\n  a: never;\n  x1: number;\n  [key: string]: number;\n}");
   assert.equal(emit({ type: "object", required: ["a"], unevaluatedProperties: false }), "export interface output {\n  a: never;\n}");
   // Without additionalProperties, any value.
-  assert.equal(emit({ type: "object", required: ["a"] }), "export interface output {\n  a: unknown;\n  [key: string]: unknown;\n}");
+  assert.equal(emit({ type: "object", required: ["a"] }), "export interface output {\n  a: unknown;\n}");
   // A pattern this runtime cannot read may or may not match: both types.
   assert.equal(emit({ type: "object", required: ["a"], patternProperties: { "(?<": { type: "number" } }, additionalProperties: { type: "string" } }), "export interface output {\n  a: number | string;\n  [key: string]: number | string;\n}");
   const counts = await agrees([

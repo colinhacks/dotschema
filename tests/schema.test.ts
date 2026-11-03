@@ -341,7 +341,7 @@ test("a __proto__ key in properties is checked, which ajv does not do itself, an
   // accepted `{ "__proto__": "foo" }` for `{ "type": "number" }` (the Test Suite's properties.json [5]); the copy ajv compiles
   // checks it under `patternProperties` too. Each schema written as text: in an object literal, `__proto__` would set the prototype.
   const cases = [
-    ['{ "type": "object", "properties": { "__proto__": { "type": "string" }, "a": { "type": "number" } }, "required": ["__proto__"] }', /\n  __proto__: string;\n  a\?: number \| undefined;\n  \[key: string\]: unknown;\n/, [['{ "__proto__": 1 }', false], ['{ "__proto__": "x" }', true], ["{}", false]]],
+    ['{ "type": "object", "properties": { "__proto__": { "type": "string" }, "a": { "type": "number" } }, "required": ["__proto__"] }', /\n  __proto__: string;\n  a\?: number \| undefined;\n\}/, [['{ "__proto__": 1 }', false], ['{ "__proto__": "x" }', true], ["{}", false]]],
     ['{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "additionalProperties": false }', /\{\n  __proto__\?: string \| undefined;\n\}/, [['{ "__proto__": "x" }', true], ['{ "__proto__": 1 }', false], ["{}", true], ['{ "b": 1 }', false]]],
     ['{ "type": "object", "properties": { "__proto__": { "type": "string" } }, "required": ["__proto__"], "additionalProperties": { "type": "number" } }', /\n  __proto__: string;\n  \[key: string\]: number \| string;\n/, [['{ "__proto__": 1 }', false], ['{ "__proto__": "x", "b": 1 }', true]]],
     // A pattern `__proto__`, which ajv skipped too, matches every key that holds it.
@@ -357,7 +357,7 @@ test("a __proto__ key in properties is checked, which ajv does not do itself, an
   }
   // An `if` that tests the key's value tests it, so the type narrows on it as on any listed property.
   const conditional = '{ "type": "object", "properties": { "__proto__": { "enum": ["a", "b"] } }, "required": ["__proto__"], "if": { "properties": { "__proto__": { "const": "a" } } }, "then": { "required": ["t"] } }';
-  assert.match(schemaTypes(conditional, PATH).types, /\ntype UserInput = \{\n  __proto__: "a" \| "b";\n  \[key: string\]: unknown;\n\} & \(\(\{ __proto__: "a" \} & \{\n  t: unknown;/);
+  assert.match(schemaTypes(conditional, PATH).types, /\ntype User = \{\n  __proto__: "a" \| "b";\n\} & \(\(\{ __proto__: "a" \} & \{\n  t: unknown;/);
   const { default: c } = await evaluate(schemaCode(conditional, PATH).code);
   assert.deepEqual(['{ "__proto__": "b" }', '{ "__proto__": "a" }', '{ "__proto__": "a", "t": 1 }'].map((value) => c.is(JSON.parse(value))), [true, false, true]);
 });
@@ -908,7 +908,7 @@ test("a $ref names a schema resource by its $id, absolute or relative to the $id
   });
   const { types, problems } = schemaTypes(source, PATH);
   assert.deepEqual(problems, []);
-  assert.match(types, /\ninterface UserInput \{\n  a\?: ItemInput \| undefined;\n  b\?: number \| undefined;\n  c\?: number \| undefined;\n  d\?: number \| undefined;\n/);
+  assert.match(types, /\ninterface UserInput \{\n  a\?: Item \| undefined;\n  b\?: number \| undefined;\n  c\?: number \| undefined;\n  d\?: number \| undefined;\n/);
   assert.match(types, /\nexport interface Item \{\n  n: number;\n/);
   const { code, problems: built } = schemaCode(source, PATH);
   assert.deepEqual(built, []);
