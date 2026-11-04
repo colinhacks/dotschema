@@ -13,18 +13,22 @@
 //   answer is every format dotschema has, and each row's verdict from the module dotschema builds
 //   for `{ "format": … }`.
 // - `keywords`: asked for when the page has a keyword table; the answer is every keyword of the drafts
-//   dotschema reads: the ones ajv's class for each draft knows, without ajv's own `$async`, `nullable`
+//   dotschema reads: the ones ajv's class for each draft knows (ajv, the repository's development
+//   dependency, is the tests' reference for the engine), without ajv's own `$async`, `nullable`
 //   and `id`, which no draft dotschema reads defines and src/schema.ts takes out of every schema, and
 //   with `$anchor`, which ajv reads where it resolves a `$ref` (compile/resolve.js) and not as a rule.
-// - `bundles`: a file written into its directory beside the schema files it sees, and esbuild's
-//   analysis of it bundled and minified with dotschema's esbuild plugin (esbuild, the repository's
-//   development dependency, as its own resolution from here finds it).
+// - `bundles`: a file written into its directory beside the schema files it sees, with a package.json
+//   setting `validators` where the request names it, and esbuild's analysis of it bundled and
+//   minified with dotschema's esbuild plugin (esbuild, the repository's development dependency, as
+//   its own resolution from here finds it), every file of dotschema's src/, its run time and formats,
+//   counted as one input, `dotschema`, as an app's bundle holds them from its one package.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import dotschema from "../../src/esbuild.ts";
-import { FORMATS } from "../../src/formats/index.ts";
+import { formatDefinition, FORMATS } from "../../src/formats/index.ts";
 import { loader } from "../../src/loader.ts";
 import { schemaCode } from "../../src/schema.ts";
 import { standalone } from "../../src/core/standalone.ts";
@@ -36,7 +40,7 @@ type Request = {
   diagnostics?: { dir: string; files: File[]; file: File }[];
   formats?: { format: string; example: string }[];
   keywords?: boolean;
-  bundles?: { dir: string; files: File[]; entry: File }[];
+  bundles?: { dir: string; files: File[]; entry: File; validators?: string }[];
 };
 
 let input = "";
@@ -89,12 +93,12 @@ for (const item of request.diagnostics ?? []) {
 }
 
 const require = createRequire(import.meta.url);
+// The repository's own package, which resolves `dotschema/...` to its files by its own name.
+const repository = createRequire(new URL("../../package.json", import.meta.url));
+/** A module's code with each `dotschema/...` it imports resolved to the repository's file, which a `data:` URL cannot resolve. */
+const linked = (code: string) => code.replace(/^(import [^;\n]* from )"(dotschema\/[^"]+)";$/gm, (_, head: string, specifier: string) => `${head}${JSON.stringify(pathToFileURL(repository.resolve(specifier)).href)};`);
 /** A format of numbers (`int32`) checks a number; every other format a string. */
-function isNumberFormat(name: string): boolean {
-  const format = FORMATS[name];
-  if (!format || format === true || format instanceof RegExp) return false;
-  return (require(`../../src/formats/${format.file}`) as { type?: string }).type === "number";
-}
+const isNumberFormat = (name: string): boolean => (formatDefinition(name) as { type?: string } | undefined)?.type === "number";
 
 const verdicts = [];
 for (const { format, example } of request.formats ?? []) {
@@ -108,7 +112,7 @@ for (const { format, example } of request.formats ?? []) {
     verdicts.push({ format, ok: false, why: problems.map((p) => p.message).join("; ") });
     continue;
   }
-  const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as { default: { is(value: unknown): boolean } };
+  const module = (await import(`data:text/javascript;base64,${Buffer.from(linked(code)).toString("base64")}`)) as { default: { is(value: unknown): boolean } };
   verdicts.push({ format, ok: module.default.is(value), why: `${JSON.stringify(value)} is refused` });
 }
 
@@ -128,9 +132,27 @@ const keywords = request.keywords
     ]
   : undefined;
 
+// dotschema's own files, its run time and formats, which an app's bundle holds from its one package.
+const SOURCES = path.resolve(import.meta.dirname, "../../src") + path.sep;
+/** The metafile with every input from dotschema's src/ counted as one, `dotschema`, in each output. */
+function grouped(metafile: esbuild.Metafile, dir: string): esbuild.Metafile {
+  const outputs = Object.fromEntries(
+    Object.entries(metafile.outputs).map(([name, output]) => {
+      const inputs: Record<string, { bytesInOutput: number }> = {};
+      for (const [input, { bytesInOutput }] of Object.entries(output.inputs)) {
+        const key = path.resolve(dir, input).startsWith(SOURCES) ? "dotschema" : input;
+        inputs[key] = { bytesInOutput: (inputs[key]?.bytesInOutput ?? 0) + bytesInOutput };
+      }
+      return [name, { ...output, inputs }];
+    }),
+  );
+  return { ...metafile, outputs };
+}
+
 const bundles = [];
 for (const item of request.bundles ?? []) {
   write(item.dir, [...item.files, item.entry]);
+  if (item.validators) writeFileSync(path.join(item.dir, "package.json"), JSON.stringify({ dotschema: { validators: item.validators } }) + "\n");
   const result = await esbuild.build({
     absWorkingDir: item.dir,
     entryPoints: [item.entry.name],
@@ -144,7 +166,7 @@ for (const item of request.bundles ?? []) {
     outfile: path.posix.join("dist", item.entry.name.replace(/\.[^.]+$/, ".mjs")),
     plugins: [dotschema()],
   });
-  bundles.push(await esbuild.analyzeMetafile(result.metafile));
+  bundles.push(await esbuild.analyzeMetafile(grouped(result.metafile, item.dir)));
 }
 
 process.stdout.write(JSON.stringify({ projects, diagnostics, formats: request.formats ? { all: Object.keys(FORMATS), verdicts } : undefined, keywords, bundles }));

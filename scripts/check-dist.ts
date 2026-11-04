@@ -44,7 +44,7 @@ const devDependencies = { typescript: "7.1.0-dev.20261002.1", "@types/node": "^2
 
 // The manifest's ranges, each `^x.y.z` (scripts/build.ts); under `--lowest`, the floor of each, which
 // every project overrides dotschema's dependencies to, by pnpm's `parent>child` selector in npm's
-// `overrides` field, which nub reads, so ajv 6 beside it (below) keeps its version.
+// `overrides` field, which nub reads, so a package of the project's own by the same name keeps its version.
 const ranges: Record<string, string> = JSON.parse(readFileSync(join(dist, "package.json"), "utf8")).dependencies;
 const lowest = process.argv.includes("--lowest");
 const floors = Object.fromEntries(Object.entries(ranges).map(([dep, range]) => [dep, range.replace(/^\^/, "")]));
@@ -119,18 +119,20 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
 }
 
 // lab/basic in a hoisted (npm-style) layout beside ajv 6, as npm lays out a project with eslint
-// (which depends on ajv ^6): ajv 6 at the top and ajv 8 under dotschema, which must compile with its
-// own. Until 2026-10-20 ajv-formats, a dependency until 2026-10-26, sat at the top with ajv 8 below
-// it too and wrote the formats' code with that copy, which the compiling copy wrote out as JSON, and
-// every format it checked with a function (event.schema.jsonc's date-time and uri) threw when it ran
-// (DESIGN.md, "The validator").
+// (which depends on ajv ^6): ajv 6 at the top and no ajv under dotschema, which validates on its own
+// engine and reads no ajv of the project's. Until 2026-11-03 ajv 8 sat under dotschema, which had to
+// compile with its own copy; until 2026-10-20 ajv-formats, a dependency until 2026-10-26, sat at the
+// top with ajv 8 below it too and wrote the formats' code with that copy, which the compiling copy
+// wrote out as JSON, and every format it checked with a function (event.schema.jsonc's date-time and
+// uri) threw when it ran (DESIGN.md, "The validator").
 {
   const dir = project("basic-hoisted-ajv6", join(root, "lab", "basic"), { dotschema: tarball, ajv: "6.12.6" }, { installArgs: ["--node-linker", "hoisted"] });
   const version = (at: string) => run(process.execPath, ["-p", `require(${JSON.stringify(`./${at}/package.json`)}).version`], dir).trim();
-  const versions = ["node_modules/ajv", "node_modules/dotschema/node_modules/ajv"].map(version);
-  if (!versions[0]!.startsWith("6.") || !versions[1]!.startsWith("8.")) throw new Error(`basic-hoisted-ajv6: expected ajv 6 at the top and ajv 8 below it, found ${versions.join(", ")}`);
+  const top = version("node_modules/ajv");
+  const below = existsSync(join(dir, "node_modules/dotschema/node_modules/ajv"));
+  if (!top.startsWith("6.") || below) throw new Error(`basic-hoisted-ajv6: expected ajv 6 at the top and no ajv below dotschema, found ajv ${top} at the top${below ? " and one below dotschema" : ""}`);
   check("basic-hoisted-ajv6", dir, [preload(EVENTS), preload(VALIDATE), [process.execPath, ["build-esbuild.ts"], "node_modules=0"], bundled(EVENTS), bundled(VALIDATE)]);
-  console.log(`basic-hoisted-ajv6: type-checked, ran under the preload and bundled, hoisted beside ajv ${versions[0]}, with ajv ${versions[1]} below it`);
+  console.log(`basic-hoisted-ajv6: type-checked, ran under the preload and bundled, hoisted beside ajv ${top}, with no ajv below dotschema`);
 }
 
 // lab/bundlers reads lab/basic's schemas from the copy beside it, work/basic, above; the bundlers come from the registry.
@@ -163,7 +165,8 @@ const bundled = (expected: string): [string, string[], string] => [process.execP
     [join(dir, "node_modules/.bin/next"), ["build", ...args], "prerendered as static content"],
     ["cat", [".next/server/app/index.html"], SERVER],
     ["cat", [".next/server/app/index.html"], CLIENT],
-    ["grep", ["-rl", "must NOT have fewer than 1 characters", ".next/static/chunks"], ".next/static/chunks/"],
+    // The engine writes the message from its template, so the chunk holds the text before the count.
+    ["grep", ["-rl", "must NOT have fewer than ", ".next/static/chunks"], ".next/static/chunks/"],
   ];
   check("nextjs", dir, [...next([]), ...next(["--webpack"])]);
   console.log("nextjs: next build with Turbopack and with webpack through withDotschema, the type check run inside it, the validators in the server's and the browser's modules, from the dotschema tarball, with no warning");

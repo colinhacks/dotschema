@@ -14,12 +14,6 @@ You'll need:
 - **Node 24 or later.**
 
 ```sh
-npm install -D dotschema typescript@beta
-```
-
-If your app runs under the preload, not as a bundle, dotschema builds each schema's module at run time, so install it as a dependency:
-
-```sh
 npm install dotschema
 npm install -D typescript@beta
 ```
@@ -275,6 +269,24 @@ export default {
 
 </Tab>
 </Tabs>
+
+### Validators
+
+Each validator compiles to JavaScript the first time it runs, and is interpreted where code can't be compiled, as in a Cloudflare Worker or a page whose Content Security Policy refuses `eval`.
+
+To choose for yourself, set `validators` in your app's `package.json`:
+
+```jsonc title="package.json"
+{
+  "dotschema": { "validators": "interpret" } // [!code ++]
+}
+```
+
+| Value | Each validator |
+| --- | --- |
+| `"jit"` | Compiles to JavaScript the first time it runs, or is interpreted where code can't be compiled. The default. |
+| `"interpret"` | Is interpreted, and never compiled, in a smaller bundle. |
+| `"aot"` | Is compiled when its module is built, so nothing is compiled at run time, in a larger bundle. |
 
 ### Editors
 

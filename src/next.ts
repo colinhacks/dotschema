@@ -34,7 +34,7 @@ type NextConfig = object & {
 };
 
 // The loader's extensions, written out rather than read from the loader, which would load the
-// parsers and ajv into next.config.ts; a test holds the list to the loader's.
+// parsers and the engine into next.config.ts; a test holds the list to the loader's.
 export const EXTENSIONS = ["schema.jsonc"];
 const GLOB = "*.schema.jsonc";
 const TEST = /\.schema\.jsonc$/;

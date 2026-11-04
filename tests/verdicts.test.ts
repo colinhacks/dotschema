@@ -9,8 +9,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileS
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseSchemaFile } from "../src/parse.ts";
-import { filesOf, schemaCode, withDiscriminators } from "../src/schema.ts";
-import { evaluate, ROOT } from "./helpers.ts";
+import { filesOf, withDiscriminators } from "../src/schema.ts";
+import { evaluate, ROOT, schemaCode } from "./helpers.ts";
 
 const PATH = join(ROOT, "tests/fixtures/verdicts.schema.jsonc");
 const D07 = "http://json-schema.org/draft-07/schema#";
@@ -134,22 +134,20 @@ test(".is() and .validate() give the same verdict on every value, for every sche
   assert.ok(checked > 10000, String(checked));
 });
 
-test(".is() confirms a pass with .validate()'s validator where ajv's first-failure code passes [] for contains beside a tuple", async () => {
+test(".is() refuses [] for contains beside a tuple, which ajv's first-failure code passed and the module confirmed with .validate()'s until the engine", async () => {
   for (const schema of INLINE.slice(0, 3)) {
-    const { module, code } = await build(JSON.stringify(schema));
-    assert.match(code, /^const __confirm = true;$/m);
+    const { module } = await build(JSON.stringify(schema));
     const empty = schema === INLINE[2] ? { a: [] } : [];
     assert.equal(module.is(empty), false, JSON.stringify(schema));
     assert.deepEqual(module.validate(empty).issues?.map((issue) => issue.keyword), ["contains"]);
     assert.equal(module.is(schema === INLINE[2] ? { a: ["x", 1, 2] } : ["x", 1]), true);
   }
-  // Only there: `contains` alone, and a tuple alone, are not confirmed.
-  assert.match((await build(JSON.stringify({ contains: { type: "number" } }))).code, /^const __confirm = false;$/m);
-  assert.match((await build(JSON.stringify({ type: "array", items: { type: "string" } }))).code, /^const __confirm = false;$/m);
+  // `contains` alone refuses [], and a tuple alone takes it.
+  assert.equal((await build(JSON.stringify({ contains: { type: "number" } }))).module.is([]), false);
+  assert.equal((await build(JSON.stringify({ type: "array", items: { type: "string" } }))).module.is([]), true);
   // In a file the schema refers to.
   const { path, source } = project({ "list.schema.jsonc": { type: "object", properties: { tags: { $ref: "./tags.schema.jsonc" } } }, "tags.schema.jsonc": { items: [{ type: "string" }], contains: { const: 1 } } }, "list.schema.jsonc");
-  const { module, code } = await build(source, path);
-  assert.match(code, /^const __confirm = true;$/m);
+  const { module } = await build(source, path);
   assert.equal(module.is({ tags: [] }), false);
 });
 

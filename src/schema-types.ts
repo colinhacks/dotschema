@@ -388,7 +388,7 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
     return local;
   }
 
-  /** Where a `$ref` points: the document and the pointer into it, a JSON Pointer's or an anchor's (`fragmentPath`); undefined for a URL, a file that cannot be read, an anchor ajv does not resolve or a malformed pointer. */
+  /** Where a `$ref` points: the document and the pointer into it, a JSON Pointer's or an anchor's (`fragmentPath`); undefined for a URL, a file that cannot be read, an anchor nothing declares or a malformed pointer. */
   function locate(ref: string): { document: Document; path: string[] } | undefined {
     let document = current;
     let fragment = ref === "" ? "" : ref.startsWith("#") ? ref.slice(1) : undefined;
@@ -440,8 +440,8 @@ export function schemaModuleTypes(root: Value, files?: SchemaFiles, draft?: Draf
   }
 
   function refType(ref: string, indent: string, inPlace?: { within: ReadonlySet<JsonType>; closing: Closing }): string {
-    // A URL, a file that cannot be read, an anchor ajv does not resolve or a malformed pointer is
-    // unknown, as ajv reports the last two. An anchor is the schema it is declared in, by the rules
+    // A URL, a file that cannot be read, an anchor nothing declares or a malformed pointer is
+    // unknown, and a problem of the build's. An anchor is the schema it is declared in, by the rules
     // of a pointer to it: the root and a definition by name, anything else inlined. A reference
     // that is a part of an object closed under `unevaluatedProperties` is always inlined, without
     // the index signature its name would bring, since the keys it evaluates are the object's.

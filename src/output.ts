@@ -4,7 +4,7 @@
 // no schema of an open object lists dropped, so its type is the schema's output type. Nothing is
 // changed in place: an object or array is copied where something under it changes, and the value
 // given comes back itself where nothing does. The schemas are read here, when the module is built,
-// into a plan the module's run time (`outputRuntime`) walks beside the value.
+// into a plan the run time (src/runtime/output.ts) walks beside the value.
 import type { Problem } from "./core/problems.ts";
 import type { Value } from "./core/serialize.ts";
 import { fileOf, fragmentPath, pointTo, resolvedSchemas, type Files } from "./refs.ts";
@@ -363,16 +363,19 @@ export function outputPlan(files: Files, rootPath: string, draft: Draft, entries
   return { nodes: out, roots: roots.map(to), tests, pre: roots.some((root) => root !== null && fills.has(root)), problems, at };
 }
 
-/** The parts of the run time a module's plan uses (`runtimeParts`), so a module carries no other. */
+/**
+ * The parts of the walk a module's plan uses (`runtimeParts`): where it uses none but the reading of
+ * one object's node, the module imports `postOne` in place of the whole `post` (src/runtime/output.ts).
+ */
 export interface Parts {
-  /** `__pre`: something fills or transforms a value. */
+  /** `pre`: something fills or transforms a value. */
   pre: boolean;
   /** `allOf`'s members and a `$ref`'s target (`m`), each `anyOf` and `oneOf` (`u`), `if` (`c`), `dependentSchemas` (`e`). */
   m: boolean;
   u: boolean;
   c: boolean;
   e: boolean;
-  /** An `if` the run time tests itself, by `const` or `enum` (`__passes`). */
+  /** An `if` the run time tests itself, by `const` or `enum` (`passes`). */
   passes: boolean;
   /** `patternProperties` (`q`), the schema of every other key (`a`), a tuple or the items of an array (`t`, `i`). */
   q: boolean;
@@ -384,9 +387,6 @@ export interface Parts {
   /** A property's schema that is a node of its own. */
   nested: boolean;
 }
-
-/** Every part, for a run time that reads any plan, as the type check's check of each `default` runs it. */
-export const EVERY_PART: Parts = { pre: true, m: true, u: true, c: true, e: true, passes: true, q: true, a: true, items: true, x: true, y: true, nested: true };
 
 /** The parts `plan` uses. */
 export function runtimeParts(plan: Plan): Parts {
@@ -405,271 +405,4 @@ export function runtimeParts(plan: Plan): Parts {
     y: has((node) => node.y),
     nested: has((node) => node.p?.some(([, child]) => child !== null)),
   };
-}
-
-/**
- * The run time that walks a plan beside a value, which a module carries where a schema lists a key
- * or changes a value, with only the `parts` its plan uses: `__pre`, before the value is validated,
- * fills each property's `default` it lacks (or holds `undefined`) and applies each `transform`, where
- * the schema applies (`allOf`, a `$ref`, the member of an `anyOf` or `oneOf` its tag names or that
- * passes its validator once filled, `then` or `else` as `if` passes, a present key's
- * `dependentSchemas`); `__post`, once it passed, drops each property that holds `undefined`, which
- * ajv passed as absent, and each key of an open object that no schema there lists (every member of
- * an `anyOf` or `oneOf` read, but for the one its tag names). Each copies an object or array before
- * it changes it, once, and returns the value it was given where nothing changed. `N` is the module's
- * nodes, `T` its validators.
- */
-export function outputRuntime(parts: Parts): string {
-  const { pre, m, u, c, e, passes, q, a, items, x, y, nested } = parts;
-  const when = (condition: boolean, code: string) => (condition ? code : "");
-  // Where each node stands alone, an object whose properties hold nothing the plan reads, `__post`
-  // reads one node, as the whole one reads that plan.
-  if (!pre && !m && !u && !c && !e && !q && !a && !items && !nested)
-    return `
-const __isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const __post = (N, s, v) => {
-  if (!__isObject(v)) return v;
-  const open = !s.n && !s.o && ((s.p && s.p.length) || (s.r && s.r.length));
-  let c;
-  for (const k of Object.keys(v))
-    if (s.p && s.p.some((p) => p[0] === k) ? v[k] === undefined : open && !(s.r && s.r.includes(k))) {
-      c = c || { ...v };
-      delete c[k];
-    }
-  return c || v;
-};
-`;
-  return `
-const __own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-const __isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);${when(
-    q,
-    `
-const __patterns = new Map();
-const __matches = (source, key) => {
-  let re = __patterns.get(source);
-  if (!re) __patterns.set(source, (re = new RegExp(source, "u")));
-  return re.test(key);
-};`,
-  )}
-// Copy on write: \`v\` with \`k\` set to \`x\`, copied first unless this pass made it (\`fresh\`).
-const __write = (v, k, x, fresh) => {
-  if (__own(v, k) && Object.is(v[k], x)) return v;
-  const c = fresh.has(v) ? v : Array.isArray(v) ? v.slice() : { ...v };
-  fresh.add(c);
-  Object.defineProperty(c, k, { value: x, writable: true, enumerable: true, configurable: true });
-  return c;
-};
-const __without = (v, k, fresh) => {
-  const c = fresh.has(v) ? v : { ...v };
-  fresh.add(c);
-  delete c[k];
-  return c;
-};${when(
-    passes,
-    `
-// Whether a value passes an \`if\` that tests one property with \`const\` or \`enum\`.
-const __passes = (test, v) => (__isObject(v) ? (__own(v, test.k) ? test.v.includes(v[test.k]) : !test.q) : !test.o);`,
-  )}${when(
-    u,
-    `
-// The members of an \`anyOf\` or \`oneOf\` its tag names, or every member.
-const __members = (u, v) => (u.k === undefined ? u.b : u.b.filter((b, i) => __isObject(v) && __own(v, u.k) && u.v[i].includes(v[u.k])));`,
-  )}
-// The schemas of a key's value, in each node of \`all\`, as JSON Schema applies them.
-const __keyed = (all, k, out) => {
-  for (const s of all) {
-    const own = s.p && s.p.find((p) => p[0] === k);
-    if (own && own[1] !== null) out.push(own[1]);${when(
-      q,
-      `
-    let matched = false;
-    for (const [source, c] of s.q || [])
-      if (__matches(source, k)) {
-        matched = true;
-        if (c !== null) out.push(c);
-      }`,
-    )}${when(
-      a,
-      `
-    if (!own${q ? " && !matched" : ""} && s.a !== undefined) out.push(s.a);`,
-    )}
-  }
-  return out;
-};${when(
-    items,
-    `
-const __indexed = (all, i, out) => {
-  for (const s of all) {
-    const c = s.t && i < s.t.length ? s.t[i] : s.i;
-    if (c !== null && c !== undefined) out.push(c);
-  }
-  return out;
-};`,
-  )}${when(
-    pre && x,
-    `
-const __transformed = (n, s) => {
-  for (const t of n.x) {${
-    y
-      ? `
-    if (t === "toEnumCase") {
-      const lower = s.toLowerCase();
-      const found = n.y.find((y) => y[0] === lower);
-      if (found) s = found[1];
-    } else `
-      : `
-    `
-  }s = t === "trimLeft" ? s.trimStart() : t === "trimRight" ? s.trimEnd() : s[t]();
-  }
-  return s;
-};`,
-  )}${when(
-    pre,
-    `
-const __pre = (N, T, root, value) => {
-  const visit = (n, v, seen, fresh) => {${when(
-    x,
-    `
-    if (n.x && typeof v === "string") v = __transformed(n, v);`,
-  )}
-    if (__isObject(v)) {
-      for (const [k, d] of n.d || []) if (!__own(v, k) || v[k] === undefined) v = __write(v, k, d !== null && typeof d === "object" ? structuredClone(d) : d, fresh);
-      for (const k of Object.keys(v)) {
-        const x = v[k];
-        if (x === undefined) continue;
-        let y = x;
-        for (const c of __keyed([n], k, [])) if (N[c].f) y = visit(N[c], y, new Set(), fresh);
-        if (y !== x) v = __write(v, k, y, fresh);
-      }
-    }${when(
-      items,
-      ` else if (Array.isArray(v))
-      for (let i = 0; i < v.length; i++) {
-        const x = v[i];
-        let y = x;
-        for (const c of __indexed([n], i, [])) if (N[c].f) y = visit(N[c], y, new Set(), fresh);
-        if (y !== x) v = __write(v, i, y, fresh);
-      }`,
-    )}
-    // In place, once each where it applies to this value.
-    if (seen.has(n)) return v;
-    seen.add(n);${when(
-      m,
-      `
-    for (const m of n.m || []) if (N[m].f) v = visit(N[m], v, seen, fresh);`,
-    )}${when(
-      u,
-      `
-    for (const u of n.u || []) {
-      if (!u.f) continue;
-      if (u.k !== undefined) {
-        const b = __members(u, v)[0];
-        if (b !== undefined && b !== null && N[b].f) v = visit(N[b], v, seen, fresh);
-        continue;
-      }
-      // The first member that passes once filled, its filling kept.
-      for (let i = 0; i < u.b.length; i++) {
-        const b = u.b[i];
-        const tried = new Set();
-        const candidate = b !== null && N[b].f ? visit(N[b], v, new Set(seen), tried) : v;
-        if (T[u.t[i]](candidate)) {
-          for (const made of tried) fresh.add(made);
-          v = candidate;
-          break;
-        }
-      }
-    }`,
-    )}${when(
-      c,
-      `
-    if (n.c) {
-      const [, then, otherwise, test] = n.c;
-      const branch = test === null ? null : (typeof test === "number" ? T[test](v) : ${passes ? "__passes(test, v)" : "false"}) ? then : otherwise;
-      if (branch !== null && N[branch].f) v = visit(N[branch], v, seen, fresh);
-    }`,
-    )}${when(
-      e,
-      `
-    for (const [k, b] of n.e || []) if (N[b].f && __isObject(v) && __own(v, k)) v = visit(N[b], v, seen, fresh);`,
-    )}
-    return v;
-  };
-  return visit(root, value, new Set(), new Set());
-};`,
-  )}
-const __post = (N, root, value) => {
-  const fresh = new Set();
-  const visit = (nodes, v) => {
-    // Every schema that applies here: those given, and in place, what each applies.
-    const all = [];
-    const add = (n) => {
-      if (n === null || n === undefined) return;
-      const s = typeof n === "number" ? N[n] : n;
-      if (all.includes(s)) return;
-      all.push(s);${when(
-        m,
-        `
-      for (const m of s.m || []) add(m);`,
-      )}${when(
-        u,
-        `
-      for (const u of s.u || []) for (const b of __members(u, v)) add(b);`,
-      )}${when(
-        c,
-        `
-      if (s.c) {
-        const [test, then, otherwise, how] = s.c;
-        add(test);${
-          passes
-            ? `
-        if (how !== null && typeof how === "object") add(__passes(how, v) ? then : otherwise);
-        else {
-          add(then);
-          add(otherwise);
-        }`
-            : `
-        add(then);
-        add(otherwise);`
-        }
-      }`,
-      )}${when(
-        e,
-        `
-      for (const [k, b] of s.e || []) if (__isObject(v) && __own(v, k)) add(b);`,
-      )}
-    };
-    for (const n of nodes) add(n);
-    if (__isObject(v)) {
-      const open = !all.some((s) => s.n || s.o) && all.some((s) => (s.p && s.p.length) || (s.r && s.r.length));
-      for (const k of Object.keys(v)) {
-        const x = v[k];
-        const declared = all.some((s) => s.p && s.p.some((p) => p[0] === k));
-        if (x === undefined && declared) {
-          v = __without(v, k, fresh);
-          continue;
-        }
-        if (open && !declared && !all.some((s) => (s.r && s.r.includes(k))${q ? " || (s.q && s.q.some((q) => __matches(q[0], k)))" : ""})) {
-          v = __without(v, k, fresh);
-          continue;
-        }
-        const children = __keyed(all, k, []);
-        if (!children.length) continue;
-        const y = visit(children, x);
-        if (y !== x) v = __write(v, k, y, fresh);
-      }
-    }${when(
-      items,
-      ` else if (Array.isArray(v))
-      for (let i = 0; i < v.length; i++) {
-        const children = __indexed(all, i, []);
-        if (!children.length) continue;
-        const y = visit(children, v[i]);
-        if (y !== v[i]) v = __write(v, i, y, fresh);
-      }`,
-    )}
-    return v;
-  };
-  return visit([root], value);
-};
-`;
 }

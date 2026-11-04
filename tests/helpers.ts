@@ -1,7 +1,10 @@
 import { spawnSync } from "node:child_process";
+import { stripTypeScriptTypes } from "node:module";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
+import type { LoadOptions } from "../src/core/universal.ts";
 import { formatDefinitions } from "../src/formats/index.ts";
+import { schemaCode as build } from "../src/schema.ts";
 
 export const ROOT = fileURLToPath(new URL("..", import.meta.url));
 export const TSC = `${ROOT}node_modules/.bin/tsc`;
@@ -12,9 +15,23 @@ export function withFormats<T extends { addFormat(name: string, format: unknown)
   return ajv;
 }
 
-/** Evaluates generated module code as an ES module. */
+/**
+ * How the tests' modules run their validators: `jit`, the default, or the mode `DOTSCHEMA_VALIDATORS`
+ * names, under which tests/modes.test.ts runs the tests of the module again, once for each other mode.
+ */
+export const VALIDATORS: NonNullable<LoadOptions["validators"]> = (process.env["DOTSCHEMA_VALIDATORS"] as NonNullable<LoadOptions["validators"]> | undefined) ?? "jit";
+
+/** `schemaCode` (src/schema.ts) in the tests' mode, unless the options name another. */
+export const schemaCode = (source: string, path: string, options: LoadOptions & { discriminators?: boolean } = {}) => build(source, path, { validators: VALIDATORS, ...options });
+
+/**
+ * Evaluates generated module code as an ES module. A module imports its run time and its formats
+ * from `dotschema/...`, which a `data:` URL does not resolve, so each such specifier is resolved from
+ * here first, to the repository's own files: `dotschema` is the repository, linked into itself.
+ */
 export async function evaluate(code: string): Promise<Record<string, any>> {
-  return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+  const linked = code.replace(/^(import [^;\n]* from )"(dotschema\/[^"]+)";$/gm, (_, head: string, specifier: string) => `${head}${JSON.stringify(import.meta.resolve(specifier))};`);
+  return import(`data:text/javascript;base64,${Buffer.from(linked).toString("base64")}`);
 }
 
 /**
@@ -34,3 +51,13 @@ export function run(command: string, args: string[], cwd = ROOT, extra: Record<s
   const result = spawnSync(command, args, { cwd, encoding: "utf8", env: env(extra) });
   return { status: result.status, out: stripVTControlCharacters(`${result.stdout}${result.stderr}${result.error ?? ""}`) };
 }
+
+/**
+ * What Rspack and Rollup need to bundle a schema's module in this repository, whose dotschema is
+ * its TypeScript sources, the run time a module imports among them: Rspack's own SWC loader for a
+ * `.ts` file, and for Rollup, which reads no TypeScript, Node's stripping of its types. webpack,
+ * esbuild, Vite and Rolldown read TypeScript themselves, and an installed dotschema is JavaScript.
+ */
+export const RSPACK_TYPESCRIPT = { test: /\.ts$/, loader: "builtin:swc-loader", options: { jsc: { parser: { syntax: "typescript" } } }, type: "javascript/auto" };
+export const ROLLUP_TYPESCRIPT = { name: "typescript", transform: (code: string, id: string) => (id.endsWith(".ts") ? { code: stripTypeScriptTypes(code), map: null } : null) };
+

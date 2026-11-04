@@ -4,10 +4,12 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CODES } from "../src/core/problems.ts";
-import { schemaCode, schemaTypes } from "../src/schema.ts";
-import { evaluate, ROOT, run } from "./helpers.ts";
+import { schemaTypes } from "../src/schema.ts";
+import { evaluate, ROOT, run, schemaCode, VALIDATORS } from "./helpers.ts";
 
 const PATH = join(ROOT, "tests/fixtures/user.schema.jsonc");
+/** The run time a module imports in the mode the tests run in (`DOTSCHEMA_VALIDATORS`): the JIT's, or the interpreter's, which links the checks an `aot` module carries. */
+const RUNTIME = VALIDATORS === "jit" ? "dotschema/runtime" : "dotschema/runtime/interpret";
 const SCHEMA = JSON.stringify({
   $schema: "https://json-schema.org/draft/2020-12/schema",
   title: "User",
@@ -17,15 +19,15 @@ const SCHEMA = JSON.stringify({
   additionalProperties: false,
 });
 
-test("the module validates with ajv's standalone code and imports nothing", async () => {
+test("the module imports the run time alone, and validates on dotschema's engine", async () => {
   const { code, problems } = schemaCode(SCHEMA, PATH);
   assert.deepEqual(problems, []);
-  assert.doesNotMatch(code, /^import /m);
+  assert.deepEqual(code.match(/^import .*$/gm), [`import { schemaModule, postOne } from "${RUNTIME}";`]);
   const { default: user, ...rest } = await evaluate(code);
   assert.deepEqual(Object.keys(rest), []);
   assert.equal(user.is({ name: "Ada" }), true);
   assert.equal(user.is({ name: "" }), false);
-  // uniqueItems over objects needs ajv's `equal` helper, which is inlined.
+  // uniqueItems over objects compares them deeply.
   assert.equal(user.is({ name: "Ada", tags: [{ a: 1 }, { a: 1 }] }), false);
   assert.equal(user.validate({ name: "", extra: 1 }).issues.length, 2);
   assert.equal(user["~standard"].validate({ tags: [] }).issues.length, 1);
@@ -33,6 +35,21 @@ test("the module validates with ajv's standalone code and imports nothing", asyn
   assert.equal(user["~standard"].vendor, "dotschema");
   assert.equal(user.schema.title, "User");
   assert.deepEqual(Object.keys(user), ["validate", "is", "schema", "~standard", "pick", "omit", "partial", "required", "keyof"]);
+});
+
+test("a change to a module's .schema, before its first check or after it, changes nothing its validators check", async () => {
+  const source = JSON.stringify({ type: "object", properties: { name: { type: "string", minLength: 1 }, role: { $ref: "#/$defs/role" } }, $defs: { role: { enum: ["admin", "member"] } } });
+  const { code, problems } = schemaCode(source, PATH);
+  assert.deepEqual(problems, []);
+  const { default: user, role } = await evaluate(code);
+  assert.equal(role.schema, user.schema.$defs.role);
+  user.schema.properties.name.minLength = 100;
+  user.schema.$defs.role.enum.push("guest");
+  assert.equal(user.is({ name: "x" }), true);
+  assert.equal(user.pick("name").is({ name: "x" }), true);
+  assert.equal(role.is("guest"), false);
+  user.schema.properties.name.type = "number";
+  assert.deepEqual(user.validate({ name: "x", role: "guest" }).issues.map((issue: { path: unknown[] }) => issue.path), [["role"]]);
 });
 
 test(".validate() reports every issue, each with ajv's message and keyword and its path, and nothing else", async () => {
@@ -103,13 +120,12 @@ test("the key of a missing, unexpected or misnamed property ends the path", asyn
   assert.deepEqual(await paths({ type: "array", items: { required: ["0"] } }, [{}]), [["required", [0, "0"]]]);
 });
 
-test(".is() stops at the first failure: it is a second validator, compiled without allErrors, beside .validate()'s", async () => {
+test(".is() stops at the first failure: it is the engine's check, beside the errors .validate() lists", async () => {
   const source = JSON.stringify({ type: "object", properties: { a: { type: "string" }, b: { type: "string" } } });
   const { code } = schemaCode(source, PATH);
-  // One table of run-time modules, two validators.
-  assert.equal(code.match(/^const __modules = /gm)?.length, 1);
-  assert.match(code, /^const __validateAll = /m);
-  assert.match(code, /^const __validateFirst = /m);
+  // One engine for the module, compiled from its schema; an `aot` module carries the check's code.
+  assert.equal(code.match(/\bschemaModule\(/g)?.length, 1);
+  assert.equal(/check: \(r\) =>/.test(code), VALIDATORS === "aot");
   const { default: s } = await evaluate(code);
   const read: string[] = [];
   const value = {
@@ -131,16 +147,11 @@ test(".is() stops at the first failure: it is a second validator, compiled witho
   assert.equal(s.validate, s["~standard"].validate);
 });
 
-test("a helper both validators require is inlined once", async () => {
-  const source = JSON.stringify({ type: "object", properties: { at: { type: "string", format: "date-time" }, name: { type: "string", minLength: 1 }, tags: { type: "array", uniqueItems: true } } });
+test("a format's file is imported once, though the root and a definition both use it", async () => {
+  const source = JSON.stringify({ type: "object", properties: { at: { type: "string", format: "date-time" }, name: { type: "string", minLength: 1 }, tags: { type: "array", uniqueItems: true }, later: { $ref: "#/definitions/later" } }, definitions: { later: { type: "string", format: "date-time" } } });
   const { code } = schemaCode(source, PATH);
-  // date-time's files, ucs2length and fast-deep-equal, each once, though both validators use them:
-  // as many modules as distinct ids required, ucs2length and fast-deep-equal among them.
-  const modules = code.match(/^function \(module, exports\) \{$/gm)!.length;
-  assert.equal(modules, new Set(code.match(/__require\(\d+\)/g)).size);
-  assert.ok(modules >= 3, String(modules));
-  assert.equal(code.match(/function ucs2length/g)!.length, 1);
-  assert.equal(code.match(/module\.exports = function equal/g)!.length, 1);
+  // date-time's file, which imports date's and time's itself, and the run time.
+  assert.deepEqual(code.match(/^import .*$/gm), [`import { schemaModule, postOne } from "${RUNTIME}";`, 'import __dateTime from "dotschema/formats/date-time";']);
   const { default: s } = await evaluate(code);
   assert.deepEqual([s.is({ at: "2026-10-20T22:14:00Z", name: "a", tags: [{}, { a: 1 }] }), s.is({ at: "yesterday" }), s.is({ name: "" }), s.is({ tags: [{}, {}] })], [true, false, false, false]);
   assert.deepEqual(s.validate({ at: "yesterday", name: "", tags: [{}, {}] }).issues.map((i: any) => i.keyword), ["format", "minLength", "uniqueItems"]);
@@ -181,9 +192,11 @@ test("neither method throws where ajv does: .is() is false, and .validate() give
       return issue.message;
     });
   };
-  // Any JSON value, recursively: JSON.parse of 3000 nested arrays, 6 KB of text, outruns ajv's stack.
+  // Any JSON value, recursively: JSON.parse of 100,000 nested arrays, 200 KB of text, outruns the
+  // stack of each way of running a validator. ajv's ran out at 3000, as the interpreter's does; the
+  // JIT's code, which takes less of the stack for each level, checks 3000 and runs out by 30,000.
   const json = { $defs: { json: { anyOf: [{ type: ["null", "boolean", "number", "string"] }, { type: "array", items: { $ref: "#/$defs/json" } }, { type: "object", additionalProperties: { $ref: "#/$defs/json" } }] } }, $ref: "#/$defs/json" };
-  const deep = JSON.parse("[".repeat(3000) + "]".repeat(3000));
+  const deep = JSON.parse("[".repeat(100_000) + "]".repeat(100_000));
   const overflow = "could not be checked: Maximum call stack size exceeded";
   assert.deepEqual(await check(json, [deep]), [overflow]);
   // A value that refers to itself where the schema recurses, and uniqueItems over two such values.
@@ -430,9 +443,9 @@ test("a $ref to another file is followed: its type is imported from that file's 
   const { code, problems, watchFiles } = schemaCode(source, path);
   assert.deepEqual(problems, []);
   assert.deepEqual(watchFiles.sort(), [join(dir, "point.schema.jsonc"), tag]);
-  // ajv's standalone code embeds each schema's id; none is a path on the machine that built it.
+  // Each file is a schema resource under an id of its own; none is a path on the machine that built it.
   assert.ok(!code.includes(dir), "the module names no path");
-  assert.doesNotMatch(code, /^import /m);
+  assert.deepEqual(code.match(/^import .*$/gm), [`import { schemaModule, post } from "${RUNTIME}";`]);
   const { default: user } = await evaluate(code);
   assert.equal(user.is({ tag: "ab" }), true);
   assert.equal(user.is({ tag: "a" }), false); // the other file's minLength
@@ -492,7 +505,6 @@ test("a $ref to nothing, to no anchor, or to a value that is not a schema is a p
   const { path, source } = project({
     "user.schema.jsonc": {
       $schema: "https://json-schema.org/draft/2020-12/schema",
-      $anchor: "top",
       type: "object",
       properties: {
         a: { $ref: "#/properties/nope" },
@@ -500,9 +512,6 @@ test("a $ref to nothing, to no anchor, or to a value that is not a schema is a p
         c: { $ref: "./other.schema.jsonc#/required" },
         d: { $ref: "#nope" },
         e: { $ref: "./other.schema.jsonc#nope" },
-        // ajv 8.20.0 does not resolve an anchor at a file's root or inside prefixItems; the message gives the pointer it does.
-        f: { $ref: "#top" },
-        g: { type: "array", prefixItems: [{ $anchor: "first", type: "string" }], items: { $ref: "#first" } },
       },
       required: ["a"],
     },
@@ -518,12 +527,22 @@ test("a $ref to nothing, to no anchor, or to a value that is not a schema is a p
       ['The $ref "./other.schema.jsonc#/required" points to an array, not a schema: a $ref points to an object or a boolean.', at("./other.schema.jsonc#/required"), 30, CODES.schema],
       ['The $ref "#nope" names no anchor: ./user.schema.jsonc declares no anchor "nope".', at("#nope"), 5, CODES.schema],
       ['The $ref "./other.schema.jsonc#nope" names no anchor: ./other.schema.jsonc declares no anchor "nope".', at("./other.schema.jsonc#nope"), 25, CODES.schema],
-      ['The $ref "#top" names an anchor that ajv does not resolve where ./user.schema.jsonc declares it, at its root: write "#" in its place.', at("#top"), 4, CODES.schema],
-      ['The $ref "#first" names an anchor that ajv does not resolve where ./user.schema.jsonc declares it, inside prefixItems: write "#/properties/g/prefixItems/0" in its place.', at("#first"), 6, CODES.schema],
     ],
   );
-  assert.match(types, /\n  a: unknown;\n  b\?: unknown;\n  c\?: unknown;\n  d\?: unknown;\n  e\?: unknown;\n  f\?: unknown;\n/);
+  assert.match(types, /\n  a: unknown;\n  b\?: unknown;\n  c\?: unknown;\n  d\?: unknown;\n  e\?: unknown;\n/);
   assert.deepEqual(schemaCode(source, path).problems, problems);
+});
+
+test("an anchor at a file's root or inside prefixItems is the schema that declares it, which ajv did not resolve there", async () => {
+  // ajv 8.20.0 resolved neither, and until the engine each was a problem at the $ref that named it.
+  const source = JSON.stringify({ $schema: "https://json-schema.org/draft/2020-12/schema", $anchor: "top", type: "object", properties: { name: { type: "string" }, f: { $ref: "#top" }, g: { type: "array", prefixItems: [{ $anchor: "first", type: "string" }], items: { $ref: "#first" } } } });
+  const { types, problems } = schemaTypes(source, PATH);
+  assert.deepEqual(problems, []);
+  assert.match(types, /\ninterface User \{\n  name\?: string;\n  f\?: User;\n  g\?: \[string\?, \.\.\.string\[\]\];\n\}/);
+  const { code, problems: built } = schemaCode(source, PATH);
+  assert.deepEqual(built, []);
+  const { default: s } = await evaluate(code);
+  assert.deepEqual([s.is({ f: { name: "a", f: {} } }), s.is({ f: { name: 1 } }), s.is({ g: ["a", "b"] }), s.is({ g: ["a", 1] })], [true, false, true, false]);
 });
 
 test("a $ref that cannot be followed is a problem at the $ref, in both texts, and its type is unknown", () => {
@@ -656,8 +675,7 @@ test("an errorMessage, ajv-errors' keyword, is .validate()'s message in every dr
     const source = JSON.stringify($schema ? { $schema, ...messages } : messages);
     const { code, problems } = schemaCode(source, PATH);
     assert.deepEqual(problems, [], draft);
-    assert.doesNotMatch(code, /^import /m, draft);
-    assert.doesNotMatch(code, /[^_\w]require\(/, draft);
+    assert.deepEqual(code.match(/^import .*$/gm), [`import { schemaModule, postOne } from "${RUNTIME}";`], draft);
     const { default: s } = await evaluate(code);
     // A message for a property's `required`, which ajv-errors reports at the object, ends its path with the key.
     assert.deepEqual(s.validate({ name: 1, age: 9 }), {
@@ -686,14 +704,25 @@ test("an errorMessage, ajv-errors' keyword, is .validate()'s message in every dr
   assert.doesNotMatch(schemaCode(SCHEMA, PATH).code, /errorMessage/);
 });
 
-test("an errorMessage on a property keeps .pick() and the other object methods, with the message, and one on the object leaves them out", async () => {
+test("an errorMessage keeps .pick() and the other object methods, with the message, on a property and on the object", async () => {
   const { default: inner } = await evaluate(schemaCode(JSON.stringify({ type: "object", properties: { a: { type: "string", errorMessage: "a is text" }, b: { type: "number" } }, required: ["b"] }), PATH).code);
   assert.deepEqual(inner.pick("a").validate({ a: 1 }).issues, [{ message: "a is text", path: ["a"], keyword: "type" }]);
   assert.deepEqual(inner.partial().validate({ a: 1 }).issues, [{ message: "a is text", path: ["a"], keyword: "type" }]);
-  // The object's own message is in the function ajv compiled for the whole object, which the join does not run.
-  const { default: outer } = await evaluate(schemaCode(JSON.stringify({ type: "object", properties: { a: { type: "string" } }, required: ["a"], errorMessage: { required: "needs a" } }), PATH).code);
-  assert.deepEqual(Object.keys(outer), ["validate", "is", "schema", "~standard"]);
-  assert.deepEqual(outer.validate({}).issues, [{ message: "needs a", path: ["a"], keyword: "required" }]);
+  // The object's own message stays in the schema each method gives, which the engine compiles whole;
+  // until the engine, the object's methods joined one validator per property, which left it out, so
+  // such an object had none.
+  const { default: outer } = await evaluate(schemaCode(JSON.stringify({ type: "object", properties: { a: { type: "string" }, b: { type: "number" } }, required: ["a", "b"], errorMessage: { required: { a: "needs a", b: "needs b" }, properties: { b: "b is a number" } } }), PATH).code);
+  assert.deepEqual(Object.keys(outer), ["validate", "is", "schema", "~standard", "pick", "omit", "partial", "required", "keyof"]);
+  assert.deepEqual(outer.validate({}).issues, [{ message: "needs a", path: ["a"], keyword: "required" }, { message: "needs b", path: ["b"], keyword: "required" }]);
+  assert.deepEqual(outer.pick("a").validate({}).issues, [{ message: "needs a", path: ["a"], keyword: "required" }]);
+  assert.deepEqual(outer.partial().validate({ b: "x" }).issues, [{ message: "b is a number", path: ["b"], keyword: "type" }]);
+  // A template in a property's message reads the value from the property's level, as a whole object's
+  // validator does; the module of 45a7f5e refused `${0#}` there, compiling each property from level 0.
+  const { code, problems } = schemaCode(JSON.stringify({ type: "object", properties: { age: { type: "integer", minimum: 13, errorMessage: "${0#} must be 13 or older" } } }), PATH);
+  assert.deepEqual(problems, []);
+  const { default: templated } = await evaluate(code);
+  assert.deepEqual(templated.validate({ age: 9 }).issues, [{ message: '"age" must be 13 or older', path: ["age"], keyword: "minimum" }]);
+  assert.deepEqual(templated.pick("age").validate({ age: 9 }).issues, [{ message: '"age" must be 13 or older', path: ["age"], keyword: "minimum" }]);
 });
 
 test("a keyword ajv reads that the schema's draft does not define is ignored: $async, nullable, id, and another draft's", async () => {
@@ -743,21 +772,25 @@ test("a keyword ajv reads that the draft does not define is ignored in a file th
   assert.deepEqual([s.is({ tag: "a" }), s.is({ tag: null }), s.is({ tag: 1 })], [true, false, false]);
 });
 
-test("a 2020-12 $dynamicRef ajv resolves to the root in place of its anchor is a problem at the reference", async () => {
+test("a 2020-12 $dynamicRef that resolves in the dynamic scope is checked there, where ajv resolved it to the root, and typed unknown", async () => {
   const S = "https://json-schema.org/draft/2020-12/schema";
-  const message = (ref: string, fix: string) => `ajv resolves the $dynamicRef "${ref}" to the root of its schema, not where it points: ${fix}.`;
-  const anchored = (name: string) => `declare "$dynamicAnchor": "${name}" at the root of the schema, or write it as a $ref`;
-  // The anchor in `$defs`, and another of its name in another schema resource, so that the reference is dynamic: the
-  // validator checked the root's rules, and at the root recursed until the stack ran out.
+  // The anchor in `$defs`, and another of its name in another schema resource, so that the reference
+  // is dynamic: ajv checked the root's rules in its place, and at the root recursed until the stack
+  // ran out, which dotschema refused at the reference until the engine.
   const other = { $id: "https://example.com/other", $dynamicAnchor: "content" };
-  for (const [schema, ref, fix] of [
-    [{ $schema: S, $defs: { content: { $dynamicAnchor: "content", type: "string" }, other }, type: "array", items: { $dynamicRef: "#content" } }, "#content", anchored("content")],
-    [{ $schema: S, $defs: { content: { $dynamicAnchor: "content", type: "string" }, other }, $dynamicRef: "#content" }, "#content", anchored("content")],
+  for (const [schema, type, valid, invalid] of [
+    [{ $schema: S, $defs: { content: { $dynamicAnchor: "content", type: "string" }, other }, type: "array", items: { $dynamicRef: "#content" } }, /\ntype User = unknown\[\];\n/, [["a"]], [[1]]],
+    [{ $schema: S, $defs: { content: { $dynamicAnchor: "content", type: "string" }, other }, $dynamicRef: "#content" }, /\ntype User = unknown;\n/, ["a"], [1]],
   ] as const) {
     const source = JSON.stringify(schema, null, 2);
-    for (const problems of [schemaTypes(source, PATH).problems, schemaCode(source, PATH).problems]) {
-      assert.deepEqual(problems.map((p) => [p.message, source.slice(p.start, p.start + p.length)]), [[message(ref, fix), ref]]);
-    }
+    const typed = schemaTypes(source, PATH);
+    assert.deepEqual(typed.problems, []);
+    assert.match(typed.types, type);
+    const { code, problems } = schemaCode(source, PATH);
+    assert.deepEqual(problems, []);
+    const { default: s } = await evaluate(code);
+    for (const value of valid) assert.equal(s.is(value), true, JSON.stringify(value));
+    for (const value of invalid) assert.equal(s.is(value), false, JSON.stringify(value));
   }
   // An anchor at the root of the file is resolved as the spec says, and so is one at the root of a
   // schema with an $id, for a $dynamicRef inside that schema.
@@ -769,19 +802,26 @@ test("a 2020-12 $dynamicRef ajv resolves to the root in place of its anchor is a
   const embedded = JSON.stringify({ $schema: S, $ref: "https://example.com/tree", $defs: { tree: tree({ $id: "https://example.com/tree" }) } });
   const { default: e } = await evaluate(schemaCode(embedded, PATH).code);
   assert.deepEqual([e.is({ kids: [{ kids: [] }] }), e.is({ kids: [1] })], [true, false]);
-  // Inside an $id whose root declares no such anchor, the problem is placed at the $id: ajv resolves the reference by where it compiles the schema.
+  // Inside an $id whose schema declares no such anchor, the reference resolves to nothing, as a $ref to an anchor there would.
   const elsewhere = JSON.stringify({ $schema: S, $dynamicAnchor: "node", $defs: { tree: { $id: "https://example.com/tree", items: { $dynamicRef: "#node" } } }, $ref: "https://example.com/tree" });
-  assert.deepEqual(schemaCode(elsewhere, PATH).problems.map((p) => [p.message, elsewhere.slice(p.start, p.start + p.length)]), [[`ajv resolves the $dynamicRef "#node" inside the schema whose $id is "https://example.com/tree" by where it compiles that schema, not against the $id: declare "$dynamicAnchor": "node" at the schema whose $id is "https://example.com/tree", or write it as a $ref.`, "https://example.com/tree"]]);
+  assert.deepEqual(schemaCode(elsewhere, PATH).problems.map((p) => p.message), ["The schema is not valid: can't resolve reference #node from id https://example.com/tree"]);
   // 2019-09's $recursiveRef "#" inside an $id whose root has no "$recursiveAnchor": true, which ajv sent to the root's anchor
   // (the Test Suite's recursiveRef.json [5]), was refused until 2026-10-27; it is a $ref to that $id's schema since.
   const recursive = JSON.stringify({ $schema: "https://json-schema.org/draft/2019-09/schema", $recursiveAnchor: true, additionalProperties: { $id: "https://example.com/inner", additionalProperties: { $recursiveRef: "#" } } });
   assert.deepEqual(schemaTypes(recursive, PATH).problems, []);
-  // In another file, placed at the root's reference to it; in draft-07, which ignores $dynamicRef, no problem.
+  // Through another file: the list's items are what the outermost schema of the dynamic scope names, the root's
+  // strings where the root refers to the list, and anything in the list's own module.
   const { path, source } = project({
-    "user.schema.jsonc": { $schema: S, type: "object", properties: { list: { $ref: "./list.schema.jsonc" } }, $defs: { item: { $dynamicAnchor: "item" } } },
-    "list.schema.jsonc": { $defs: { item: { $dynamicAnchor: "item" } }, type: "array", items: { $dynamicRef: "#item" } },
+    "user.schema.jsonc": { $schema: S, type: "object", properties: { list: { $ref: "./list.schema.jsonc" } }, $defs: { item: { $dynamicAnchor: "item", type: "string" } } },
+    "list.schema.jsonc": { $schema: S, $defs: { item: { $dynamicAnchor: "item" } }, type: "array", items: { $dynamicRef: "#item" } },
   });
-  assert.deepEqual(schemaTypes(source, path).problems.map((p) => [p.message, source.slice(p.start, p.start + p.length)]), [[`./list.schema.jsonc: ${message("#item", anchored("item"))}`, "./list.schema.jsonc"]]);
+  assert.deepEqual(schemaTypes(source, path).problems, []);
+  const { default: user } = await evaluate(schemaCode(source, path).code);
+  assert.deepEqual([user.is({ list: ["a"] }), user.is({ list: [1] })], [true, false]);
+  const list = join(dirname(path), "list.schema.jsonc");
+  const { default: alone } = await evaluate(schemaCode(readFileSync(list, "utf8"), list).code);
+  assert.equal(alone.is([1]), true);
+  // In draft-07, which ignores $dynamicRef, no problem.
   assert.deepEqual(schemaCode(JSON.stringify({ type: "array", items: { $dynamicRef: "#item" } }), PATH).problems, []);
 });
 
@@ -812,7 +852,7 @@ test("a $dynamicRef that resolves as a $ref would, and 2019-09's $recursiveRef t
   }
 });
 
-test("ajv's keywords that give another verdict than the spec are ajv's own with the fault taken out: an empty enum, an if's evaluated keys, unevaluatedItems after a branch, contains", async () => {
+test("the keywords to which ajv gave another verdict than the spec give the spec's: an empty enum, an if's evaluated keys, unevaluatedItems after a branch, contains", async () => {
   const S = "https://json-schema.org/draft/2020-12/schema";
   const S19 = "https://json-schema.org/draft/2019-09/schema";
   const build = async (schema: object) => {
@@ -850,19 +890,15 @@ test("ajv's keywords that give another verdict than the spec are ajv's own with 
   assert.deepEqual(await verdicts({ $schema: S, allOf: [{ contains: { multipleOf: 2 } }, { contains: { multipleOf: 3 } }], unevaluatedItems: { multipleOf: 5 } }, [[2, 3, 4, 5, 6], [2, 3, 4, 7, 8]]), [true, false]);
   assert.deepEqual(await verdicts({ $schema: S, contains: { type: "string" }, minContains: 0, unevaluatedItems: false }, [[], [0], ["foo", 0], ["foo", "bar"]]), [true, false, false, true]);
   const counted = await build({ $schema: S, prefixItems: [true], contains: { type: "string" }, unevaluatedItems: false });
-  // The issue is the item's: what it must be to be evaluated, where ajv's unevaluatedItems said "must NOT have more than 1 items".
-  assert.deepEqual(counted.validate([1, "a", 2]).issues, [{ message: "must be string", path: [2], keyword: "type" }]);
+  // The issue is unevaluatedItems' own, ajv's message for it, which counts the items evaluated; the
+  // module ajv checked a rewritten copy for gave the item's, "must be string" at [2], until the engine.
+  assert.deepEqual(counted.validate([1, "a", 2]).issues, [{ message: "must NOT have more than 2 items", path: [], keyword: "unevaluatedItems" }]);
   assert.deepEqual(counted.schema, { $schema: S, prefixItems: [true], contains: { type: "string" }, unevaluatedItems: false });
-  // A contains that may not have run, in an if, a then, anyOf or behind a $ref, is refused at the unevaluatedItems (unevaluatedItems.json [23]).
-  const message = (inside: string) => `ajv takes every item as evaluated for the "unevaluatedItems" at # once a "contains" is beside it, where 2020-12 counts only the items "contains" matched; dotschema counts those for a "contains" beside the "unevaluatedItems" or in its "allOf", and the "contains" at #${inside} is not. Move that "contains" beside the "unevaluatedItems", or into its "allOf".`;
-  for (const [schema, inside] of [
-    [{ $schema: S, if: { contains: { const: "a" } }, then: { if: { contains: { const: "b" } } }, unevaluatedItems: false }, "/if"],
-    [{ $schema: S, anyOf: [{ contains: { const: "a" } }, true], unevaluatedItems: false }, "/anyOf/0"],
-    [{ $schema: S, $ref: "#/$defs/c", unevaluatedItems: false, $defs: { c: { contains: { const: "a" } } } }, "/$ref"],
-  ] as const) {
-    const source = JSON.stringify(schema);
-    for (const problems of [schemaTypes(source, PATH).problems, schemaCode(source, PATH).problems]) assert.deepEqual(problems.map((p) => [p.message, source.slice(p.start, p.start + p.length)]), [[message(inside), "unevaluatedItems"]]);
-  }
+  // A contains that may not have run, in an if, a then, anyOf or behind a $ref, counts the items it
+  // matched where it ran (unevaluatedItems.json [23]), which dotschema refused at the unevaluatedItems until the engine.
+  assert.deepEqual(await verdicts({ $schema: S, if: { contains: { const: "a" } }, then: { if: { contains: { const: "b" } } }, unevaluatedItems: false }, [["a"], ["a", "b"], ["a", "c"], ["b"]]), [true, true, false, false]);
+  assert.deepEqual(await verdicts({ $schema: S, anyOf: [{ contains: { const: "a" } }, true], unevaluatedItems: false }, [[], ["a"], ["b"]]), [true, true, false]);
+  assert.deepEqual(await verdicts({ $schema: S, $ref: "#/$defs/c", unevaluatedItems: false, $defs: { c: { contains: { const: "a" } } } }, [["a"], ["a", "b"], ["b"]]), [true, false, false]);
   // 2019-09, where contains evaluates nothing, and a contains under not, whose annotations are dropped, are not refused.
   await verdicts({ $schema: S19, anyOf: [{ contains: { const: "a" } }, true], unevaluatedItems: false }, [[]]);
   assert.deepEqual(await verdicts({ $schema: S, not: { contains: { const: "a" } }, unevaluatedItems: { type: "string" } }, [[], ["b"], [1]]), [true, true, false]);
@@ -889,6 +925,15 @@ test("an $id below a file's root begins a schema resource: a $ref inside it reso
     const { default: s, inner: definition } = await evaluate(code);
     assert.deepEqual([s.is(1), s.is("s"), definition.is(1), definition.is("s")], [true, false, true, false]);
   }
+});
+
+test("two schemas under one $id, or one anchor, are a problem, as they were ajv's, while one schema under an $anchor and a $dynamicAnchor of the same name is not", () => {
+  const problems = (schema: object) => schemaCode(JSON.stringify({ $schema: "https://json-schema.org/draft/2020-12/schema", ...schema }), PATH).problems.map((p) => p.message);
+  assert.deepEqual(problems({ $defs: { a: { $id: "https://example.com/x", type: "string" }, b: { $id: "https://example.com/x", type: "number" } } }), ['The schema is not valid: reference "https://example.com/x" resolves to more than one schema']);
+  assert.deepEqual(problems({ $defs: { a: { $id: "https://example.com/x", type: "string" }, b: { $id: "https://example.com/x", type: "string" } } }), ['The schema is not valid: reference "https://example.com/x" resolves to more than one schema']);
+  assert.deepEqual(problems({ $defs: { a: { $anchor: "same", type: "string" }, b: { $anchor: "same", type: "number" } } }), ['The schema is not valid: reference "dotschema:0#same" resolves to more than one schema']);
+  assert.deepEqual(schemaCode(JSON.stringify({ $defs: { a: { $id: "#same" }, b: { $id: "#same" } } }), PATH).problems.map((p) => p.message), ['The schema is not valid: reference "dotschema:0#same" resolves to more than one schema']);
+  assert.deepEqual(problems({ $defs: { a: { $anchor: "x", $dynamicAnchor: "x", type: "string" } }, $ref: "#x" }), []);
 });
 
 test("a $ref names a schema resource by its $id, absolute or relative to the $id above it, with a pointer or an anchor inside it", async () => {
@@ -973,10 +1018,11 @@ test("a $ref to a schema resource in another file, by its $id, is that file's ty
   assert.deepEqual([user.is({ place: { city: "Oslo" } }), user.is({ place: {} })], [true, false]);
 });
 
-test("a format checked by a function, such as date-time or uri, is inlined: the module requires nothing", async () => {
-  const { code, problems } = schemaCode(JSON.stringify({ type: "object", properties: { at: { type: "string", format: "date-time" }, url: { type: "string", format: "uri" } } }), PATH);
+test("a format checked by a function, such as date-time or uri, is its file, which the module imports, and one checked by a regular expression is in the module", async () => {
+  const { code, problems } = schemaCode(JSON.stringify({ type: "object", properties: { at: { type: "string", format: "date-time" }, url: { type: "string", format: "uri" }, ip: { type: "string", format: "ipv4" } } }), PATH);
   assert.deepEqual(problems, []);
-  assert.doesNotMatch(code, /[^_\w]require\(/);
+  assert.deepEqual(code.match(/^import .*$/gm), [`import { schemaModule, postOne } from "${RUNTIME}";`, 'import __dateTime from "dotschema/formats/date-time";', 'import __uri from "dotschema/formats/uri";']);
+  assert.match(code, /"ipv4": \/\^/);
   const { default: s } = await evaluate(code);
   assert.equal(s.is({ at: "2026-10-20T22:14:00Z", url: "https://example.com/a" }), true);
   assert.equal(s.is({ at: "yesterday" }), false);
@@ -984,10 +1030,10 @@ test("a format checked by a function, such as date-time or uri, is inlined: the 
 });
 
 test("every format ajv-formats defines, and its formatMinimum, formatMaximum and exclusive keywords, give ajv-formats' own verdicts and errors", async () => {
-  // dotschema registers its copies of ajv-formats' formats (src/formats/) and writes the limit
-  // keywords with its own ajv (loadAjv); the reference is ajv-formats' plugin, a development
-  // dependency, run by the same ajv, which compiles with new Function, on values where the formats
-  // dotschema changed or replaced (tests/formats.test.ts) agree with ajv-formats'.
+  // dotschema gives the engine its copies of ajv-formats' formats (src/formats/), and the engine
+  // checks the limit keywords as ajv-formats' plugin does; the reference is that plugin, a
+  // development dependency, run by ajv, on values where the formats dotschema changed or replaced
+  // (tests/formats.test.ts) agree with ajv-formats'.
   const { createRequire } = await import("node:module");
   const require = createRequire(join(ROOT, "src/schema.ts"));
   const Ajv = require("ajv").default;
@@ -1034,9 +1080,9 @@ test("a time has its offset, an IPv4 address no leading zero, and iso-time is a 
   assert.equal(s.is({ iso: "25:00:00" }), false);
 });
 
-test("a string in the schema that reads like a require call stays the schema's: the validator compares it as written and inlines nothing for it", async () => {
-  // ajv writes the schema's strings with JSON.stringify, which leaves ' unescaped; only a
-  // double-quoted require in its standalone code is a call (STANDALONE_REQUIRE).
+test("a string in the schema that reads like a require call stays the schema's: the validator compares it as written, and the module imports its run time alone", async () => {
+  // Until the engine, the module held ajv's standalone code, whose double-quoted requires were calls
+  // to inline, so a string that read like one had to stay a string.
   const schema = {
     type: "object",
     properties: {
@@ -1049,8 +1095,7 @@ test("a string in the schema that reads like a require call stays the schema's: 
   };
   const { code, problems } = schemaCode(JSON.stringify(schema), PATH);
   assert.deepEqual(problems, []);
-  assert.doesNotMatch(code, /__require\(\d+\) /);
-  assert.doesNotMatch(code, /class Ajv/);
+  assert.deepEqual(code.match(/^import .*$/gm), [`import { schemaModule, postOne } from "${RUNTIME}";`]);
   const { default: s } = await evaluate(code);
   const valid = { note: "load require('ajv/dist/runtime/equal') now", "require('ajv')": "x", builtin: "a require('fs') b", relative: "a require('./refs.js') b", quoted: 'a require("ajv") b' };
   assert.deepEqual(s.validate(valid), { value: valid });
@@ -1058,42 +1103,44 @@ test("a string in the schema that reads like a require call stays the schema's: 
   assert.deepEqual(s.validate({ "require('ajv')": 5 }).issues.map((i: any) => i.path), [["require('ajv')"]]);
   assert.deepEqual(s.validate({ note: "other" }).issues.map((i: any) => [i.path, i.keyword]), [[["note"], "const"]]);
   // The string the validator compares, as the schema wrote it.
-  assert.match(code, /"load require\('ajv\/dist\/runtime\/equal'\) now" !== /);
+  assert.ok(code.includes(`{"const": "load require('ajv/dist/runtime/equal') now"}`));
 });
 
-test("in a process that disallows code generation from strings, a schema's problem says so, in the build and the type check alike", () => {
-  // ajv compiles every validator with new Function, the one dotschema writes out as code too.
+test("in a process that disallows code generation from strings, a schema builds, in the build and the type check alike, and its module validates", () => {
+  // Until the engine, ajv compiled every validator with new Function, and the build refused each
+  // schema there; the JIT's module falls back to the interpreter where new Function throws.
   const script = [
-    `import { schemaCode, schemaTypes } from ${JSON.stringify(join(ROOT, "src/schema.ts"))};`,
+    `import { schemaTypes } from ${JSON.stringify(join(ROOT, "src/schema.ts"))};`,
+    `import { evaluate, schemaCode } from ${JSON.stringify(join(ROOT, "tests/helpers.ts"))};`,
     `const draft07 = ${JSON.stringify(JSON.stringify({ type: "string", minLength: 1 }))};`,
     `const draft2020 = ${JSON.stringify(SCHEMA)};`,
+    `try { new Function(""); console.log("allowed"); } catch { console.log("refused"); }`,
     `for (const source of [draft07, draft2020]) for (const build of [schemaCode, schemaTypes]) console.log(JSON.stringify(build(source, ${JSON.stringify(PATH)}).problems.map((p) => p.message)));`,
+    `const { default: s } = await evaluate(schemaCode(draft07, ${JSON.stringify(PATH)}).code);`,
+    `console.log(JSON.stringify([s.is("a"), s.is(""), s.validate("").issues.map((i) => i.keyword)]));`,
   ].join("\n");
   const { status, out } = run(process.execPath, ["--disallow-code-generation-from-strings", "--input-type=module", "-e", script]);
   assert.equal(status, 0, out);
-  const lines = out.trim().split("\n").map((line) => JSON.parse(line));
-  assert.equal(lines.length, 4);
-  for (const messages of lines) {
-    assert.equal(messages.length, 1);
-    assert.match(messages[0], /^Building user\.schema\.jsonc's validator runs ajv, which compiles it with new Function, and this process disallows code generation from strings \(--disallow-code-generation-from-strings/);
-    assert.doesNotMatch(messages[0], /not valid/);
-  }
+  assert.deepEqual(out.trim().split("\n"), ["refused", "[]", "[]", "[]", "[]", '[true,false,["minLength"]]']);
 });
 
-test("a schema outside any project that installs ajv still validates: ajv is dotschema's own dependency", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "dotschema-no-ajv-"));
+test("a schema outside any project that installs dotschema still validates: the host resolves its module's run time from dotschema's own files", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "dotschema-elsewhere-"));
   const path = join(dir, "a.schema.jsonc");
   writeFileSync(path, SCHEMA);
   const { types, problems } = schemaTypes(SCHEMA, path);
   assert.deepEqual(problems, []);
   // The file names the root, not the schema's title.
   assert.match(types,/\ninterface AInput \{\n  name: string;\n  tags\?: \{\n    \[key: string\]: unknown;\n  \}\[\] \| undefined;\n\}/);
-  const { code, problems: codeProblems } = schemaCode(SCHEMA, path);
-  assert.deepEqual(codeProblems, []);
-  assert.doesNotMatch(code, /^import /m);
-  const { default: user } = await evaluate(code);
-  assert.equal(user.is({ name: "Ada" }), true);
-  assert.equal(user.is({ name: "" }), false);
+  // No node_modules above the file holds dotschema; the preload and the esbuild plugin find the run time where they are.
+  writeFileSync(join(dir, "main.mjs"), 'import a from "./a.schema.jsonc";\nconsole.log(JSON.stringify([a.is({ name: "Ada" }), a.is({ name: "" })]));\n');
+  const preloaded = run(process.execPath, ["--import", join(ROOT, "src/register.ts"), "main.mjs"], dir);
+  assert.equal(preloaded.out.trim(), "[true,false]", preloaded.out);
+  const { build } = await import("esbuild");
+  const { default: dotschema } = await import("../src/esbuild.ts");
+  const bundled = await build({ entryPoints: [join(dir, "main.mjs")], outfile: join(dir, "out.mjs"), bundle: true, format: "esm", platform: "node", plugins: [dotschema()], logLevel: "silent" });
+  assert.deepEqual(bundled.errors, []);
+  assert.equal(run(process.execPath, ["out.mjs"], dir).out.trim(), "[true,false]");
 });
 
 test("the module is a Standard JSON Schema: each target's draft from `~standard.jsonSchema`, a fresh copy, and a throw for another target", async () => {
@@ -1112,6 +1159,22 @@ test("the module is a Standard JSON Schema: each target's draft from `~standard.
   assert.equal(user.schema.properties.name.minLength, 1);
   assert.throws(() => jsonSchema.input({ target: "openapi-3.0" }), /converts a schema to the "draft-07" and "draft-2020-12" targets, not "openapi-3.0"/);
   assert.throws(() => jsonSchema.input({ target: "toString" }), /not "toString"/);
+});
+
+test("a document of Standard JSON Schema is a tree: a part of the schema it holds twice is two objects", async () => {
+  // The 2020-12 document rewrites `tag`'s $ref, so it writes `properties` anew, and reads `home` and
+  // `work`, equal, from the one place of the schema that is either.
+  const address = { type: "object", properties: { street: { type: "string", minLength: 1 }, city: { type: "string", minLength: 1 } }, required: ["street", "city"] };
+  const source = JSON.stringify({ type: "object", properties: { home: address, work: address, tag: { $ref: "#/definitions/tag" } }, definitions: { tag: { type: "string" } } });
+  const { code, problems } = schemaCode(source, PATH);
+  assert.deepEqual(problems, []);
+  const { default: place } = await evaluate(code);
+  const document = place["~standard"].jsonSchema.input({ target: "draft-2020-12" });
+  assert.deepEqual(document.properties.tag, { $ref: "#/$defs/tag" });
+  assert.deepEqual(document.properties.home, address);
+  assert.notEqual(document.properties.home, document.properties.work);
+  document.properties.home.required.push("zip");
+  assert.deepEqual(document.properties.work.required, ["street", "city"]);
 });
 
 test("a keyword the target cannot express makes that target throw, naming it, while the other still converts", async () => {

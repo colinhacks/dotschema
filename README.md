@@ -46,17 +46,16 @@ if (user.is(data)) {
 }
 ```
 
-It's powered by TypeScript's [_content mappers_](https://github.com/microsoft/typescript-go/pull/4712) (introduced in TypeScript 7.1), which let a package give `tsc` the types of a file it imports. The validator is compiled by [ajv](https://ajv.js.org) when the module is built, so a bundle carries the validator and no validator library.
+It's powered by TypeScript's [_content mappers_](https://github.com/microsoft/typescript-go/pull/4712) (introduced in TypeScript 7.1), which let a package give `tsc` the types of a file it imports. The validator is dotschema's own, which compiles each schema to JavaScript the first time it runs.
 
 ## Setup
 
 You'll need TypeScript 7.1 (currently in beta) and Node 24 or later:
 
 ```sh
-npm install -D dotschema typescript@beta
+npm install dotschema
+npm install -D typescript@beta
 ```
-
-An app that runs under the preload, not as a bundle, builds each schema's module at run time, so it installs dotschema as a dependency: `npm install dotschema`.
 
 Add dotschema to `tsconfig.json` as a content mapper:
 
@@ -94,6 +93,8 @@ Load dotschema wherever your code runs, so that a schema import works at run tim
 | webpack, Rspack | `use: "dotschema/webpack"` in a rule for the schema files, in `module.rules` ([setup](https://dotschema.dev/#setup-webpack)) |
 | Cloudflare Workers | dotschema's Vite plugin beside Cloudflare's ([setup](https://dotschema.dev/#setup-cloudflare-workers)) |
 | Jest | `"dotschema/jest"` in `transform`, for the schema files ([setup](https://dotschema.dev/#setup-jest)) |
+
+A setting in your app's `package.json` chooses how validators run: compiled the first time each runs, and interpreted where code can't be compiled, as in a Cloudflare Worker (the default), always interpreted, or compiled when the module is built ([setup](https://dotschema.dev/#validators)).
 
 Your editor types schema imports through the TypeScript 7.1 language server, with content mappers on: in VS Code and Cursor, the **TypeScript 7** extension pointed at your project's TypeScript, and in Zed, the **TypeScript Language Server** extension. The settings for each are in [Editors](https://dotschema.dev/#editors).
 

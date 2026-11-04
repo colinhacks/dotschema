@@ -9,8 +9,8 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { schemaCode, schemaTypes } from "../src/schema.ts";
-import { evaluate, ROOT, run, TSC, withFormats } from "./helpers.ts";
+import { schemaTypes } from "../src/schema.ts";
+import { evaluate, ROOT, run, schemaCode, TSC, withFormats } from "./helpers.ts";
 
 const require = createRequire(import.meta.url);
 const PATH = join(ROOT, "tests/fixtures/pick.schema.jsonc");
@@ -21,7 +21,7 @@ const load = async (schema: unknown, path = PATH) => {
   return evaluate(code);
 };
 
-/** ajv, set as dotschema sets it (src/schema.ts, loadAjv), for the draft of a converted schema. */
+/** ajv, a development dependency, set as dotschema set it until the engine (`loadAjv` at 45a7f5e), for the draft of a converted schema. */
 function ajvFor(schema: { $schema: string }, allErrors: boolean) {
   const mod = require(schema.$schema.includes("2020-12") ? "ajv/dist/2020" : "ajv");
   const Ajv = mod.default ?? mod;
@@ -265,11 +265,11 @@ test("the types of .pick() and .omit() keep each property's optionality and the 
   assert.equal(status, 0);
 });
 
-test("a file two properties refer to is compiled once for each validator, as the root's own validator compiles it", () => {
-  // team.schema.jsonc's `lead` is a $ref to user.schema.jsonc and its `members` an array of them: one function for both.
+test("a file two properties refer to is one schema resource of the module, which the engine compiles once for both", () => {
+  // team.schema.jsonc's `lead` is a $ref to user.schema.jsonc and its `members` an array of them; shared/place.schema.jsonc is the third file.
   const path = join(ROOT, "lab/basic/team.schema.jsonc");
   const { code } = schemaCode(readFileSync(path, "utf8"), path);
-  assert.equal(code.match(/schemaPath:"#\/properties\/name\/minLength"/g)?.length, 2);
+  assert.deepEqual(code.match(/\["dotschema:\d+", /g), ['["dotschema:0", ', '["dotschema:1", ', '["dotschema:2", ']);
 });
 
 for (const [draft, additional] of [[D2020, false], [D07, { type: "number" }], [D2020, undefined]] as const) {

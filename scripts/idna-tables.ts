@@ -1,5 +1,5 @@
-// Checks the Unicode tables of src/formats/idna.cjs and idn-hostname.cjs against the Unicode Character
-// Database (DESIGN.md, "Formats"), for every code point idna.cjs's ALLOWED takes, and prints the tables the data
+// Checks the Unicode tables of src/formats/idna.js and idn-hostname.js against the Unicode Character
+// Database (DESIGN.md, "Formats"), for every code point idna.js's ALLOWED takes, and prints the tables the data
 // gives where they differ: the viramas (canonical combining class 9), the joining types (T; L or D; R
 // or D, of code points that are not marks), the Bidi class each code point gets, and the code points
 // UTS #46 ignores (for every code point); then runs the format on UTS #46's conformance tests, but
@@ -11,8 +11,8 @@
 // (https://www.unicode.org/Public/idna/<version>/): `nub scripts/idna-tables.ts <dir>`. The engine's
 // Unicode, which the files' property escapes read, must be the data's.
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: nub scripts/idna-tables.ts <directory of the Unicode data files>");
@@ -20,10 +20,10 @@ const formats = join(import.meta.dirname, "..", "src", "formats");
 
 // The files' regular expressions, by name, each `const NAME = /.../flags;` on a line of its own.
 const found = new Map<string, RegExp>();
-for (const file of ["idna.cjs", "idn-hostname.cjs"]) for (const [, name = "", body = "", flags = ""] of readFileSync(join(formats, file), "utf8").matchAll(/^const (\w+) = \/(.*)\/([a-z]*);$/gm)) found.set(name, new RegExp(body, flags));
+for (const file of ["idna.js", "idn-hostname.js"]) for (const [, name = "", body = "", flags = ""] of readFileSync(join(formats, file), "utf8").matchAll(/^const (\w+) = \/(.*)\/([a-z]*);$/gm)) found.set(name, new RegExp(body, flags));
 const rx = (name: string): RegExp => {
   const regex = found.get(name);
-  if (!regex) throw new Error(`src/formats/idna.cjs and idn-hostname.cjs have no regular expression ${name}`);
+  if (!regex) throw new Error(`src/formats/idna.js and idn-hostname.js have no regular expression ${name}`);
   return regex;
 };
 
@@ -95,9 +95,8 @@ for (const { name, data, ours, over, free } of checks) {
 // UTS #46's conformance tests: the source of each line (column 1), and whether toASCII, nontransitional, finds no error (column 5, or 3 when it is empty), but for X4_2, an empty label toUnicode alone reports.
 const idna2008 = read("IdnaMappingTable.txt", (fields) => fields[3] ?? "").map;
 const unescape = (text: string) => (text === '""' ? "" : text.replace(/\\u([0-9A-F]{4})|\\x\{([0-9A-F]+)\}/gi, (_, a?: string, b?: string) => String.fromCodePoint(parseInt(a ?? b ?? "", 16))));
-const require = createRequire(import.meta.url);
-const idnHostname: (str: string) => boolean = require(join(formats, "idn-hostname.cjs"));
-const hostname: (str: string) => boolean = require(join(formats, "hostname.cjs"));
+const idnHostname: (str: string) => boolean = (await import(pathToFileURL(join(formats, "idn-hostname.js")).href)).default;
+const hostname: (str: string) => boolean = (await import(pathToFileURL(join(formats, "hostname.js")).href)).default;
 let run = 0, skipped = 0;
 const wrong: string[] = [];
 for (const line of readFileSync(join(dir, "IdnaTestV2.txt"), "utf8").split("\n")) {
@@ -115,5 +114,5 @@ for (const line of readFileSync(join(dir, "IdnaTestV2.txt"), "utf8").split("\n")
 }
 if (wrong.length) failed = true;
 console.log(`IdnaTestV2.txt: ${run} lines run, ${wrong.length} with another verdict${wrong.length ? `: ${wrong.slice(0, 20).join(", ")}` : ""}; ${skipped} skipped for an NV8 or XV8 code point`);
-console.log(`Unicode ${process.versions.unicode}, ${found.size} regular expressions read from src/formats/idna.cjs and idn-hostname.cjs`);
+console.log(`Unicode ${process.versions.unicode}, ${found.size} regular expressions read from src/formats/idna.js and idn-hostname.js`);
 process.exitCode = failed ? 1 : 0;
