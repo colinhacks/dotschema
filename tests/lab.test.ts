@@ -97,9 +97,8 @@ test("lab/basic bundles with the esbuild plugin and runs with nothing installed"
   rmSync(`${ROOT}lab/basic/dist`, { recursive: true, force: true });
   const built = run(process.execPath, ["build-esbuild.ts"], `${ROOT}lab/basic`);
   assert.equal(built.status, 0, built.out);
-  // main.ts and the four schemas it imports: shared/place.schema.jsonc, which team.schema.jsonc refers to, is compiled into team's validator;
-  // beside them, dotschema's run time, which each module imports, and the files of the formats they use.
-  assert.match(built.out, /errors=0 inputs=5 node_modules=0 dotschema=\d+/);
+  // main.ts and the four schemas it imports: shared/place.schema.jsonc, which team.schema.jsonc refers to, is compiled into team's validator.
+  assert.match(built.out, /errors=0 inputs=5 node_modules=0/);
   const ran = run(process.execPath, ["dist/main.mjs"], `${ROOT}lab/basic`);
   assert.equal(ran.status, 0, ran.out);
   for (const expected of EXPECTED) assert.ok(ran.out.includes(expected), ran.out);
@@ -109,12 +108,12 @@ test("lab/basic bundles with the esbuild plugin and runs with nothing installed"
 const installed = (lab: string): string | false => (existsSync(`${ROOT}lab/${lab}/node_modules`) ? false : `lab/${lab} is not installed: run \`nub install\` in lab/${lab}`);
 const missing = (tool: string): string | false => (spawnSync(tool, ["--version"]).status === 0 ? false : `${tool} is not installed`);
 
-/** Runs a bundle copied alone into an empty directory, so that nothing it could require is installed above it, with Node's `flags`. */
-function runAlone(file: string, flags: string[] = []): { status: number | null; out: string } {
+/** Runs a bundle copied alone into an empty directory, so that nothing it could require is installed above it. */
+function runAlone(file: string): { status: number | null; out: string } {
   const dir = mkdtempSync(join(tmpdir(), "dotschema-alone-"));
   try {
     copyFileSync(file, join(dir, basename(file)));
-    return run(process.execPath, [...flags, basename(file)], dir);
+    return run(process.execPath, [basename(file)], dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -167,17 +166,13 @@ for (const [bundler, through, file] of [["webpack", "the webpack loader", "main.
   });
 }
 
-test("lab/bundlers: the browser bundle has no Node.js import, and where a Content Security Policy without unsafe-eval refuses the JIT's code generation, its validators run on the interpreter", { skip: installed("bundlers") }, () => {
+test("lab/bundlers: the browser bundle has no new Function and no Node.js import, so a Content Security Policy without unsafe-eval allows it", { skip: installed("bundlers") }, () => {
   if (!existsSync(`${BUNDLERS}/dist/vite-browser/main.mjs`)) assert.equal(run(process.execPath, ["build.mjs", "vite-browser"], BUNDLERS).status, 0);
   const code = readFileSync(`${BUNDLERS}/dist/vite-browser/main.mjs`, "utf8");
-  // The JIT's two calls of Function, minified from `new Function`: the probe, and the check it makes; no eval.
-  assert.equal(code.match(/\bFunction\(/g)?.length, 2);
-  assert.doesNotMatch(code, /\beval\(/);
-  assert.doesNotMatch(code, /from\s*["']node:|\bimport\(["']node:|\brequire\(/);
-  // Node refusing code generation from strings, as such a policy does: the same output.
-  const ran = runAlone(`${BUNDLERS}/dist/vite-browser/main.mjs`, ["--disallow-code-generation-from-strings"]);
-  assert.equal(ran.status, 0, ran.out);
-  for (const expected of EXPECTED) assert.ok(ran.out.includes(expected), ran.out);
+  assert.doesNotMatch(code, /new Function|\beval\(/);
+  assert.doesNotMatch(code, /from\s*["']node:|\bimport\(["']node:/);
+  // The one `require(` left is in a string: ajv's `.code` for its own code generation.
+  assert.ok([...code.matchAll(/require\(/g)].every((m) => code[m.index - 1] === "`" || code[m.index - 1] === "'" || code[m.index - 1] === '"'), "a require( outside a string");
 });
 
 test("lab/bundlers: Vite's, Rollup's and Rolldown's config types each take the plugin", { skip: installed("bundlers") }, () => {
@@ -215,8 +210,7 @@ for (const args of [[], ["--webpack"]]) {
     // The client component's validator is in a browser chunk.
     const chunks = `${NEXT_LAB}/.next/static/chunks`;
     const files = readdirSync(chunks, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".js"));
-    // The engine's message for minLength, which it writes with the limit.
-    assert.ok(files.some((f) => readFileSync(join(chunks, f), "utf8").includes("must NOT have fewer than ")), "no browser chunk holds the validator");
+    assert.ok(files.some((f) => readFileSync(join(chunks, f), "utf8").includes("must NOT have fewer than 1 characters")), "no browser chunk holds the validator");
   });
 }
 

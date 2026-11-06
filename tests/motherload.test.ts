@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withDotschema } from "../src/next.ts";
-import { ROLLUP_TYPESCRIPT, ROOT, run, RSPACK_TYPESCRIPT, TSC } from "./helpers.ts";
+import { ROOT, run, TSC } from "./helpers.ts";
 
 const MOTHERLOAD = process.env["MOTHERLOAD_DIR"];
 const skip = MOTHERLOAD ? false : "MOTHERLOAD_DIR is not set";
@@ -64,7 +64,7 @@ test("beside Motherload: both mappers type the project, and both preloads and bo
       rmSync(join(dir, "dist"), { recursive: true, force: true });
       const built = run(process.execPath, ["build-esbuild.ts", order], dir);
       assert.equal(built.status, 0, built.out);
-      assert.match(built.out, /errors=0 inputs=4 node_modules=0 dotschema=\d+/, order);
+      assert.match(built.out, /errors=0 inputs=4 node_modules=0/, order);
       const ran = run(process.execPath, ["dist/main.mjs"], dir);
       assert.equal(ran.status, 0, ran.out);
       assert.equal(ran.out.trim(), EXPECTED, `esbuild ${order}`);
@@ -79,9 +79,7 @@ for (const name of ["webpack", "Rspack"] as const) {
       const dotschema = { test: /\.schema\.jsonc$/, use: "dotschema/webpack" };
       for (const [order, rules] of [["motherload first", [motherload, dotschema]], ["dotschema first", [dotschema, motherload]]] as const) {
         const output = join(dir, "dist", order.replace(" ", "-"));
-        // Rspack reads dotschema's TypeScript, the run time a module imports in this repository, with its own SWC loader.
-        const typescript = name === "Rspack" ? [RSPACK_TYPESCRIPT] : [];
-        const config = { mode: "none", context: dir, entry: "./main.js", target: "node", output: { path: output, filename: "main.cjs" }, module: { rules: [...rules, ...typescript] } };
+        const config = { mode: "none", context: dir, entry: "./main.js", target: "node", output: { path: output, filename: "main.cjs" }, module: { rules } };
         const stats: any = await new Promise((done, fail) => bundler(config, (error: Error | null, stats: unknown) => (error ? fail(error) : done(stats))));
         assert.equal(stats.hasErrors(), false, `${order}: ${stats.toString()}`);
         const ran = run(process.execPath, [join(output, "main.cjs")], dir);
@@ -103,8 +101,7 @@ for (const name of ["Vite", "Rollup", "Rolldown"] as const) {
           const out = await build({ configFile: false, logLevel: "silent", root: dir, plugins, build: { write: false, ssr: join(dir, "main.js"), minify: false } });
           code = out.output[0].code;
         } else {
-          // Rollup reads dotschema's TypeScript, the run time a module imports in this repository, with its types stripped.
-          const bundle = await (await fromBundlers(name.toLowerCase()))[name.toLowerCase()]({ input: join(dir, "main.js"), plugins: [...plugins, ...(name === "Rollup" ? [ROLLUP_TYPESCRIPT] : [])], onLog: () => {} });
+          const bundle = await (await fromBundlers(name.toLowerCase()))[name.toLowerCase()]({ input: join(dir, "main.js"), plugins, onLog: () => {} });
           code = (await bundle.generate({ format: "es" })).output[0].code;
         }
         const file = join(dir, `${name}-${order.replace(" ", "-")}.mjs`);

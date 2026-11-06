@@ -5,9 +5,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { schemaCode } from "../src/schema.ts";
 import { parseJsoncFile } from "../src/parse.ts";
 import { schemaDeclarations, type Draft } from "../src/schema-types.ts";
-import { evaluate, run, schemaCode, TSC } from "./helpers.ts";
+import { evaluate, run, TSC } from "./helpers.ts";
 
 const emit = (schema: unknown) => schemaDeclarations(schema as never);
 

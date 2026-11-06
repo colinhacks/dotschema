@@ -36,9 +36,7 @@ import { pageFiles } from './page-files.ts';
 //   once, or the build fails, so the page says what each keyword does however ajv grows.
 // - The bundle. A block marked `bundle="main.ts"` holds esbuild's analysis of the page's first block
 //   of that name, the opening example's, bundled and minified with dotschema's esbuild plugin beside
-//   the schema files it sees, dotschema's own files counted together as `dotschema`, in a project
-//   whose package.json sets the `validators` the block names (`validators="interpret"`), or none.
-//   The build measures it again and fails, printing the new analysis,
+//   the schema files it sees. The build measures it again and fails, printing the new analysis,
 //   when the block's text differs, so the page, and /llms.txt, which is read from the page's files,
 //   say what dotschema's src/ gives now.
 // - The Inference cards. An `<Inferred>` element around a schema block is a card of the Inference
@@ -162,8 +160,6 @@ const SCHEMA = /\.schema\.jsonc$/;
 const isErrors = (node: Code) => /(?:^|\s)errors(?:\s|$)/.test(node.meta ?? '');
 /** The file a bundle block analyses (`bundle="main.ts"`), if the block is one. */
 const bundleOf = (node: Code) => /(?:^|\s)bundle="([^"]+)"/.exec(node.meta ?? '')?.[1];
-/** The `validators` setting a bundle block's project names (`validators="interpret"`), if it names one. */
-const validatorsOf = (node: Code) => /(?:^|\s)validators="([^"]+)"/.exec(node.meta ?? '')?.[1];
 
 /** A Twoslash block's code as a reader copies it: from its cut, without Twoslash's notes and queries. */
 function plainCode(value: string): string {
@@ -333,8 +329,7 @@ export function remarkSchemas() {
         if (entry.file) compiler?.addDependency(entry.file);
         const files = filesAt(at);
         const text = plainCode(entry.node.value);
-        const validators = validatorsOf(node);
-        bundles.push({ node, item: request.bundles.push({ dir: path.join(cache, 'bundles', hash([files, name, text, validators ?? ''])), files, entry: { name, text }, ...(validators ? { validators } : {}) }) - 1 });
+        bundles.push({ node, item: request.bundles.push({ dir: path.join(cache, 'bundles', hash([files, name, text])), files, entry: { name, text } }) - 1 });
       }
     });
 

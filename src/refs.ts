@@ -5,7 +5,7 @@
 // file's root gives it another base, or it names a schema by its `$id`; one with a scheme of its own
 // (`https:`, `urn:`) that no schema of the files has as its `$id` is a URL and is not followed. The
 // files reached, transitively, are read once each: the types import the other files' modules, and
-// the engine compiles the validators from all of them.
+// ajv compiles the validator from all of them.
 import { readFileSync } from "node:fs";
 import { dirname, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -77,7 +77,7 @@ export function fileOf(ref: string, from: string): { path: string; fragment: str
   try {
     return { path: fileURLToPath(new URL(uri, pathToFileURL(from))), fragment: hash === -1 ? "" : ref.slice(hash + 1) };
   } catch {
-    return undefined; // not a URL at all, which the engine reports
+    return undefined; // not a URL at all, which ajv reports
   }
 }
 
@@ -110,24 +110,23 @@ function anchorNames(schema: Obj): string[] {
 }
 
 /**
- * Each anchor in a file's schema and where it is, as JSON Pointer segments: an `$anchor`, a
- * `$dynamicAnchor` or a plain-name `$id`, in any draft, at the file's root and in each schema below
- * it, walked as ajv 8.20.0 walked a schema for its anchors (`getSchemaRefs` in its
- * dist/compile/resolve.js, with json-schema-traverse), which also reaches one under a keyword no
- * draft defines. Until the engine, the root and the items of `prefixItems` were left out, as ajv's
- * walk left them out (measured on 2026-10-26: ajv refused a `$ref` to an anchor in either, "can't
- * resolve reference #top"); the engine resolves them as the spec does. A name's first place is kept.
- * The anchors of the whole file, for a schema read without its files (`schemaDeclarations`);
- * `fileIndex` keeps each within the schema resource that declares it.
+ * Each anchor in a file's schema and where it is, as JSON Pointer segments, where ajv 8.20.0
+ * resolves one (`getSchemaRefs` in its dist/compile/resolve.js): an `$anchor`, a `$dynamicAnchor` or
+ * a plain-name `$id`, in any draft, in each schema json-schema-traverse reaches, which leaves out the
+ * file's root and the items of `prefixItems` (measured on 2026-10-26: ajv refused a `$ref` to an
+ * anchor in either, "can't resolve reference #top", and resolved one under a keyword no draft
+ * defines). A name's first place is kept; ajv refuses a second that differs. The anchors of the
+ * whole file, for a schema read without its files (`schemaDeclarations`); `fileIndex` keeps each
+ * within the schema resource that declares it.
  */
 function anchorsIn(schema: Value): Map<string, string[]> {
   const anchors = new Map<string, string[]>();
   const walk = (node: Value, segments: string[]) => {
     if (!isObj(node)) return;
-    for (const name of anchorNames(node)) if (!anchors.has(name)) anchors.set(name, segments);
+    if (segments.length) for (const name of anchorNames(node)) if (!anchors.has(name)) anchors.set(name, segments);
     for (const [key, value] of Object.entries(node)) {
       if (Array.isArray(value)) {
-        if (TRAVERSE_LIST.has(key) || key === "prefixItems") value.forEach((item, i) => walk(item, [...segments, key, String(i)]));
+        if (TRAVERSE_LIST.has(key)) value.forEach((item, i) => walk(item, [...segments, key, String(i)]));
       } else if (TRAVERSE_MAP.has(key)) {
         if (isObj(value)) for (const [name, item] of Object.entries(value)) walk(item, [...segments, key, name]);
       } else if (!TRAVERSE_SKIP.has(key)) walk(value, [...segments, key]);
@@ -137,18 +136,18 @@ function anchorsIn(schema: Value): Map<string, string[]> {
   return anchors;
 }
 
-const fileAnchors = new WeakMap<object, Map<string, string[]>>();
+const ajvAnchors = new WeakMap<object, Map<string, string[]>>();
 
 /**
  * Where a `$ref`'s fragment points in a file's schema, as JSON Pointer segments: a pointer's own,
- * or the place of the anchor it names (`anchorsIn`). Undefined for a malformed pointer and for an
- * anchor the file does not declare.
+ * or the place of the anchor it names, where ajv resolves one (`anchorsIn`). Undefined for a
+ * malformed pointer and for an anchor ajv does not find.
  */
 export function fragmentPath(schema: Value, fragment: string): string[] | undefined {
   if (fragment === "" || fragment.startsWith("/")) return pointer(fragment);
   if (!isObj(schema)) return undefined;
-  let anchors = fileAnchors.get(schema);
-  if (!anchors) fileAnchors.set(schema, (anchors = anchorsIn(schema)));
+  let anchors = ajvAnchors.get(schema);
+  if (!anchors) ajvAnchors.set(schema, (anchors = anchorsIn(schema)));
   return anchors.get(fragment);
 }
 
@@ -256,7 +255,7 @@ type Site = {
   moved: boolean;
   /** Whether that base is still the file's own location, moved only by `$id`s without a scheme, so that a relative reference names a file. */
   local: boolean;
-  /** Whether an `$id` below the file's root is on the way to it, against which ajv resolved a pointer, as the engine does, a draft-07 one beside a `$ref` included: such a pointer is written from the file's id (`resolvedSchemas`). */
+  /** Whether ajv sees an `$id` below the file's root on the way to it, against which it would resolve a pointer. */
   ajvMoved: boolean;
 };
 
@@ -266,8 +265,10 @@ type FileIndex = {
   base: string;
   /** Each schema resource by its URI without a fragment: where it is, and whether only the file itself may name it, a file's location and an `$id` relative to it naming a place on this disk and not a resource another file shares. */
   resources: Map<string, { segments: string[]; local: boolean }>;
-  /** Each anchor, by its resource's URI and its name (`<uri>#<name>`). */
+  /** Each anchor where ajv finds one, by its resource's URI and its name (`<uri>#<name>`). */
   anchors: Map<string, string[]>;
+  /** Each anchor the spec finds where ajv does not: at the file's root, or inside `prefixItems`. */
+  unseen: Map<string, string[]>;
   /** Each `$ref`, by the JSON Pointer of the schema that holds it. */
   sites: Map<string, Site>;
 };
@@ -275,10 +276,10 @@ type FileIndex = {
 const indexes = new WeakMap<object, Map<string, FileIndex>>();
 
 /**
- * A file's schema resources and anchors, walked as ajv 8.20.0 walked them (`getSchemaRefs` in its
- * dist/compile/resolve.js, with json-schema-traverse's `allKeys`), the file's root and the items of
- * `prefixItems` included, which ajv's walk left out until the engine (`anchorsIn`), and each of its
- * `$ref`s, keyword by keyword as `mapSchemas` walks them, with the base it resolves against.
+ * A file's schema resources and anchors, where ajv 8.20.0 finds them (`getSchemaRefs` in its
+ * dist/compile/resolve.js, walking with json-schema-traverse's `allKeys`, which leaves out the file's
+ * root and the items of `prefixItems`), and each of its `$ref`s, keyword by keyword as `mapSchemas`
+ * walks them, with the base it resolves against.
  */
 function fileIndex(path: string, schema: Value, hideBesideRef: boolean): FileIndex {
   const key = `${hideBesideRef}\0${path}`;
@@ -286,30 +287,33 @@ function fileIndex(path: string, schema: Value, hideBesideRef: boolean): FileInd
   if (cached) return cached;
   const rootId = isObj(schema) && typeof schema["$id"] === "string" && SCHEME.test(schema["$id"]) ? splitFragment(schema["$id"])[0] : undefined;
   const base = rootId ?? pathToFileURL(path).href;
-  const index: FileIndex = { base, resources: new Map([[base, { segments: [], local: rootId === undefined }]]), anchors: new Map(), sites: new Map() };
+  const index: FileIndex = { base, resources: new Map([[base, { segments: [], local: rootId === undefined }]]), anchors: new Map(), unseen: new Map(), sites: new Map() };
 
-  // Resources and anchors, by the walk ajv's resolve.js makes.
-  const register = (node: Value, segments: string[], base: string, local: boolean) => {
+  // Resources and anchors, by the walk ajv's resolve.js makes; `seen` is false where ajv's walk does not reach.
+  const register = (node: Value, segments: string[], base: string, local: boolean, seen: boolean) => {
     if (!isObj(node)) return;
     if (segments.length) {
       const id = resourceId(node, hideBesideRef);
       if (id !== undefined) {
         const [uri, fragment] = splitFragment(resolveUri(base, id));
         [base, local] = [uri, local && !SCHEME.test(id)];
-        if (!index.resources.has(uri)) index.resources.set(uri, { segments, local });
-        if (fragment) index.anchors.set(`${uri}#${fragment}`, segments);
+        if (seen && !index.resources.has(uri)) index.resources.set(uri, { segments, local });
+        if (fragment) (seen ? index.anchors : index.unseen).set(`${uri}#${fragment}`, segments);
       }
     }
-    for (const name of anchorNames(node)) if (!index.anchors.has(`${base}#${name}`)) index.anchors.set(`${base}#${name}`, segments);
+    for (const name of anchorNames(node)) {
+      const map = seen && segments.length ? index.anchors : index.unseen;
+      if (!map.has(`${base}#${name}`)) map.set(`${base}#${name}`, segments);
+    }
     for (const [key, value] of Object.entries(node)) {
       if (Array.isArray(value)) {
-        if (TRAVERSE_LIST.has(key) || key === "prefixItems") value.forEach((item, i) => register(item, [...segments, key, String(i)], base, local));
+        if (TRAVERSE_LIST.has(key) || key === "prefixItems") value.forEach((item, i) => register(item, [...segments, key, String(i)], base, local, seen && key !== "prefixItems"));
       } else if (TRAVERSE_MAP.has(key)) {
-        if (isObj(value)) for (const [name, item] of Object.entries(value)) register(item, [...segments, key, name], base, local);
-      } else if (!TRAVERSE_SKIP.has(key)) register(value, [...segments, key], base, local);
+        if (isObj(value)) for (const [name, item] of Object.entries(value)) register(item, [...segments, key, name], base, local, seen);
+      } else if (!TRAVERSE_SKIP.has(key)) register(value, [...segments, key], base, local, seen);
     }
   };
-  register(schema, [], base, rootId === undefined);
+  register(schema, [], base, rootId === undefined, true);
 
   // The `$ref`s, each with the base of the schema that holds it, its own `$id` applied.
   const sites = (node: Value, segments: string[], site: Omit<Site, "ref">) => {
@@ -346,8 +350,8 @@ type Resolution =
   | { kind: "schema"; path: string; segments: string[]; fragment: string; resource: string[] }
   /** A file to read, then the fragment within its root's resource. */
   | { kind: "file"; path: string; fragment: string }
-  /** An anchor its resource does not declare. */
-  | { kind: "anchor"; path: string; name: string; resource: string[] }
+  /** An anchor its resource does not declare where ajv finds one; `unseen` is where the spec finds it, if anywhere. */
+  | { kind: "anchor"; path: string; name: string; resource: string[]; unseen: string[] | undefined }
   /** A malformed pointer, which ajv reports. */
   | { kind: "malformed" }
   /** A URI that no schema of the files has as its `$id`: a URL, which dotschema does not fetch. */
@@ -365,7 +369,7 @@ function within(path: string, index: FileIndex, uri: string, fragment: string): 
     name = decodeURIComponent(fragment);
   } catch {}
   const at = index.anchors.get(`${uri}#${name}`);
-  return at ? { kind: "schema", path, segments: at, fragment, resource } : { kind: "anchor", path, name, resource };
+  return at ? { kind: "schema", path, segments: at, fragment, resource } : { kind: "anchor", path, name, resource, unseen: index.unseen.get(`${uri}#${name}`) };
 }
 
 /**
@@ -437,9 +441,9 @@ const resolved = new WeakMap<Map<string, Value>, Map<string, Value>>();
 
 /**
  * Every file's schema with each `$ref` written as a pointer from its target file's root, so that
- * neither the emitter nor the engine resolves one against an `$id` again: `#/pointer` within the file where
- * the base is the file's own (no `$id` below the root above the reference), and otherwise the
- * file's specifier and the pointer, which `forEngine` turns into the file's id; another file's
+ * neither the emitter nor ajv resolves one against an `$id` again: `#/pointer` within the file where
+ * ajv's base is the file's own (no `$id` below the root above the reference), and otherwise the
+ * file's specifier and the pointer, which `forAjv` turns into the file's id; another file's
  * specifier and the pointer for a schema there. A reference that resolves to a URL is written as
  * that absolute URL where an `$id` moved its base, so that it keeps its meaning; one that points to
  * nothing is left as written, for `collect`'s problem.
@@ -500,7 +504,7 @@ export type Files = {
 /**
  * The root schema and every file it reaches. `drafts.of` names the draft a schema declares, or
  * undefined when it declares none, and `drafts.none` the draft a root that declares none is read
- * in: the engine compiles every file in the root's draft, so a file that declares another is a problem,
+ * in: ajv compiles every file in the root's draft, so a file that declares another is a problem,
  * while one that declares none is read in the root's. `clean` is applied to each other file as it
  * is read, as the caller applied it to the root, before its references are followed.
  */
@@ -568,7 +572,7 @@ export function collect(rootPath: string, root: Value, rootSource: string, draft
           const there = fileIndex(target.path, schemaThere, hide);
           return check(within(target.path, there, there.base, target.fragment));
         }
-        // A malformed pointer is the engine's to report, and so is a URL, which it cannot resolve: nothing is fetched.
+        // A malformed pointer is ajv's to report, and so is a URL, which ajv cannot resolve: nothing is fetched.
         if (resolution.kind === "malformed" || resolution.kind === "url") return;
         const there = specifierOf(path, resolution.path);
         // The resource the reference resolves to, when it is not a file's root, by its $id as written
@@ -576,7 +580,10 @@ export function collect(rootPath: string, root: Value, rootSource: string, draft
         const id = resolution.resource.length ? (pointTo(schemas.get(resolution.path)!, resolution.resource) as Obj)["$id"] : undefined;
         const inside = typeof id === "string" ? `the schema whose $id is "${id}" (${there}#${fragmentOf(resolution.resource)})` : there;
         if (resolution.kind === "anchor") {
-          report(`The $ref "${ref}" names no anchor: ${inside} declares no anchor "${resolution.name}".`);
+          // An anchor the spec finds where ajv does not, at the root or in `prefixItems`, has a pointer that ajv follows.
+          const declared = resolution.unseen;
+          const uri = ref.includes("#") ? ref.slice(0, ref.indexOf("#")) : ref;
+          report(declared ? `The $ref "${ref}" names an anchor that ajv does not resolve where ${there} declares it, ${declared.length > resolution.resource.length ? "inside prefixItems" : "at its root"}: write "${uri}#${fragmentOf(declared.slice(resolution.resource.length))}" in its place.` : `The $ref "${ref}" names no anchor: ${inside} declares no anchor "${resolution.name}".`);
           return;
         }
         const value = pointTo(schemas.get(resolution.path)!, resolution.segments);
@@ -615,17 +622,57 @@ function idPlaceOf(source: string, value: string): { start: number; length: numb
 }
 
 /**
+ * Each 2020-12 `$dynamicRef` and 2019-09 `$recursiveRef` that ajv resolves otherwise than the spec,
+ * as a problem placed as `collect`'s are. ajv 8.20.0 (`dist/vocabularies/dynamic/dynamicRef.js`)
+ * resolves `"#name"` to the `$dynamicAnchor` of that name only when it has compiled one already, and
+ * otherwise, as for a JSON Pointer or `"#"`, to the root of the function it compiles, which is the
+ * file's root unless a `$ref` reached the schema: measured on 2026-10-20, with the anchor in `$defs`
+ * the validator checked the root's rules in its place, and with the reference at the root it
+ * recursed until the stack ran out. The spec resolves each against the schema resource that holds
+ * it (2020-12 core 8.2.3.2; 2019-09 core 8.2.4.2), so a reference passes where that resource's root
+ * declares the anchor, `"$dynamicAnchor": "name"` or `"$recursiveAnchor": true`, and `"#"` passes
+ * at the file's own root resource alone. Measured on 2026-10-27 with the Test Suite's 2019-09
+ * recursiveRef.json [5], whose `$recursiveRef` inside an `$id` without `$recursiveAnchor` ajv sent
+ * to the root's anchor: refused, as every such reference inside an `$id` is.
+ */
+export function dynamicRefProblems(files: Files, rootPath: string, rootSource: string, keyword: "$dynamicRef" | "$recursiveRef"): Problem[] {
+  const problems: Problem[] = [];
+  const hide = refHidesId(files.schemas.get(rootPath)!);
+  for (const [path, schema] of files.schemas) {
+    const index = fileIndex(path, schema, hide);
+    mapSchemas(schema, (s, segments) => {
+      const ref = s[keyword];
+      // A reference to another document ajv refuses itself.
+      if (typeof ref !== "string" || !ref.startsWith("#")) return;
+      const resource = resourceAt(index, segments);
+      const root = pointTo(schema, resource.segments) as Obj;
+      const name = keyword === "$recursiveRef" ? (ref === "#" ? "" : undefined) : ref.includes("/") ? undefined : ref.slice(1);
+      const anchored = keyword === "$recursiveRef" ? root["$recursiveAnchor"] === true : name !== undefined && name !== "" && root["$dynamicAnchor"] === name;
+      if (anchored || (ref === "#" && keyword === "$dynamicRef" && !resource.segments.length) || (keyword === "$recursiveRef" && !resource.segments.length)) return;
+      const id = resource.segments.length ? (root["$id"] as string) : undefined;
+      const at = id === undefined ? "the root of the schema" : `the schema whose $id is "${id}"`;
+      const fix = keyword === "$recursiveRef" ? `declare "$recursiveAnchor": true beside that $id, or write a $ref to it` : name ? `declare "$dynamicAnchor": "${name}" at ${at}, or write it as a $ref` : "write it as a $ref";
+      const where = path === rootPath ? "" : `${specifierOf(rootPath, path)}: `;
+      const place = path !== rootPath ? files.places.get(path)! : id === undefined ? placeOf(rootSource, ref) : idPlaceOf(rootSource, id);
+      const message = id === undefined ? `${where}ajv resolves the $dynamicRef "${ref}" to the root of its schema, not where it points: ${fix}.` : `${where}ajv resolves the ${keyword} "${ref}" inside the schema whose $id is "${id}" by where it compiles that schema, not against the $id: ${fix}.`;
+      if (!problems.some((p) => p.message === message && p.start === place.start)) problems.push({ message, ...place, code: CODES.schema });
+    });
+  }
+  return problems;
+}
+
+/**
  * The files with each 2020-12 `$dynamicRef` and 2019-09 `$recursiveRef` that resolves as a `$ref`
- * would written as that `$ref`, for the types, the engine and Standard JSON Schema alike. A `$dynamicRef`
+ * would written as that `$ref`, for the types, ajv and Standard JSON Schema alike. A `$dynamicRef`
  * is a `$ref` (2020-12 core 8.2.3.2) when its fragment is a JSON Pointer, when the schema it first
  * resolves to declares no `$dynamicAnchor` of its name (the "bookending" the Test Suite's
  * dynamicRef.json holds), and, where that schema does, when no other schema of the files declares
  * one of that name, so that no dynamic scope can hold another. A `$recursiveRef` (`"#"` alone,
  * 2019-09 core 8.2.4.2) is a `$ref` to the root of its schema resource unless that root says
  * `"$recursiveAnchor": true`, and, where it does, when no other schema of the files says so. Each is
- * written as a pointer from the resource it names (an anchor by where it is), and beside a `$ref`
- * already there, in `allOf`. A reference that resolves to nothing the files hold is left as written,
- * for the engine to report, and a dynamic one for the engine to resolve in the dynamic scope.
+ * written as a pointer from the resource it names (an anchor ajv does not see, at a file's root, by
+ * where it is), and beside a `$ref` already there, in `allOf`. A reference that resolves to nothing
+ * the files hold is left as written, for ajv or `dynamicRefProblems` to report.
  */
 export function staticReferences(files: Files, rootPath: string, keyword: "$dynamicRef" | "$recursiveRef"): Files {
   const hide = refHidesId(files.schemas.get(rootPath)!);
@@ -654,7 +701,7 @@ export function staticReferences(files: Files, rootPath: string, keyword: "$dyna
       const thereIndex = fileIndex(resolution.path, there, hide);
       resolution = within(resolution.path, thereIndex, thereIndex.base, resolution.fragment);
     }
-    const target = resolution.kind === "schema" ? resolution : undefined;
+    const target = resolution.kind === "schema" ? resolution : resolution.kind === "anchor" && resolution.unseen ? { ...resolution, segments: resolution.unseen } : undefined;
     if (!target) return undefined;
     const fragment = ref.includes("#") ? ref.slice(ref.indexOf("#") + 1) : "";
     if (fragment !== "" && !fragment.startsWith("/")) {
@@ -689,13 +736,11 @@ export function staticReferences(files: Files, rootPath: string, keyword: "$dyna
 }
 
 /**
- * Every file of `files` as a schema resource for the engine, each under an id that holds no path,
- * because the module carries each resource with its id (DESIGN.md, "No path in the module"): a
- * file's own absolute `$id` (one with a scheme), or `dotschema:<n>`, which each file's root `$id`
- * becomes. Each reference to another of the files is rewritten to that file's id, so the engine never
- * resolves a file path. Until the engine, the same copy was what ajv compiled (`forAjv`).
+ * Every file of `files` for ajv, each under an id that holds no path, because ajv's standalone code
+ * embeds ids: a file's own absolute `$id` (one with a scheme), or `dotschema:<n>`. Each reference
+ * to another of the files is rewritten to that file's id, so ajv never resolves a file path.
  */
-export function forEngine(files: Files, rootPath: string): { root: Value; rootId: string; others: { path: string; id: string; schema: Value }[] } {
+export function forAjv(files: Files, rootPath: string): { root: Value; others: { path: string; id: string; schema: Value }[] } {
   const ids = new Map<string, string>();
   let n = 0;
   for (const [path, schema] of files.schemas) {
@@ -714,7 +759,6 @@ export function forEngine(files: Files, rootPath: string): { root: Value; rootId
   };
   return {
     root: prepare(rootPath, schemas.get(rootPath)!),
-    rootId: ids.get(rootPath)!.replace(/#$/, ""),
     others: [...schemas].filter(([path]) => path !== rootPath).map(([path, schema]) => ({ path, id: ids.get(path)!, schema: prepare(path, schema) })),
   };
 }

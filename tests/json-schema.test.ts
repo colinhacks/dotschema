@@ -10,9 +10,9 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseSchemaFile } from "../src/parse.ts";
-import { draftOf, filesOf } from "../src/schema.ts";
+import { draftOf, filesOf, schemaCode } from "../src/schema.ts";
 import { jsonSchemas, TARGET_URIS, type JsonSchemaResult, type JsonSchemaTarget } from "../src/json-schema.ts";
-import { evaluate, ROOT, schemaCode, withFormats } from "./helpers.ts";
+import { evaluate, ROOT, withFormats } from "./helpers.ts";
 
 const require = createRequire(import.meta.url);
 const TARGETS: JsonSchemaTarget[] = ["draft-07", "draft-2020-12"];
@@ -60,7 +60,7 @@ function compileFor(target: JsonSchemaTarget, schema: unknown, strictSchema = tr
   if (!ajv.getKeyword("$anchor")) ajv.addKeyword("$anchor");
   // ajv-errors' `errorMessage`, which the conversion keeps as data, as it keeps any keyword no draft
   // defines, read here as a consumer with ajv-errors reads it; strict, ajv refuses it otherwise.
-  require("./fixtures/engine/error-message.cjs")(ajv);
+  require("../src/keywords/error-message.cjs")(ajv);
   // dotschema's `transform`, which the conversion keeps as data too, declared so that strict mode
   // takes it; no value checked here holds a string a transform changes.
   ajv.addKeyword("transform");

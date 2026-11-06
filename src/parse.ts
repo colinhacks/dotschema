@@ -76,7 +76,7 @@ export function placeAt(source: string, segments: readonly string[]): { start: n
 // The `/** */` comments of the files parsed, which the types write as JSDoc where a schema has no
 // `description` (DESIGN.md, "The types"): for each object, the text of the one written directly
 // before each of its keys, and of one before a file's root. A `//` or `/* */` comment is a note and
-// is never read. Kept beside the values rather than in them, so the schema the engine compiles and the
+// is never read. Kept beside the values rather than in them, so the schema ajv compiles and the
 // module exports stays as written; `carryDocs` passes them on to a copy (`mapSchemas` in refs.ts).
 const keyDocs = new WeakMap<object, ReadonlyMap<string, string>>();
 const rootDocs = new WeakMap<object, string>();

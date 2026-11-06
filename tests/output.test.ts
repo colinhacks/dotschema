@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { schemaTypes } from "../src/schema.ts";
-import { evaluate, ROOT, run, schemaCode, TSC } from "./helpers.ts";
+import { schemaCode, schemaTypes } from "../src/schema.ts";
+import { evaluate, ROOT, run, TSC } from "./helpers.ts";
 
 const PATH = join(ROOT, "tests/fixtures/output.schema.jsonc");
 
@@ -129,9 +129,7 @@ test("a value with nothing to fill, transform, drop or strip comes back itself, 
   assert.equal(Object.getPrototypeOf(filled), Object.prototype);
 });
 
-test("a module imports the parts of the run time its schemas use, and where each object stands alone, the postOne of one node, which gives what the whole post gives", async () => {
-  /** What a module imports from the run time. */
-  const imports = (code: string) => /^import \{ ([^}]*) \} from "dotschema\/runtime[^"]*";$/m.exec(code)![1]!.split(", ");
+test("a module carries the parts of the run time its schemas use, and where each object stands alone, a __post of one node that gives what the whole one gives", async () => {
   const open = { type: "object", properties: { a: {}, b: { type: "string" } }, required: ["c"] };
   const closed = { type: "object", properties: { a: {}, b: { type: "string" } }, additionalProperties: false };
   // The same object beside a property whose schema is a node of its own, which no value below holds.
@@ -142,17 +140,16 @@ test("a module imports the parts of the run time its schemas use, and where each
   ] as const) {
     const one = schemaCode(JSON.stringify(schema), PATH).code;
     const whole = schemaCode(JSON.stringify(nest(schema)), PATH).code;
-    assert.deepEqual(imports(one), ["schemaModule", "postOne"]);
-    assert.deepEqual(imports(whole), ["schemaModule", "post"]);
+    assert.doesNotMatch(one, /__pre|__keyed/);
+    assert.match(whole, /__keyed/);
+    assert.doesNotMatch(whole, /__pre/);
     const [s, t] = [(await evaluate(one)).default, (await evaluate(whole)).default];
     for (const value of values) {
       assert.deepEqual(s.validate(value), t.validate(value), JSON.stringify(value));
       if (s.validate(value).value === value) assert.equal(t.validate(value).value, value);
     }
   }
-  assert.deepEqual(imports(schemaCode(JSON.stringify({ type: "object", properties: { a: { default: 1 } } }), PATH).code), ["schemaModule", "pre", "post"]);
-  // A schema that lists no key and fills nothing gives the value it checked, and imports neither.
-  assert.deepEqual(imports(schemaCode(JSON.stringify({ type: "array", items: { type: "object", additionalProperties: { type: "string" } } }), PATH).code), ["schemaModule"]);
+  assert.match(schemaCode(JSON.stringify({ type: "object", properties: { a: { default: 1 } } }), PATH).code, /__pre/);
 });
 
 test(".pick(), .omit(), .partial() and .required() keep the defaults of the keys they keep, and strip the keys they leave out of an open object", async () => {

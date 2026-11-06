@@ -42,24 +42,10 @@ function range(dep: string, declared: string): string {
 const js = (path: string) => path.replace(/\.ts$/, ".js");
 const types = (path: string) => path.replace(/\.ts$/, ".d.ts");
 
-/**
- * An entry of package.json's exports as the package publishes it: a TypeScript file its compiled
- * JavaScript with its declarations beside it, under each condition the entry names (`dotschema/runtime`
- * is the interpreter's under `workerd`, `edge-light` and `react-native`), typed by its default's
- * declarations; and a JavaScript file, a format's (`./formats/*`), as it is.
- */
-type Entry = string | Record<string, string>;
-function entry(value: Entry): Entry {
-  if (typeof value === "string") return value.endsWith(".ts") ? { types: types(value), default: js(value) } : value;
-  const fallback = value["default"];
-  if (fallback === undefined) throw new Error(`package.json: an export with conditions has no "default": ${JSON.stringify(value)}`);
-  return { types: types(fallback), ...Object.fromEntries(Object.entries(value).map(([condition, path]) => [condition, js(path)])) };
-}
-
 const { private: _private, scripts: _scripts, devDependencies: _dev, devEngines: _engines, overrides: _overrides, ...rest } = pkg;
 const built = {
   ...rest,
-  exports: Object.fromEntries(Object.entries(pkg.exports as Record<string, Entry>).map(([key, value]) => [key, entry(value)])),
+  exports: Object.fromEntries(Object.entries(pkg.exports as Record<string, string>).map(([key, path]) => [key, { types: types(path), default: js(path) }])),
   typescript: { ...pkg.typescript, contentMapper: { ...pkg.typescript.contentMapper, exec: (pkg.typescript.contentMapper.exec as string[]).map(js) } },
   dependencies: Object.fromEntries(Object.entries(pkg.dependencies as Record<string, string>).map(([dep, declared]) => [dep, range(dep, declared)])),
 };
@@ -72,8 +58,10 @@ for (const field of ["homepage", "bugs", "author", "license"]) if (!built[field]
 
 mkdirSync(to, { recursive: true });
 cpSync(tsc, join(to, "src"), { recursive: true });
-// The format files (src/formats/index.ts), plain JavaScript a module imports, which tsc does not copy.
-for (const file of readdirSync(join(root, "src", "formats"))) if (file.endsWith(".js")) cpSync(join(root, "src", "formats", file), join(to, "src", "formats", file));
+// The format files (src/formats/index.ts), plain JavaScript a module inlines, which tsc does not copy.
+for (const file of readdirSync(join(root, "src", "formats"))) if (file.endsWith(".cjs")) cpSync(join(root, "src", "formats", file), join(to, "src", "formats", file));
+// The same for ajv-errors' keyword (src/keywords/), which schema.ts requires.
+cpSync(join(root, "src", "keywords"), join(to, "src", "keywords"), { recursive: true });
 writeFileSync(join(to, "package.json"), JSON.stringify(built, null, 2) + "\n");
 cpSync(join(root, "README.md"), join(to, "README.md"));
 cpSync(join(root, "LICENSE"), join(to, "LICENSE"));
@@ -82,10 +70,9 @@ cpSync(join(root, "LICENSE"), join(to, "LICENSE"));
 const files = readdirSync(to, { recursive: true, encoding: "utf8" });
 const sources = files.filter((f) => /\.(c|m)?ts$/.test(f) && !/\.d\.(c|m)?ts$/.test(f));
 if (sources.length) throw new Error(`dist/dotschema holds TypeScript sources: ${sources.join(", ")}`);
-// A pattern (`./src/formats/*.js`) names every file it matches, which the loading below reads.
-const named = [...Object.values(built.exports as Record<string, Entry>).flatMap((e) => (typeof e === "string" ? [e] : Object.values(e))), ...(built.typescript.contentMapper.exec as string[]).slice(1)].filter((file) => !file.includes("*"));
+const named = [...Object.values(built.exports as Record<string, Record<string, string>>).flatMap((e) => Object.values(e)), ...(built.typescript.contentMapper.exec as string[]).slice(1)];
 for (const file of named) if (!existsSync(join(to, file))) throw new Error(`dist/dotschema: ${file} is named in package.json and missing`);
-// And every format's file loads from it, with each file it imports.
+// And every format's file loads from it, with each file it requires.
 const { formatDefinitions } = await import(pathToFileURL(join(to, "src", "formats", "index.js")).href);
 formatDefinitions();
 // The README goes to npm, where a relative link leads nowhere.

@@ -1,10 +1,6 @@
 // Builds main.js with the bundler named on the command line (webpack, rspack, vite, vite-browser,
-// rollup or rolldown) from its config file, and prints the build's errors, warnings, how many
-// modules came from node_modules, and how many are dotschema's own run time, which each schema's
-// module imports, from node_modules or not.
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
+// rollup or rolldown) from its config file, and prints the build's errors, warnings and how many
+// modules came from node_modules.
 const name = process.argv[2];
 const { default: config } = await import(`./${name}.config.mjs`);
 
@@ -13,11 +9,8 @@ async function build() {
   if (name === "webpack" || name === "rspack") {
     const bundler = name === "rspack" ? (await import("@rspack/core")).rspack : (await import("webpack")).default;
     const stats = await new Promise((resolve, reject) => bundler(config, (error, stats) => (error ? reject(error) : resolve(stats))));
-    // A module of several concatenated ones (`./main.js + 23 modules`) lists them in `modules`; Rspack
-    // 2.2.9 names a module only with the stats' default fields, which `all: false` turns off.
-    const { errors, warnings, modules } = stats.toJson({ errors: true, warnings: true, modules: true, nestedModules: true });
-    const names = modules.flatMap((m) => [m.name, ...(m.modules ?? []).map((n) => n.name)]).filter((n) => typeof n === "string" && !/ \+ \d+ modules$/.test(n));
-    return { errors: errors.map((e) => e.message), warnings: warnings.map((w) => w.message), ids: [...new Set(names)] };
+    const { errors, warnings, modules } = stats.toJson({ all: false, errors: true, warnings: true, modules: true });
+    return { errors: errors.map((e) => e.message), warnings: warnings.map((w) => w.message), ids: modules.map((m) => m.name) };
   }
   const warnings = [];
   const onLog = (level, log) => void (level === "warn" && warnings.push(log.message));
@@ -38,7 +31,4 @@ async function build() {
 
 const { errors, warnings, ids } = await build();
 for (const message of [...errors, ...warnings]) console.log(message);
-// dotschema's files are those of its src/, where its run time is; webpack and Rspack name a module by its path from the config's context.
-const own = resolve(dirname(fileURLToPath(import.meta.resolve("dotschema/runtime"))), "..");
-const ours = (id) => typeof id === "string" && resolve(config.context ?? import.meta.dirname, id).startsWith(own);
-console.log(`errors=${errors.length} warnings=${warnings.length} node_modules=${ids.filter((id) => /node_modules/.test(id) && !ours(id)).length} dotschema=${ids.filter(ours).length}`);
+console.log(`errors=${errors.length} warnings=${warnings.length} node_modules=${ids.filter((id) => /node_modules/.test(id)).length}`);

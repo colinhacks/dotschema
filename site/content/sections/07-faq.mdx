@@ -28,27 +28,19 @@ Yes. A schema file is JSONC, so it can hold comments and trailing commas:
 Draft-06, draft-07, 2019-09 and 2020-12. The [`$schema` keyword](#drafts) picks one, and a schema without it is draft-07. A draft-04 or older schema is an error at the type check.
 
 </Accordion>
-<Accordion title="How much does dotschema add to a bundle?" id="faq-bundle">
+<Accordion title="Does a bundle carry a validator library?" id="faq-bundle">
 
-Its validator, once, and a module for each schema that holds the schema. The opening example's `main.ts`, bundled and minified by esbuild, with dotschema's files counted together:
+No. Each schema's module is built with its validator compiled, so it imports nothing, and a bundle carries the validator and no validator library. A bundled app needs dotschema only to build, as a devDependency.
+
+The opening example's `main.ts`, bundled and minified by esbuild, has two inputs:
 
 ```text title="esbuild's analysis" bundle="main.ts"
-  dist/main.mjs         71.1kb  100.0%
-   ├ dotschema          70.6kb   99.3%
-   ├ user.schema.jsonc   460b     0.6%
-   └ main.ts              38b     0.1%
+  dist/main.mjs         7.2kb  100.0%
+   ├ user.schema.jsonc  7.2kb   99.5%
+   └ main.ts             35b     0.5%
 ```
 
-With [`"validators": "interpret"`](#validators), the bundle leaves out the code that compiles each validator:
-
-```text title="esbuild's analysis" bundle="main.ts" validators="interpret"
-  dist/main.mjs         49.6kb  100.0%
-   ├ dotschema          49.1kb   99.0%
-   ├ user.schema.jsonc   460b     0.9%
-   └ main.ts              38b     0.1%
-```
-
-A bundle carries the code of only the formats its schemas use, and esbuild leaves out a definition nothing imports.
+A module carries the code of only the formats it uses, and esbuild leaves out a definition nothing imports.
 
 </Accordion>
 <Accordion title="What isn't supported?" id="faq-limits">
@@ -58,6 +50,9 @@ Each of these is an error at the type check:
 | Refused | Instead |
 | --- | --- |
 | A `$ref` to a URL (`https:`, `urn:`) | Save the schema as a `.schema.jsonc` file in the project, and `$ref` the file |
+| A `$dynamicRef` to an anchor that two schema resources declare, when its own resource's root does not | Declare the anchor at the root of its resource, or write a `$ref` |
+| In 2020-12, a `contains` that an `unevaluatedItems` sees through `anyOf`, `oneOf`, a conditional, `dependentSchemas` or a `$ref` | Move the `contains` beside the `unevaluatedItems`, or into its `allOf` |
+| An `$anchor` at a file's root, or inside `prefixItems` | Write `"#"`, or the pointer, in the `$ref` |
 | A draft-04 or draft-03 schema | Declare draft-06 or a later draft in `$schema` |
 
 </Accordion>

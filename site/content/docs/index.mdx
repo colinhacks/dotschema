@@ -1,6 +1,6 @@
 ---
 title: dotschema
-description: Import a JSON Schema from a .schema.jsonc file into TypeScript, and get the type it describes and a validator, compiled to JavaScript the first time it runs. A TypeScript 7.1 content mapper.
+description: Import a JSON Schema from a .schema.jsonc file into TypeScript, and get the type it describes and a validator compiled by ajv at build time. A TypeScript 7.1 content mapper.
 ---
 
 <p className="dk-subheader">Import JSON Schemas into TypeScript. Fully typed, scary fast.</p>
@@ -34,4 +34,4 @@ if (user.is(data)) {
 }
 ```
 
-It's powered by TypeScript's [_content mappers_](https://github.com/microsoft/typescript-go/pull/4712) (introduced in TypeScript 7.1), which let a package give `tsc` the types of a file it imports. The validator is dotschema's own, which compiles each schema to JavaScript the first time it runs.
+It's powered by TypeScript's [_content mappers_](https://github.com/microsoft/typescript-go/pull/4712) (introduced in TypeScript 7.1), which let a package give `tsc` the types of a file it imports. The validator is compiled by [ajv](https://ajv.js.org) when the module is built, so a bundle carries the validator and no validator library.

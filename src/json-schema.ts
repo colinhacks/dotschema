@@ -54,8 +54,8 @@ const ITEMS = new Set(["items", "prefixItems", "additionalItems"]);
 const DEPENDENCIES = new Set(["dependencies", "dependentRequired", "dependentSchemas"]);
 
 /**
- * The keywords another draft (or ajv alone) defines that a schema's own draft does not. The engine
- * ignores each in that draft, or dotschema takes it out before the engine sees it (schema.ts's `IGNORED`), so the
+ * The keywords another draft (or ajv alone) defines that a schema's own draft does not. ajv ignores
+ * each in that draft, or dotschema takes it out before ajv sees it (schema.ts's `IGNORED`), so the
  * converted schema leaves it out too: kept, the target might act on it (`prefixItems` in a draft-07
  * schema would start checking tuples in 2020-12). A keyword no draft defines (`x-foo`) is kept as
  * written, as data.
@@ -347,7 +347,7 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     if (typeof result["$ref"] === "string") {
       const ref = result["$ref"];
       // Draft-07 ignores every keyword beside a `$ref` (core 8.3); 2019-09 and 2020-12 apply them,
-      // and so does dotschema's validator in draft-07, as ajv does. The draft-07 schema moves the `$ref`
+      // and so does ajv in draft-07 (dotschema's validator). The draft-07 schema moves the `$ref`
       // into `allOf`, beside the other keywords, so a draft-07 reader applies them all too.
       const others = Object.keys(result).filter((key) => key !== "$ref" && !ANNOTATIONS.has(key));
       if (to07 && (others.length || rootOfAll)) {
@@ -465,7 +465,7 @@ export function jsonSchema(files: Files, rootPath: string, draft: Draft, target:
     let target: { path: string; segments: string[] } | undefined;
     if (site.key === "$dynamicRef") {
       // Kept only within one file (above). An anchor stays one, resolved again as the schema is
-      // applied, and a URL is left as written, which the engine refuses itself.
+      // applied, and a URL is left as written, which ajv refuses itself.
       const segments = ref.startsWith("#") ? pointer(ref.slice(1)) : undefined;
       if (segments === undefined) {
         if (!ref.startsWith("#") && !SCHEME.test(ref)) fail("names a file that was not read.");

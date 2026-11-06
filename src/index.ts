@@ -98,7 +98,7 @@ export interface SchemaIssue extends StandardSchemaV1.Issue {
  */
 export interface Schema<T, S = unknown, I = T> extends StandardSchemaV1<I, T>, StandardJSONSchemaV1<I, T> {
   /**
-   * Checks the whole value and reports every way it fails, as ajv with `allErrors` does. Never throws: a value
+   * Checks the whole value and reports every way it fails (ajv with `allErrors`). Never throws: a value
    * the validator cannot check (nested deeper than the stack, a getter that throws) is one issue, `keyword: "error"`.
    * Each `default` the value lacks is filled in and each `transform` applied before it is checked; on
    * success, `value` drops each property that holds `undefined` and each key an open object does not

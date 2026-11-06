@@ -13,8 +13,8 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import * as z from "zod";
 import { ALIASES, FORMATS, formatDefinitions } from "../src/formats/index.ts";
-import { build as bundle } from "esbuild";
-import { evaluate, ROOT, schemaCode } from "./helpers.ts";
+import { schemaCode } from "../src/schema.ts";
+import { evaluate, ROOT } from "./helpers.ts";
 
 const PATH = join(ROOT, "tests/fixtures/format.schema.jsonc");
 const SUITE = join(ROOT, "tests/fixtures/format-suite");
@@ -191,68 +191,65 @@ test("each of Zod's formats gives Zod's verdict, alone by its name and by Zod's 
   assert.deepEqual(differ, { "cidrv6 zod": ["::ffff:192.168.1.1/96"] });
 });
 
-/** The files of src/formats/ a bundle of a module holds, by name: the file of each format the module imports, and the files each imports. */
-async function formatFiles(code: string): Promise<string[]> {
-  const result = await bundle({ stdin: { contents: code, resolveDir: ROOT, loader: "js" }, bundle: true, write: false, format: "esm", metafile: true, logLevel: "silent" });
-  return Object.keys(result.metafile.inputs).flatMap((input) => /^src\/formats\/([\w-]+)\.js$/.exec(input)?.[1] ?? []).sort();
-}
+/** The names of the format files a module carries, by the first line of each, "// The format `name`". */
+const formatFiles = (code: string) => [...code.matchAll(/^\/\/ The format `([^`]+)`/gm)].map((m) => m[1]).sort();
 
-test("a module imports the file of each format it checks with a function, which imports the files it requires, and no other", async () => {
+test("a module carries the file of each format it checks with a function, and the files that file requires, and no other", async () => {
   const build = async (properties: Record<string, unknown>) => {
     const { code, problems } = schemaCode(JSON.stringify({ type: "object", properties }), PATH);
     assert.deepEqual(problems, []);
     return { code, module: (await evaluate(code)).default };
   };
-  /** The formats a module imports, by the specifier of each. */
-  const imported = (code: string) => [...code.matchAll(/^import \w+ from "dotschema\/formats\/([\w-]+)";$/gm)].map((m) => m[1]);
-  // No format, and a format written as a regular expression: no file.
+  // No format, and a format ajv writes as a regular expression: no file and no table of formats.
   for (const properties of [{ a: { type: "string" } }, { a: { type: "string", format: "uuid" } }]) {
     const { code } = await build(properties);
-    assert.deepEqual(imported(code), []);
-    assert.deepEqual(await formatFiles(code), []);
+    assert.deepEqual(formatFiles(code), []);
+    assert.doesNotMatch(code, /__formats/);
   }
-  // date-time imports date and time; nothing of the other date and time formats comes with it.
+  // date-time requires date and time; nothing of the other date and time formats comes with it.
   const { code, module } = await build({ at: { type: "string", format: "date-time" } });
-  assert.deepEqual(imported(code), ["date-time"]);
-  assert.deepEqual(await formatFiles(code), ["date", "date-time", "time"]);
-  assert.match(code, /, \{ "date-time": __dateTime \}, /);
+  assert.deepEqual(formatFiles(code), ["date", "date-time", "time"]);
+  assert.match(code, /^const __formats = \{ "date-time": __require\(\d+\) \};$/m);
   assert.deepEqual([module.is({ at: "2026-10-20T08:00:00Z" }), module.is({ at: "2026-10-20T08:00:00+01" })], [true, false]);
-  // jwt is its file alone, and base64url imports base64's.
+  // jwt is its file alone, and base64url requires base64's.
   const jwt = await build({ token: { type: "string", format: "jwt" } });
-  assert.deepEqual(await formatFiles(jwt.code), ["jwt"]);
+  assert.deepEqual(formatFiles(jwt.code), ["jwt"]);
   assert.deepEqual([jwt.module.is({ token: "eyJhbGciOiJub25lIn0.e30." }), jwt.module.is({ token: "a.b.c" })], [true, false]);
-  assert.deepEqual(await formatFiles((await build({ data: { type: "string", format: "base64url" } })).code), ["base64", "base64url"]);
-  // idn-hostname and hostname import IDNA2008's checks, idn-email idn-hostname and ipv6, email ipv6; iri and iri-reference RFC 3987's grammar, and it RFC 3986's, each once.
-  assert.deepEqual(await formatFiles((await build({ host: { type: "string", format: "idn-hostname" } })).code), ["idn-hostname", "idna"]);
-  assert.deepEqual(await formatFiles((await build({ mail: { type: "string", format: "idn-email" } })).code), ["idn-email", "idn-hostname", "idna", "ipv6"]);
-  assert.deepEqual(await formatFiles((await build({ mail: { type: "string", format: "email" } })).code), ["email", "ipv6"]);
-  assert.deepEqual(await formatFiles((await build({ host: { type: "string", format: "hostname" } })).code), ["hostname", "idna"]);
-  assert.deepEqual(await formatFiles((await build({ link: { type: "string", format: "uri" } })).code), ["uri", "uri-grammar"]);
+  assert.deepEqual(formatFiles((await build({ data: { type: "string", format: "base64url" } })).code), ["base64", "base64url"]);
+  // idn-hostname and hostname require IDNA2008's checks, idn-email idn-hostname and ipv6, email ipv6; iri and iri-reference RFC 3987's grammar, and it RFC 3986's, each carried once.
+  assert.deepEqual(formatFiles((await build({ host: { type: "string", format: "idn-hostname" } })).code), ["idn-hostname"]);
+  assert.deepEqual(formatFiles((await build({ mail: { type: "string", format: "idn-email" } })).code), ["idn-email", "idn-hostname", "ipv6"]);
+  assert.deepEqual(formatFiles((await build({ mail: { type: "string", format: "email" } })).code), ["email", "ipv6"]);
+  const host = (await build({ host: { type: "string", format: "hostname" } })).code;
+  assert.deepEqual(formatFiles(host), ["hostname"]);
+  assert.equal(host.match(/^\/\/ IDNA2008's validity of a host name/gm)?.length, 1);
+  const uri = (await build({ link: { type: "string", format: "uri" } })).code;
+  assert.deepEqual(formatFiles(uri), ["uri"]);
+  assert.doesNotMatch(uri, /The grammar of RFC 3987/);
   const iri = await build({ a: { type: "string", format: "iri" }, b: { type: "string", format: "iri-reference" } });
-  assert.deepEqual(imported(iri.code), ["iri", "iri-reference"]);
-  assert.deepEqual(await formatFiles(iri.code), ["iri", "iri-grammar", "iri-reference", "uri-grammar"]);
-  // A format by Zod's alias imports its format's file, and a module that uses it by both names imports the file once.
+  assert.deepEqual(formatFiles(iri.code), ["iri", "iri-reference"]);
+  assert.equal(iri.code.match(/^\/\/ The grammar of RFC 3987/gm)?.length, 1);
+  assert.equal(iri.code.match(/^\/\/ The grammar of RFC 3986/gm)?.length, 1);
+  // A format by Zod's alias carries its format's file, and a module that uses it by both names carries the file once.
   for (const [alias, name] of [["credit_card", "credit-card"], ["currency_code", "currency-code"]]) {
     const byAlias = await build({ a: { type: "string", format: alias } });
-    assert.deepEqual(imported(byAlias.code), [name]);
+    assert.deepEqual(formatFiles(byAlias.code), [name]);
     const both = await build({ a: { type: "string", format: alias }, b: { type: "string", format: name } });
-    assert.deepEqual(imported(both.code), [name]);
-    const binding = `__${name!.replace(/-(\w)/g, (_, c: string) => c.toUpperCase())}`;
-    assert.match(both.code, new RegExp(`, \\{ "${name}": ${binding}, "${alias}": ${binding} \\}, `));
+    assert.deepEqual(formatFiles(both.code), [name]);
+    assert.match(both.code, new RegExp(`^const __formats = \\{ "${name}": __require\\((\\d+)\\), "${alias}": __require\\(\\1\\) \\};$`, "m"));
   }
   const card = await build({ a: { type: "string", format: "credit_card" }, b: { type: "string", format: "currency_code" } });
   assert.deepEqual([card.module.is({ a: "4111 1111 1111 1111", b: "USD" }), card.module.is({ a: "4111 1111 1111 1112" }), card.module.is({ b: "usd" })], [true, false, false]);
   // A digest by Zod's alias is a regular expression, as by its name: no file.
-  assert.deepEqual(imported((await build({ a: { type: "string", format: "sha256_hex" } })).code), []);
-  // Each file once, for each property that uses it.
+  assert.deepEqual(formatFiles((await build({ a: { type: "string", format: "sha256_hex" } })).code), []);
+  // Each file once, for both validators and for each property that uses it.
   const several = await build({ a: { format: "date-time" }, b: { format: "date-time", formatMinimum: "2026-01-01T00:00:00Z" }, c: { format: "date" }, d: { format: "uri" } });
-  assert.deepEqual(imported(several.code), ["date", "date-time", "uri"]);
-  assert.deepEqual(await formatFiles(several.code), ["date", "date-time", "time", "uri", "uri-grammar"]);
+  assert.deepEqual(formatFiles(several.code), ["date", "date-time", "time", "uri"]);
   assert.deepEqual([several.module.is({ b: "2026-02-01T00:00:00Z", c: "2026-01-01", d: "https://x.dev" }), several.module.is({ b: "2025-12-31T23:59:59Z" })], [true, false]);
 });
 
 test("a string in the schema that reads like the module's table of formats stays the schema's", async () => {
-  // The formats a module imports are the names its schemas give `format`, read from the schemas; a string that reads like code is a string.
+  // usedFormats reads ajv's declarations of the formats it uses, and never rewrites the code; a string that holds one adds at most a file.
   const text = "const formats0 = __formats.uri;";
   const { code, problems } = schemaCode(JSON.stringify({ type: "object", properties: { note: { const: text }, at: { format: "date" } } }), PATH);
   assert.deepEqual(problems, []);

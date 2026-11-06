@@ -7,8 +7,8 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { schemaTypes } from "../src/schema.ts";
-import { evaluate, ROOT, schemaCode, withFormats } from "./helpers.ts";
+import { schemaCode, schemaTypes } from "../src/schema.ts";
+import { evaluate, ROOT, withFormats } from "./helpers.ts";
 
 const require = createRequire(import.meta.url);
 const PATH = join(ROOT, "tests/fixtures/definitions.schema.jsonc");
@@ -124,8 +124,6 @@ test("a bundler leaves out a definition nothing imports, and the root when only 
   const onlyAddress = await bundle('import { address } from "./user.schema.jsonc"; console.log(address.is({}));');
   assert.doesNotMatch(onlyDefault, /__schema\["definitions"\]\["address"\]/);
   assert.match(both, /__schema\["definitions"\]\["address"\]/);
-  // The root's entry, `__entry("", ...)`, is left out where only a definition is imported.
-  assert.match(onlyDefault, /__entry\("", /);
-  assert.doesNotMatch(onlyAddress, /__entry\("", /);
+  assert.doesNotMatch(onlyAddress, /__make\(__validateAll/);
   assert.ok(onlyDefault.length < both.length && onlyAddress.length < both.length, `${onlyDefault.length} ${onlyAddress.length} ${both.length}`);
 });

@@ -1,7 +1,6 @@
 // The host adapters (src/core/universal.ts) on dotschema's loader: a query or hash is left to the
-// next hook or plugin, a bundler watches the files a schema refers to and the package.json its
-// settings come from, the Jest transformer makes ESM or CommonJS and keys its cache on the module,
-// and positions are UTF-8 bytes.
+// next hook or plugin, a bundler watches the files a schema refers to, the Jest transformer makes
+// ESM or CommonJS and keys its cache on the module, and positions are UTF-8 bytes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -13,11 +12,9 @@ import { pathToFileURL } from "node:url";
 import { standalone } from "../src/core/standalone.ts";
 import { toEsbuildPlugin, toJestTransformer, toNodeHooks, toVitePlugin, toWebpackLoader, utf8Range, type LoaderPlugin } from "../src/core/universal.ts";
 import { loader } from "../src/loader.ts";
-import { evaluate, ROOT } from "./helpers.ts";
+import { evaluate } from "./helpers.ts";
 
 const plugin = standalone(loader);
-/** The package.json a module's settings are read from, which a bundler also watches: the working directory's, the repository's, where no host names another project. */
-const MANIFEST = join(ROOT, "package.json");
 const dir = mkdtempSync(join(tmpdir(), "dotschema-adapters-"));
 writeFileSync(join(dir, "tag.schema.jsonc"), '{ "type": "string" }');
 
@@ -27,23 +24,9 @@ test("the Node hook loads a schema file and leaves a query or hash to the next h
   const url = pathToFileURL(join(dir, "tag.schema.jsonc")).href;
   const loaded = hooks.load!(url, {} as any, next) as any;
   assert.equal(loaded.format, "module");
-  assert.match(loaded.source, /^import \{ schemaModule \} from "dotschema\/runtime";$/m);
+  assert.match(loaded.source, /vendor: "dotschema"/);
   for (const suffix of ["?raw", "?url", "#raw"]) assert.equal((hooks.load!(url + suffix, {} as any, next) as any).format, "next", suffix);
   assert.equal((hooks.load!(pathToFileURL(join(dir, "app.jsonc")).href, {} as any, next) as any).format, "next");
-});
-
-test("the Node hook resolves the run time a schema's module imports from dotschema's own files, and every other specifier as it is", () => {
-  const hooks = toNodeHooks(plugin, [plugin]);
-  const asked: [string, string | undefined][] = [];
-  const next = (specifier: string, context?: { parentURL?: string | undefined }) => (asked.push([specifier, context?.parentURL]), { url: "", shortCircuit: true }) as any;
-  const schema = pathToFileURL(join(dir, "tag.schema.jsonc")).href;
-  const main = pathToFileURL(join(dir, "main.js")).href;
-  hooks.resolve!("dotschema/runtime", { parentURL: schema } as any, next);
-  hooks.resolve!("dotschema/formats/email", { parentURL: `${schema}?x` } as any, next);
-  hooks.resolve!("dotschema/runtime", { parentURL: main } as any, next);
-  hooks.resolve!("./other.js", { parentURL: schema } as any, next);
-  assert.deepEqual(asked, [["dotschema/runtime", plugin.runtime!.from], ["dotschema/formats/email", plugin.runtime!.from], ["dotschema/runtime", main], ["./other.js", schema]]);
-  assert.equal(plugin.runtime!.from, pathToFileURL(join(ROOT, "src/loader.ts")).href);
 });
 
 test("esbuild leaves a query to other plugins", async () => {
@@ -63,11 +46,11 @@ test("esbuild watches the files a schema refers to, and still does when one is m
   toEsbuildPlugin(plugin).setup({ onLoad: (_options, callback) => void (onLoad = callback) });
   const team = onLoad!({ path: join(dir, "team.schema.jsonc") });
   assert.equal(team.loader, "js");
-  assert.deepEqual(team.watchFiles, [join(dir, "tag.schema.jsonc"), MANIFEST]);
+  assert.deepEqual(team.watchFiles, [join(dir, "tag.schema.jsonc")]);
   const lost = onLoad!({ path: join(dir, "lost.schema.jsonc") });
   assert.match(lost.errors[0].text, /^dotschema: .*The \$ref "\.\/gone\.schema\.jsonc" names a file that does not exist\./);
-  assert.deepEqual(lost.watchFiles, [join(dir, "gone.schema.jsonc"), MANIFEST]);
-  assert.deepEqual(onLoad!({ path: join(dir, "tag.schema.jsonc") }).watchFiles, [MANIFEST]);
+  assert.deepEqual(lost.watchFiles, [join(dir, "gone.schema.jsonc")]);
+  assert.deepEqual(onLoad!({ path: join(dir, "tag.schema.jsonc") }).watchFiles, []);
 });
 
 /** A webpack loader's context for one file: its path, its query, the loaders on it, and the files it was told to watch. */
@@ -78,41 +61,18 @@ const TAG = '{ "type": "string" }';
 test("the webpack loader makes a schema's module and passes a file with a query through as it came", async () => {
   const path = join(dir, "tag.schema.jsonc");
   const code = webpackLoader.call(loaderContext(path), TAG);
-  assert.equal((await evaluate(code!)).default.is("x"), true);
+  assert.equal((await evaluate(code)).default.is("x"), true);
   for (const resourceQuery of ["?raw", "?url"]) assert.equal(webpackLoader.call(loaderContext(path, { resourceQuery }), TAG), TAG, resourceQuery);
   assert.throws(() => webpackLoader.call(loaderContext(path), "{ "), /^Error: dotschema: .*tag\.schema\.jsonc: /);
-});
-
-test("the webpack loader resolves the run time a module imports from dotschema's own directory where the build hands it its resolver, and leaves a specifier it finds nothing for", async () => {
-  const path = join(dir, "tag.schema.jsonc");
-  const asked: [string, string][] = [];
-  const source = '{ "type": "string", "format": "email" }';
-  const load = (resolve: (from: string, request: string) => Promise<string | false>) =>
-    new Promise<string | undefined>((done, fail) => {
-      const context = { ...loaderContext(path), getResolve: () => resolve, async: () => (error: Error | null, code?: string) => (error ? fail(error) : done(code)) };
-      assert.equal(webpackLoader.call(context, source), undefined);
-    });
-  const code = (await load(async (from, request) => (asked.push([from, request]), createRequire(join(from, "_")).resolve(request))))!;
-  assert.deepEqual(asked, [[join(ROOT, "src"), "dotschema/runtime"], [join(ROOT, "src"), "dotschema/formats/email"]]);
-  assert.match(code, new RegExp(`^import \\{ schemaModule \\} from ${JSON.stringify(join(ROOT, "src/runtime/index.ts")).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")};$`, "m"));
-  assert.match(code, new RegExp(`^import __email from ${JSON.stringify(join(ROOT, "src/formats/email.js")).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")};$`, "m"));
-  const linked = code.replace(/^(import [^;\n]* from )"(\/[^"]+)";$/gm, (_, head: string, file: string) => `${head}${JSON.stringify(pathToFileURL(file).href)};`);
-  const { default: tag } = await evaluate(linked);
-  assert.equal(tag.is("ada@example.com"), true);
-  assert.equal(tag.is("ada"), false);
-  // A specifier the resolver finds nothing for is left to the build, which resolves it from the schema's file.
-  const kept = (await load(async (_from, request) => (request === "dotschema/runtime" ? false : Promise.reject(new Error("not found")))))!;
-  assert.match(kept, /^import \{ schemaModule \} from "dotschema\/runtime";$/m);
-  assert.match(kept, /^import __email from "dotschema\/formats\/email";$/m);
 });
 
 test("the webpack loader watches the files a schema refers to, and still does when one is missing", () => {
   const team = loaderContext(join(dir, "team.schema.jsonc"));
   webpackLoader.call(team, '{ "properties": { "tag": { "$ref": "./tag.schema.jsonc" } } }');
-  assert.deepEqual(team.watched, [join(dir, "tag.schema.jsonc"), MANIFEST]);
+  assert.deepEqual(team.watched, [join(dir, "tag.schema.jsonc")]);
   const lost = loaderContext(join(dir, "lost.schema.jsonc"));
   assert.throws(() => webpackLoader.call(lost, '{ "properties": { "tag": { "$ref": "./gone.schema.jsonc" } } }'), /The \$ref "\.\/gone\.schema\.jsonc" names a file that does not exist\./);
-  assert.deepEqual(lost.watched, [join(dir, "gone.schema.jsonc"), MANIFEST]);
+  assert.deepEqual(lost.watched, [join(dir, "gone.schema.jsonc")]);
 });
 
 /** A `.jsonc` loader of the protocol, as Motherload's is, whose module the webpack loader may be handed under Rspack. */
@@ -124,7 +84,7 @@ test("the webpack loader reads a schema file from disk where a loader it outrank
   const handed = "export default {};";
   // With the .jsonc loader beside it, what it is handed may be that loader's module: it reads the file.
   const code = webpackLoader.call(loaderContext(path, { loaders: [marked(standalone(loader)), marked(JSONC)] }), handed);
-  assert.equal((await evaluate(code!)).default.is("x"), true);
+  assert.equal((await evaluate(code)).default.is("x"), true);
   // Alone, or beside a loader it does not outrank, it reads what it is handed, as a loader does.
   assert.throws(() => webpackLoader.call(loaderContext(path, { loaders: [marked(standalone(loader))] }), handed), /tag\.schema\.jsonc: /);
   // And the .jsonc loader, outranked, passes a schema file through.
@@ -143,7 +103,7 @@ test("the Vite plugin loads a schema as JavaScript, watches the files it refers 
   assert.equal(result!.moduleType, "js");
   for (const query of ["?raw", "?url", "#x"]) assert.equal(viteLoad(join(dir, "tag.schema.jsonc") + query).result, null, query);
   assert.equal(viteLoad(join(dir, "app.jsonc")).result, null);
-  assert.deepEqual(viteLoad(join(dir, "team.schema.jsonc")).watched, [join(dir, "tag.schema.jsonc"), MANIFEST]);
+  assert.deepEqual(viteLoad(join(dir, "team.schema.jsonc")).watched, [join(dir, "tag.schema.jsonc")]);
   assert.throws(() => viteLoad(join(dir, "lost.schema.jsonc")), /^Error: dotschema: .*The \$ref "\.\/gone\.schema\.jsonc" names a file that does not exist\./);
 });
 

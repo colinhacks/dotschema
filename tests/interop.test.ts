@@ -18,14 +18,12 @@ import { standalone } from "../src/core/standalone.ts";
 import { ownerOf, register, toEsbuildPlugin, toNodeHooks, toVitePlugin } from "../src/core/universal.ts";
 import { loader } from "../src/loader.ts";
 import { withDotschema } from "../src/next.ts";
-import { ROLLUP_TYPESCRIPT, ROOT, RSPACK_TYPESCRIPT, run } from "./helpers.ts";
+import { ROOT, run } from "./helpers.ts";
 import * as standin from "./standin.ts";
 
 const pkg = JSON.parse(readFileSync(`${ROOT}package.json`, "utf8"));
 const FIXTURE = join(ROOT, "tests/fixtures/interop");
 const SCHEMA = standalone(loader);
-/** dotschema's module of a schema file, by its import of the run time. */
-const MODULE = /^import \{ schemaModule \} from "dotschema\/runtime";$/m;
 
 test("the package is private in the repository, points at its sources, and depends on no Motherload package", () => {
   assert.equal(pkg.name, "dotschema");
@@ -35,10 +33,8 @@ test("the package is private in the repository, points at its sources, and depen
   assert.ok(existsSync(`${ROOT}src/mapper.ts`));
   // A mapper package does not resolve through self-reference, so the repository links itself.
   assert.equal(pkg.devDependencies.dotschema, "link:.");
-  // The formats are dotschema's own (src/formats/), and so is the engine (src/engine/), so ajv and ajv-formats are development
-  // dependencies, for the tests that compare them; the run time a module imports is the package's own (src/runtime/).
-  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["jsonc-parser"]);
-  for (const entry of ["./runtime", "./runtime/interpret"]) assert.ok(pkg.exports[entry], entry);
+  // The formats are dotschema's own (src/formats/), so ajv-formats is a development dependency, for the test that compares them.
+  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["ajv", "jsonc-parser"]);
   // Each a caret range on the oldest version that passes the checks (DESIGN.md, "Packaging").
   for (const [dep, range] of Object.entries(pkg.dependencies)) assert.match(range as string, /^\^[1-9]\d*\.\d+\.\d+$/, dep);
 });
@@ -84,7 +80,7 @@ test("Node, in one process: alone, the stand-in reads a schema file as data, as 
     set.clear();
     for (const loader of order) set.add(loader);
     assert.equal((theirs.load!(url("user.schema.jsonc"), {} as any, next) as any).format, "next");
-    assert.match((ours.load!(url("user.schema.jsonc"), {} as any, next) as any).source, MODULE);
+    assert.match((ours.load!(url("user.schema.jsonc"), {} as any, next) as any).source, /vendor: "dotschema"/);
     assert.match((theirs.load!(url("app.jsonc"), {} as any, next) as any).source, /stand-in jsonc/);
     assert.equal((ours.load!(url("app.jsonc"), {} as any, next) as any).format, "next");
   }
@@ -111,9 +107,9 @@ test("Bun: dotschema's preload adds its loader where the stand-in's plugin finds
     standin.bunPlugin(standin.standin).setup({ onLoad: (_options, callback) => void loads.push(callback) });
     plugins[0]!.setup({ onLoad: (_options, callback) => void loads.push(callback) });
     const [theirs, ours] = loads;
-    assert.match(theirs!({ path: join(FIXTURE, "user.schema.jsonc") }).contents, MODULE);
+    assert.match(theirs!({ path: join(FIXTURE, "user.schema.jsonc") }).contents, /vendor: "dotschema"/);
     assert.match(theirs!({ path: join(FIXTURE, "app.jsonc") }).contents, /stand-in jsonc/);
-    assert.match(ours!({ path: join(FIXTURE, "user.schema.jsonc") }).contents, MODULE);
+    assert.match(ours!({ path: join(FIXTURE, "user.schema.jsonc") }).contents, /vendor: "dotschema"/);
   }
   set.clear();
 });
@@ -152,9 +148,7 @@ for (const name of ["webpack", "Rspack"] as const) {
     const theirs = { test: /\.jsonc$/, use: join(FIXTURE, "standin-webpack.ts") };
     try {
       for (const [i, rules] of [[ours, theirs], [theirs, ours]].entries()) {
-        // Rspack reads dotschema's TypeScript, the run time a module imports in this repository, with its own SWC loader.
-        const typescript = name === "Rspack" ? [RSPACK_TYPESCRIPT] : [];
-        const config = { mode: "none", context: FIXTURE, entry: "./main.js", target: "node", output: { path: join(dir, String(i)), filename: "main.cjs" }, module: { rules: [...rules, ...typescript] } };
+        const config = { mode: "none", context: FIXTURE, entry: "./main.js", target: "node", output: { path: join(dir, String(i)), filename: "main.cjs" }, module: { rules } };
         const stats: any = await new Promise((resolve, reject) => bundler(config, (error: Error | null, stats: unknown) => (error ? reject(error) : resolve(stats))));
         assert.equal(stats.hasErrors(), false, stats.toString());
         ranBoth(join(dir, String(i), "main.cjs"), `${name}, rules in order ${i}`);
@@ -176,8 +170,7 @@ for (const name of ["Vite", "Rollup", "Rolldown"] as const) {
           const out = await build({ configFile: false, logLevel: "silent", root: FIXTURE, plugins, build: { write: false, ssr: join(FIXTURE, "main.js"), minify: false } });
           code = out.output[0].code;
         } else {
-          // Rollup reads dotschema's TypeScript, the run time a module imports in this repository, with its types stripped.
-          const bundle = await (await fromBundlers(name.toLowerCase()))[name.toLowerCase()]({ input: join(FIXTURE, "main.js"), plugins: [...plugins, ...(name === "Rollup" ? [ROLLUP_TYPESCRIPT] : [])], onLog: () => {} });
+          const bundle = await (await fromBundlers(name.toLowerCase()))[name.toLowerCase()]({ input: join(FIXTURE, "main.js"), plugins, onLog: () => {} });
           code = (await bundle.generate({ format: "es" })).output[0].code;
         }
         writeFileSync(join(dir, `main${i}.mjs`), code);
@@ -194,7 +187,7 @@ test("control: in Rollup without dotschema's plugin, the stand-in reads a schema
   const bundle = await rollup({ input: join(FIXTURE, "main.js"), plugins: [standin.vitePlugin(standin.standin)], onLog: () => {} });
   const code: string = (await bundle.generate({ format: "es" })).output[0].code;
   assert.equal(code.match(/stand-in jsonc/g)?.length, 2);
-  assert.doesNotMatch(code, /schemaModule\(/);
+  assert.doesNotMatch(code, /vendor: "dotschema"/);
 });
 
 type Rules = Record<string, { loaders: string[] }>;
